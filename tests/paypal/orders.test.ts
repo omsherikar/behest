@@ -149,6 +149,15 @@ describe('captureOrder', () => {
     expect(JSON.parse(post.body ?? '')).toEqual({});
   });
 
+  it('encodes the order id, so it stays one segment of the capture path', async () => {
+    const calls = stubFetch([{ method: 'POST', path: `${ORDERS}/AB%2FCD%3Fx%3D1/capture`, status: 201, body: captureCompleted }]);
+
+    await captureOrder('AB/CD?x=1', requestId);
+
+    const [post] = apiCalls(calls);
+    expect(post.url).toBe('https://api-m.sandbox.paypal.com/v2/checkout/orders/AB%2FCD%3Fx%3D1/capture');
+  });
+
   it.each([
     ['PENDING', 'PENDING'],
     ['DECLINED', 'DECLINED'],

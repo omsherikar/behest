@@ -110,7 +110,7 @@ export const captureOrder: PaypalPort['captureOrder'] = async (orderId, requestI
   let order: Order;
   try {
     // An empty JSON body, as the sandbox proof sent it.
-    order = await paypalRequest<Order>('POST', `${ORDERS}/${orderId}/capture`, { body: {}, requestId });
+    order = await paypalRequest<Order>('POST', `${ORDERS}/${encodeURIComponent(orderId)}/capture`, { body: {}, requestId });
   } catch (error) {
     if (isInstrumentDeclined(error)) return { captureId: '', status: 'DECLINED' };
     throw error;

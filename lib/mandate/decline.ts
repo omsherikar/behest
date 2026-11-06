@@ -1,0 +1,20 @@
+// The answer that turns a mandate down. The compiler offers it with each question about a limit
+// Behest cannot enforce, such as "only on weekends". Choosing it ends the flow on the buyer's page
+// and is never sent to the compiler, which could otherwise compile a policy without that limit.
+
+export const DECLINE_ANSWER = "Don't set up this mandate";
+
+/** The text with typographic apostrophes, runs of spaces, case and a closing full stop evened out. */
+function normalized(text: string): string {
+  return text
+    .replace(/[‘’ʼ]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.!]+$/, '')
+    .toLowerCase();
+}
+
+/** Whether an answer is the decline answer, however its apostrophe, spacing, case or full stop are written. */
+export function isDeclineAnswer(answer: string): boolean {
+  return normalized(answer) === normalized(DECLINE_ANSWER);
+}

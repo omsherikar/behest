@@ -9,7 +9,7 @@ export const DECLINE_ANSWER = "Don't set up this mandate";
 /** The text with apostrophes dropped, runs of spaces, case and a closing full stop evened out. */
 function normalized(text: string): string {
   return text
-    .replace(/['‘’ʼ]/g, '')
+    .replace(/['\u2018\u2019\u02bc]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/[.!]+$/, '')

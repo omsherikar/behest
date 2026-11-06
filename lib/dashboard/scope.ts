@@ -1,4 +1,4 @@
-import { asc, desc, eq, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, type SQL } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import {
   buyers,
@@ -9,6 +9,7 @@ import {
   purchaseEvents,
   purchases,
   type PurchaseStatus,
+  purchaseStatus,
   receipts,
   sellers,
   type StoredIntentResult,
@@ -30,27 +31,38 @@ import { transactionRows, type DashboardTransaction } from './transactions';
 // sees every seller's. Rows are plain JSON (timestamps as ISO strings), exactly as the data route
 // sends them, and leave out what no dashboard view needs: payout emails, approval links, the
 // agent's unverified proposal and event payloads.
+//
+// What is between the buyer and Behest stays there: the seller sees each order's cart, total,
+// final verdict, status and payment, never the buyer's request, the gate's or the intent check's
+// reasoning, the buyer's ids or mandates, and of the event log only the status transitions.
 
-export type DashboardPurchase = {
+/** What a seller may see of a purchase. */
+export type SellerPurchase = {
   id: string;
-  buyerId: string;
-  mandateId: string;
   sellerId: string | null;
-  request: string;
   cart: Cart | null;
   totalCents: number | null;
   currency: 'USD';
+  /** The final verdict: after the intent check, or the gate's own when the check did not run. */
+  verdict: Verdict;
+  status: PurchaseStatus;
+  paypalOrderId: string | null;
+  paypalCaptureId: string | null;
+  capturedAt: string | null;
+  createdAt: string;
+};
+
+/** What the buyer and the operator see of a purchase: everything, including how it was decided. */
+export type DashboardPurchase = SellerPurchase & {
+  buyerId: string;
+  mandateId: string;
+  request: string;
   gateVerdict: Verdict;
   gateOutcomes: StoredRuleOutcome[];
   rulesetVersion: string;
   intent: StoredIntentResult | null;
   finalVerdict: Verdict | null;
   approver: 'policy' | 'human' | null;
-  status: PurchaseStatus;
-  paypalOrderId: string | null;
-  paypalCaptureId: string | null;
-  capturedAt: string | null;
-  createdAt: string;
 };
 
 export type DashboardPurchaseEvent = { id: string; purchaseId: string; seq: number; kind: string; createdAt: string };
@@ -96,27 +108,31 @@ export type DashboardMandate = {
   createdAt: string;
 };
 
-export type DashboardData = {
-  persona: Persona;
+type CommonData = {
   /** When the rows were read, as an ISO timestamp. */
   asOf: string;
-  purchases: DashboardPurchase[];
   purchaseEvents: DashboardPurchaseEvent[];
   receipts: DashboardReceipt[];
   payouts: DashboardPayout[];
   sellers: DashboardSeller[];
   products: DashboardProduct[];
-  mandates: DashboardMandate[];
   /** The operator's PayPal transactions; always empty for the other personas. */
   transactions: DashboardTransaction[];
   /** Data that could not be loaded, in words. The rest of the data is still complete. */
   warnings: string[];
 };
 
+/** The dashboard's rows. The seller's purchases are the narrower SellerPurchase, and it has no mandates. */
+export type DashboardData =
+  | (CommonData & { persona: 'buyer' | 'operator'; purchases: DashboardPurchase[]; mandates: DashboardMandate[] })
+  | (CommonData & { persona: 'seller'; purchases: SellerPurchase[]; mandates: [] });
+
 export type DashboardDeps = {
   now?: Date;
   /** Reads the merchant account's PayPal transactions between two instants (Transaction Search). */
   loadTransactions: (start: Date, end: Date) => Promise<Transaction[]>;
+  /** How long to wait for Transaction Search before giving up with a warning. Default 8 seconds. */
+  transactionsTimeoutMs?: number;
 };
 
 /** Which purchases a persona sees: all of them, those of one buyer or seller, or none. */
@@ -148,6 +164,35 @@ const iso = (date: Date) => date.toISOString();
 const isoOrNull = (date: Date | null) => (date ? date.toISOString() : null);
 
 const DAY_MS = 86_400_000;
+const TRANSACTIONS_TIMEOUT_MS = 8_000;
+
+/** `promise`, or a rejection if it has not settled within `ms`. */
+async function withinTime<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Only what a seller may see of a purchase (see the note at the top). */
+const forSeller = (p: DashboardPurchase): SellerPurchase => ({
+  id: p.id,
+  sellerId: p.sellerId,
+  cart: p.cart,
+  totalCents: p.totalCents,
+  currency: p.currency,
+  verdict: p.verdict,
+  status: p.status,
+  paypalOrderId: p.paypalOrderId,
+  paypalCaptureId: p.paypalCaptureId,
+  capturedAt: p.capturedAt,
+  createdAt: p.createdAt,
+});
 
 export async function loadDashboardData(db: Db, persona: Persona, deps: DashboardDeps): Promise<DashboardData> {
   const now = deps.now ?? new Date();
@@ -155,38 +200,45 @@ export async function loadDashboardData(db: Db, persona: Persona, deps: Dashboar
   const warnings: string[] = [];
 
   const [purchaseRows, eventRows, receiptRows, payoutRows] =
-    scope.kind === 'none' ? [[], [], [], []] : await purchaseTables(db, scope);
+    scope.kind === 'none' ? [[], [], [], []] : await purchaseTables(db, scope, persona);
   const [sellerRows, productRows] = await catalogue(db, scope, persona);
-  const mandateRows = await mandatesFor(db, scope);
-
-  let transactions: DashboardTransaction[] = [];
-  if (persona === 'operator') {
-    try {
-      const start = new Date(now.getTime() - TRANSACTION_SEARCH_MAX_DAYS * DAY_MS);
-      transactions = transactionRows(await deps.loadTransactions(start, now), purchaseRows);
-    } catch (error) {
-      warnings.push(`PayPal transactions could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  return {
-    persona,
+  const common = {
     asOf: iso(now),
-    purchases: purchaseRows,
     purchaseEvents: eventRows,
     receipts: receiptRows,
     payouts: payoutRows,
     sellers: sellerRows,
     products: productRows,
-    mandates: mandateRows,
-    transactions,
+    transactions: [] as DashboardTransaction[],
     warnings,
   };
+  if (persona === 'seller') return { ...common, persona, purchases: purchaseRows.map(forSeller), mandates: [] };
+
+  const mandateRows = await mandatesFor(db, scope);
+  if (persona === 'operator') {
+    try {
+      const start = new Date(now.getTime() - TRANSACTION_SEARCH_MAX_DAYS * DAY_MS);
+      const found = await withinTime(
+        deps.loadTransactions(start, now),
+        deps.transactionsTimeoutMs ?? TRANSACTIONS_TIMEOUT_MS,
+        'Transaction Search did not answer in time.',
+      );
+      common.transactions = transactionRows(found, purchaseRows);
+    } catch (error) {
+      warnings.push(`PayPal transactions could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { ...common, persona, purchases: purchaseRows, mandates: mandateRows };
 }
+
+// A status transition is logged under the status it moves the purchase into; anything else in
+// the log (the agent's steps, the gate's and the intent check's work) is between buyer and Behest.
+const STATUS_TRANSITIONS: string[] = purchaseStatus.enumValues;
 
 async function purchaseTables(
   db: Db,
   scope: Exclude<Scope, { kind: 'none' }>,
+  persona: Persona,
 ): Promise<[DashboardPurchase[], DashboardPurchaseEvent[], DashboardReceipt[], DashboardPayout[]]> {
   const inScope = purchaseCondition(scope);
 
@@ -226,7 +278,7 @@ async function purchaseTables(
     })
     .from(purchaseEvents)
     .innerJoin(purchases, eq(purchaseEvents.purchaseId, purchases.id))
-    .where(inScope)
+    .where(persona === 'seller' ? and(inScope, inArray(purchaseEvents.kind, STATUS_TRANSITIONS)) : inScope)
     .orderBy(asc(purchaseEvents.seq));
 
   const receiptRows = await db
@@ -262,7 +314,12 @@ async function purchaseTables(
     .orderBy(desc(payouts.createdAt));
 
   return [
-    purchaseRows.map((p) => ({ ...p, capturedAt: isoOrNull(p.capturedAt), createdAt: iso(p.createdAt) })),
+    purchaseRows.map((p) => ({
+      ...p,
+      verdict: p.finalVerdict ?? p.gateVerdict,
+      capturedAt: isoOrNull(p.capturedAt),
+      createdAt: iso(p.createdAt),
+    })),
     eventRows.map((e) => ({ ...e, createdAt: iso(e.createdAt) })),
     receiptRows.map((r) => ({ ...r, createdAt: iso(r.createdAt) })),
     payoutRows.map((p) => ({ ...p, createdAt: iso(p.createdAt), updatedAt: iso(p.updatedAt) })),

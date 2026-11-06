@@ -1,7 +1,9 @@
 // AG Studio's data sources for the dashboard: a table for each row type the data route returns
-// (lib/dashboard/scope.ts), two tables derived from them (gate rule outcomes and cart lines), and
+// (lib/dashboard/scope.ts), two tables derived from them (decision outcomes and cart lines), and
 // two for the budget burn-down (lib/dashboard/budget.ts). Money arrives in integer cents and is
-// shown in dollars, so Studio's currency format can display it.
+// shown in dollars, so Studio's currency format can display it. The seller's rows carry nothing
+// about how the buyer's purchases were decided, so its report has no decision outcomes, mandates
+// or budgets, and its purchases only the fields a seller may see.
 
 import type {
   AgDataSourcesDefinition,
@@ -11,7 +13,8 @@ import type {
   AgRelationDefinition,
 } from 'ag-studio';
 import { budgetEffect, burnDown, periodBounds, type BudgetEffect } from '@/lib/dashboard/budget';
-import type { DashboardData } from '@/lib/dashboard/scope';
+import { decisionOutcomes } from '@/lib/dashboard/reasons';
+import type { DashboardData, DashboardPurchase, SellerPurchase } from '@/lib/dashboard/scope';
 import type { TransactionMatch } from '@/lib/dashboard/transactions';
 import type { BehestRegistry } from './widgets';
 
@@ -80,37 +83,45 @@ const MATCH_LABEL: Record<TransactionMatch, string> = {
 
 // --- Rows -------------------------------------------------------------------------
 
-function purchaseRows(data: DashboardData) {
-  return data.purchases.map((p) => {
-    const verdict = p.finalVerdict ?? p.gateVerdict;
-    return {
-      id: p.id,
-      createdAt: p.createdAt,
-      buyerId: p.buyerId,
-      mandateId: p.mandateId,
-      sellerId: p.sellerId,
-      request: p.request,
-      verdict,
-      gateVerdict: p.gateVerdict,
-      intent: p.intent ? words(p.intent.verdict) : 'Not run',
-      status: words(p.status),
-      approver: p.approver === 'human' ? 'Buyer' : p.approver === 'policy' ? 'Policy' : null,
-      itemCount: p.cart?.items.reduce((sum, item) => sum + item.quantity, 0) ?? null,
-      total: dollars(p.totalCents),
-      budgetEffect: EFFECT_LABEL[budgetEffect(p.status)],
-      proposals: 1,
-      allowed: flag(verdict === 'ALLOW'),
-      asked: flag(verdict === 'ASK'),
-      blocked: flag(verdict === 'BLOCK'),
-      rulesFlagged: p.gateOutcomes.filter((o) => o.result === 'ask' || o.result === 'block').length,
-      captureId: p.paypalCaptureId,
-    };
-  });
-}
+/** The buyer's and the operator's data, which say how each purchase was decided. */
+type FullData = Exclude<DashboardData, { persona: 'seller' }>;
 
-function gateOutcomeRows(data: DashboardData) {
+const nonPassing = (p: DashboardPurchase) =>
+  decisionOutcomes(p).filter((o) => o.result === 'ask' || o.result === 'block').length;
+
+/** A purchase as every persona may see it. */
+const purchaseRow = (p: SellerPurchase) => ({
+  id: p.id,
+  createdAt: p.createdAt,
+  sellerId: p.sellerId,
+  verdict: p.verdict,
+  status: words(p.status),
+  itemCount: p.cart?.items.reduce((sum, item) => sum + item.quantity, 0) ?? null,
+  total: dollars(p.totalCents),
+  proposals: 1,
+  allowed: flag(p.verdict === 'ALLOW'),
+  asked: flag(p.verdict === 'ASK'),
+  blocked: flag(p.verdict === 'BLOCK'),
+  captureId: p.paypalCaptureId,
+});
+
+/** A purchase as the buyer and the operator see it, with how it was decided. */
+const detailedPurchaseRow = (p: DashboardPurchase) => ({
+  ...purchaseRow(p),
+  buyerId: p.buyerId,
+  mandateId: p.mandateId,
+  request: p.request,
+  gateVerdict: p.gateVerdict,
+  intent: p.intent ? words(p.intent.verdict) : 'Not run',
+  approver: p.approver === 'human' ? 'Buyer' : p.approver === 'policy' ? 'Policy' : null,
+  budgetEffect: EFFECT_LABEL[budgetEffect(p.status)],
+  rulesFlagged: nonPassing(p),
+});
+
+/** Every gate rule's outcome for each purchase, then the intent check's reasons when it asked or blocked. */
+function decisionRows(data: FullData) {
   return data.purchases.flatMap((p) =>
-    p.gateOutcomes.map((o, position) => ({
+    decisionOutcomes(p).map((o, position) => ({
       id: `${p.id}:${position}`,
       purchaseId: p.id,
       position,
@@ -155,7 +166,7 @@ function receiptRows(data: DashboardData) {
 }
 
 /** One row per active mandate: its budget for the current period, and how much of it is used. */
-function budgetTables(data: DashboardData) {
+function budgetTables(data: FullData) {
   const now = new Date(data.asOf);
   const budgets = [];
   const steps = [];
@@ -207,9 +218,17 @@ function budgetTables(data: DashboardData) {
 export const hasData = (data: DashboardData) =>
   [data.purchases, data.products, data.mandates].some((rows) => rows.length > 0);
 
+// Tables only the buyer and the operator get: how purchases were decided, and budgets.
+const BUYER_SIDE_TABLES = new Set(['gateOutcomes', 'mandates', 'budgets', 'budgetSteps']);
+
+const tablesOf = (relation: AgRelationDefinition) =>
+  [relation.source, relation.target].flatMap((end) => ('tableId' in end ? [end.tableId] : []));
+
 export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<BehestRegistry> {
-  const purchases = purchaseRows(data);
-  const { budgets, steps } = budgetTables(data);
+  const full = data.persona === 'seller' ? null : data;
+  const visible = (tableId: string) => full !== null || !BUYER_SIDE_TABLES.has(tableId);
+  const purchases = full ? full.purchases.map(detailedPurchaseRow) : data.purchases.map(purchaseRow);
+  const { budgets, steps } = full ? budgetTables(full) : { budgets: [], steps: [] };
   const dates = [...data.purchases.map((p) => p.createdAt), ...data.transactions.map((t) => t.date)]
     .filter((d): d is string => !!d)
     .map((d) => d.slice(0, 10))
@@ -226,40 +245,48 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
       {
         id: 'purchases',
         description:
-          'One row per purchase the agent proposed. Verdict is the final one (after the intent check). Budget effect says ' +
-          'whether the total counts against the budget as spent, is reserved in flight, or was released (blocked, cancelled, ' +
-          'failed or refunded). Allowed, Needed approval and Blocked are 1 or 0, so their sums count purchases.',
+          'One row per purchase the agent proposed. Verdict is the final one (after the intent check). Allowed, Needed ' +
+          'approval and Blocked are 1 or 0, so their sums count purchases.' +
+          (full
+            ? ' Budget effect says whether the total counts against the budget as spent, is reserved in flight, or was ' +
+              'released (blocked, cancelled, failed or refunded).'
+            : ''),
         data: purchases,
         fields: fields([
           ['id', 'Purchase ID', 'textFormat'],
           ['createdAt', 'Proposed at', 'dateTimeFormat'],
-          ['buyerId', 'Buyer ID', 'textFormat', true],
-          ['mandateId', 'Mandate ID', 'textFormat', true],
           ['sellerId', 'Seller ID', 'textFormat', true],
-          ['request', 'Request', 'textFormat'],
           ['verdict', 'Verdict', 'textFormat'],
-          ['gateVerdict', 'Gate verdict', 'textFormat'],
-          ['intent', 'Intent check', 'textFormat'],
           ['status', 'Status', 'textFormat'],
-          ['approver', 'Approved by', 'textFormat'],
           ['itemCount', 'Items', 'integerFormat'],
           ['total', 'Total', 'currencyFormat'],
-          ['budgetEffect', 'Budget effect', 'textFormat'],
           ['proposals', 'Proposals', 'integerFormat'],
           ['allowed', 'Allowed', 'integerFormat'],
           ['asked', 'Needed approval', 'integerFormat'],
           ['blocked', 'Blocked', 'integerFormat'],
-          ['rulesFlagged', 'Rules flagged', 'integerFormat'],
           ['captureId', 'PayPal capture', 'textFormat'],
+          ...(full
+            ? ([
+                ['buyerId', 'Buyer ID', 'textFormat', true],
+                ['mandateId', 'Mandate ID', 'textFormat', true],
+                ['request', 'Request', 'textFormat'],
+                ['gateVerdict', 'Gate verdict', 'textFormat'],
+                ['intent', 'Intent check', 'textFormat'],
+                ['approver', 'Approved by', 'textFormat'],
+                ['budgetEffect', 'Budget effect', 'textFormat'],
+                ['rulesFlagged', 'Rules flagged', 'integerFormat'],
+              ] satisfies FieldSpec[])
+            : []),
         ]),
       },
       {
         id: 'gateOutcomes',
-        name: 'Gate rule outcomes',
+        name: 'Decision outcomes',
         description:
-          'Every policy gate rule evaluated for each purchase, in rule order. Result is Pass, Ask, Block or Skip; detail ' +
-          'explains it in words. The reasons for a verdict are the outcomes that asked or blocked.',
-        data: gateOutcomeRows(data),
+          'Every policy gate rule evaluated for each purchase, in rule order, then the intent check (rule "Intent check") ' +
+          'when it asked or blocked. Result is Pass, Ask, Block or Skip; detail explains it in words. The reasons for a ' +
+          'verdict are the outcomes that asked or blocked.',
+        data: full ? decisionRows(full) : [],
         fields: fields([
           ['id', 'Outcome ID', 'textFormat', true],
           ['purchaseId', 'Outcome purchase ID', 'textFormat'],
@@ -369,7 +396,7 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
       {
         id: 'mandates',
         description: 'Spending mandates the buyer signed: budget per period, per-purchase cap and the amount above which the agent asks.',
-        data: data.mandates.map((m) => ({
+        data: (full?.mandates ?? []).map((m) => ({
           id: m.id,
           status: words(m.status),
           period: words(m.policy.budget.period === 'once' ? 'one_off' : m.policy.budget.period),
@@ -457,7 +484,7 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
           ['note', 'Transaction note', 'textFormat'],
         ]),
       },
-    ],
+    ].filter((source) => visible(source.id)),
     relationships: [
       manyToOne('purchase-seller', 'purchases.sellerId', 'sellers.id'),
       manyToOne('purchase-mandate', 'purchases.mandateId', 'mandates.id'),
@@ -474,7 +501,7 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
       onCalendar('purchaseEvents', 'createdAt'),
       onCalendar('payouts', 'createdAt'),
       onCalendar('transactions', 'date'),
-    ],
+    ].filter((relation) => tablesOf(relation).every(visible)),
     calendars: [
       {
         id: CALENDAR_ID,
@@ -487,7 +514,9 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
       },
     ],
     expressions: [
-      ratio('budgetUsed', 'Budget used', 'Share of the budget this period that is spent or reserved in flight.', 'budgets.committed', 'budgets.budget'),
+      ...(full
+        ? [ratio('budgetUsed', 'Budget used', 'Share of the budget this period that is spent or reserved in flight.', 'budgets.committed', 'budgets.budget')]
+        : []),
       ratio('approvalRate', 'Approval rate', 'Share of proposals that needed the buyer to approve.', 'purchases.asked', 'purchases.proposals'),
       ratio('blockRate', 'Block rate', 'Share of proposals the gate or intent check blocked.', 'purchases.blocked', 'purchases.proposals'),
     ],

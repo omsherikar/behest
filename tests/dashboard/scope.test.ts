@@ -102,7 +102,11 @@ async function seed(db: Db) {
       })
       .returning();
     ids[p.label] = row.id;
-    await db.insert(purchaseEvents).values({ purchaseId: row.id, kind: 'settled', data: { note: p.label } });
+    // A status transition (its kind is the new status) and an agent step, which is buyer-private.
+    await db.insert(purchaseEvents).values([
+      { purchaseId: row.id, kind: 'settled', data: { note: p.label } },
+      { purchaseId: row.id, kind: 'agent_step', data: { thought: `searched for ${p.label}` } },
+    ]);
     await db.insert(receipts).values({ purchaseId: row.id, jws: `receipt.${p.label}.sig`, payloadHash: HASH, keyId: 'k1' });
     await db.insert(payouts).values({
       purchaseId: row.id,
@@ -115,7 +119,7 @@ async function seed(db: Db) {
   return { ids, priyaMandateId: priyaMandate.id, ravi, gadgets };
 }
 
-const purchaseIdsOf = (rows: { purchaseId: string }[]) => rows.map((r) => r.purchaseId).sort();
+const purchaseIdsOf = (rows: { purchaseId: string }[]) => [...new Set(rows.map((r) => r.purchaseId))].sort();
 
 function noTransactions(): DashboardDeps & { loadTransactions: ReturnType<typeof vi.fn> } {
   return { now: NOW, loadTransactions: vi.fn(async () => []) };
@@ -146,6 +150,12 @@ describe('loadDashboardData for the buyer', () => {
     expect(purchaseIdsOf(data.receipts)).toEqual(own);
     expect(purchaseIdsOf(data.payouts)).toEqual(own);
     expect(data.mandates.map((m) => m.id)).toEqual([seeded.priyaMandateId]);
+  });
+
+  it('sees its purchases in full: the request, the gate outcomes and every event', async () => {
+    const data = await loadDashboardData(db, 'buyer', noTransactions());
+    expect(data.purchases[0]).toMatchObject({ request: expect.any(String), gateOutcomes: expect.any(Array) });
+    expect(new Set(data.purchaseEvents.map((e) => e.kind))).toEqual(new Set(['settled', 'agent_step']));
   });
 
   it('sees every seller catalogue, which is public', async () => {
@@ -183,6 +193,36 @@ describe('loadDashboardData for the seller', () => {
     expect(purchaseIdsOf(data.payouts)).toEqual(own);
   });
 
+  it("never sees the buyer's request, the gate's reasoning, the intent check or the buyer's ids", async () => {
+    const data = await loadDashboardData(db, 'seller', noTransactions());
+    expect(data.purchases.length).toBeGreaterThan(0);
+    for (const purchase of data.purchases) {
+      expect(Object.keys(purchase).sort()).toEqual([
+        'capturedAt',
+        'cart',
+        'createdAt',
+        'currency',
+        'id',
+        'paypalCaptureId',
+        'paypalOrderId',
+        'sellerId',
+        'status',
+        'totalCents',
+        'verdict',
+      ]);
+      for (const field of ['request', 'gateOutcomes', 'intent', 'buyerId', 'mandateId']) {
+        expect(purchase).not.toHaveProperty(field);
+      }
+    }
+    expect(data.purchases[0]).toMatchObject({ verdict: 'ALLOW', status: 'settled', totalCents: expect.any(Number) });
+  });
+
+  it("sees only status transitions in the event log, never the agent's steps", async () => {
+    const data = await loadDashboardData(db, 'seller', noTransactions());
+    expect(data.purchaseEvents.length).toBeGreaterThan(0);
+    expect(data.purchaseEvents.every((e) => e.kind === 'settled')).toBe(true);
+  });
+
   it('sees only its own seller record and catalogue, and no mandates', async () => {
     const deps = noTransactions();
     const data = await loadDashboardData(db, 'seller', deps);
@@ -213,7 +253,7 @@ describe('loadDashboardData for the operator', () => {
       ids['priya-gadgets'],
       ids['priya-ravi'],
     ]);
-    expect(data.purchaseEvents).toHaveLength(4);
+    expect(data.purchaseEvents).toHaveLength(8);
     expect(data.receipts).toHaveLength(4);
     expect(data.payouts).toHaveLength(4);
     expect(data.mandates).toHaveLength(2);
@@ -244,6 +284,15 @@ describe('loadDashboardData for the operator', () => {
       feeCents: -79,
     });
     expect(data.warnings).toEqual([]);
+  });
+
+  it('gives up on Transaction Search when it does not answer in time, with a warning', async () => {
+    const loadTransactions = vi.fn(() => new Promise<Transaction[]>(() => {}));
+    const data = await loadDashboardData(db, 'operator', { now: NOW, loadTransactions, transactionsTimeoutMs: 20 });
+
+    expect(data.transactions).toEqual([]);
+    expect(data.warnings).toEqual(['PayPal transactions could not be loaded: Transaction Search did not answer in time.']);
+    expect(data.purchases).toHaveLength(4);
   });
 
   it('still returns everything else, with a warning, when Transaction Search fails', async () => {
@@ -279,6 +328,7 @@ describe('dashboard rows', () => {
     const data = await loadDashboardData(db, 'operator', noTransactions());
     const purchase = data.purchases.find((p) => p.id === seeded.ids['priya-ravi']);
     expect(purchase).toMatchObject({
+      verdict: 'ALLOW',
       gateVerdict: 'ALLOW',
       finalVerdict: 'ALLOW',
       status: 'settled',

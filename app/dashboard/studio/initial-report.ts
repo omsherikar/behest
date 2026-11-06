@@ -1,7 +1,8 @@
 // The built-in report for each persona, as AG Studio report state. Every persona gets the pages
 // that make sense for it: the buyer sees its agent's decisions, budget, receipts and the
 // catalogue; the seller sees the orders placed with it, its receipts and payouts and its
-// catalogue; the operator sees everything plus reconciliation against PayPal. Field ids
+// catalogue, with nothing about how the buyer's agent decided (its data has none); the operator
+// sees everything plus reconciliation against PayPal. Field ids
 // ('purchases.total') refer to the data sources in ./data.ts; 'behest-*' widgets are in ./widgets.ts.
 
 import type { AgPageState, AgWidgetLayoutState } from 'ag-studio';
@@ -227,6 +228,124 @@ const receipts: PageState = {
   },
 };
 
+// Statuses in which the buyer's money has been captured.
+const PAID = ['Captured', 'Accepted', 'Settled', 'Disputed', 'Resolved'];
+
+const sellerOrders: PageState = {
+  id: 'orders',
+  widgets: {
+    'kpi-orders': kpi('Agent orders', sum('purchases.proposals'), 'calendar::day'),
+    'kpi-allowed': kpi('Allowed', sum('purchases.allowed')),
+    'kpi-asked': kpi('Needed approval', sum('purchases.asked')),
+    'kpi-blocked': kpi('Blocked', sum('purchases.blocked')),
+    verdict: {
+      type: 'button-filter',
+      dataMapping: { value: [{ id: 'purchases.verdict' }] },
+      format: {
+        ...title('Verdict'),
+        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 64 } },
+      },
+    },
+    ledger: {
+      type: 'behest-ledger',
+      dataMapping: {
+        columns: [
+          { id: 'purchases.createdAt' },
+          { id: 'purchases.itemCount' },
+          { id: 'purchases.total' },
+          { id: 'purchases.status' },
+          { id: 'purchases.captureId' },
+        ],
+      },
+      format: title('Orders from buyer agents'),
+    },
+    // Follows the ledger: clicking a paid order there shows and verifies its receipt here.
+    receipt: { type: 'behest-receipt', dataMapping: {}, format: title('Receipt for the selected order') },
+    items: {
+      type: 'grid',
+      dataMapping: {
+        cols: [
+          { id: 'purchases.createdAt' },
+          { id: 'cartItems.sku' },
+          { id: 'cartItems.title' },
+          { id: 'cartItems.quantity' },
+          { id: 'cartItems.lineTotal' },
+          { id: 'purchases.status' },
+        ],
+      },
+      sort: [{ field: { id: 'purchases.createdAt' }, direction: 'desc' }],
+      format: title('Items ordered'),
+    },
+    'sales-by-item': {
+      type: 'bar-chart-grouped',
+      dataMapping: { categoryKey: [{ id: 'cartItems.title' }], valueKey: [sum('cartItems.lineTotal')] },
+      format: title('Paid sales by item'),
+    },
+  },
+  widgetLayout: {
+    'kpi-orders': at(0, 0, 4, 7),
+    'kpi-allowed': at(4, 0, 4, 7),
+    'kpi-asked': at(8, 0, 4, 7),
+    'kpi-blocked': at(12, 0, 4, 7),
+    verdict: at(16, 0, 8, 7),
+    ledger: at(0, 7, 24, 26),
+    receipt: at(0, 33, 9, 36),
+    items: at(9, 33, 15, 18),
+    'sales-by-item': at(9, 51, 15, 18),
+  },
+  filter: {
+    widget: {
+      'sales-by-item': [{ field: { id: 'purchases.status' }, model: { operator: 'isIn', value: PAID } }],
+    },
+  },
+};
+
+const sellerReceipts: PageState = {
+  id: 'receipts',
+  widgets: {
+    'kpi-receipts': kpi('Receipts received', countd('receipts.id')),
+    'kpi-paid-out': kpi('Paid out to you', sum('payouts.amount')),
+    'kpi-pending': kpi('Payouts pending', sum('payouts.pending')),
+    receipt: { type: 'behest-receipt', dataMapping: {}, format: title('Receipt') },
+    'receipt-list': {
+      type: 'grid',
+      dataMapping: {
+        cols: [
+          { id: 'receipts.issuedAt' },
+          { id: 'receipts.id' },
+          { id: 'purchases.verdict' },
+          // One receipt per purchase, so the purchase total is shown as is, not summed.
+          { id: 'purchases.total' },
+          { id: 'receipts.keyId' },
+        ],
+      },
+      sort: [{ field: { id: 'receipts.issuedAt' }, direction: 'desc' }],
+      format: title('Receipts'),
+    },
+    payouts: {
+      type: 'grid',
+      dataMapping: {
+        cols: [
+          { id: 'payouts.createdAt' },
+          sum('payouts.amount'),
+          { id: 'payouts.status' },
+          { id: 'payouts.paypalBatchId' },
+        ],
+      },
+      sort: [{ field: { id: 'payouts.createdAt' }, direction: 'desc' }],
+      format: title('PayPal payouts'),
+    },
+  },
+  widgetLayout: {
+    'kpi-receipts': at(0, 0, 8, 7),
+    'kpi-paid-out': at(8, 0, 8, 7),
+    'kpi-pending': at(16, 0, 8, 7),
+    receipt: at(0, 7, 9, 36),
+    'receipt-list': at(9, 7, 15, 18),
+    payouts: at(9, 25, 15, 18),
+  },
+};
+
 const catalogue: PageState = {
   id: 'catalogue',
   widgets: {
@@ -342,8 +461,8 @@ export const BUILT_IN_REPORTS: Record<Persona, BuiltInReport> = {
     [catalogue, 'Catalogue'],
   ]),
   seller: report('My shop', [
-    [decisions, 'Agent orders'],
-    [receipts, 'Receipts and payouts'],
+    [sellerOrders, 'Agent orders'],
+    [sellerReceipts, 'Receipts and payouts'],
     [catalogue, 'Catalogue'],
   ]),
   operator: report('Operations', [

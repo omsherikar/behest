@@ -34,7 +34,9 @@ const currency = () => text('currency').$type<'USD'>().notNull().default('USD');
 // Buyers, wallets and mandates
 
 export const mandateStatus = pgEnum('mandate_status', ['active', 'revoked', 'expired']);
+export type MandateStatus = (typeof mandateStatus.enumValues)[number];
 export const walletStatus = pgEnum('wallet_status', ['pending', 'linked', 'revoked']);
+export type WalletStatus = (typeof walletStatus.enumValues)[number];
 
 export const buyers = pgTable('buyers', {
   id: id(),
@@ -143,6 +145,8 @@ export const purchaseStatus = pgEnum('purchase_status', [
   'disputed',
   'resolved',
 ]);
+/** The purchase lifecycle, shared by the state machine, the orchestrator and the UI. */
+export type PurchaseStatus = (typeof purchaseStatus.enumValues)[number];
 export const approver = pgEnum('approver', ['policy', 'human']);
 
 /** One gate rule's result as stored on a purchase. */
@@ -377,6 +381,7 @@ export const llmCalls = pgTable(
 );
 
 export const jobStatus = pgEnum('job_status', ['queued', 'running', 'done', 'dead']);
+export type JobStatus = (typeof jobStatus.enumValues)[number];
 
 export const jobs = pgTable(
   'jobs',

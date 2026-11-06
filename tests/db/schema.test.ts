@@ -1,7 +1,20 @@
 import { eq, sql } from 'drizzle-orm';
-import { expect, it } from 'vitest';
+import { expect, expectTypeOf, it } from 'vitest';
 import type { Db } from '@/lib/db/client';
-import { buyers, mandates, products, purchases, sellerOrders, sellers, webhookEvents } from '@/lib/db/schema';
+import {
+  buyers,
+  type JobStatus,
+  mandates,
+  type MandateStatus,
+  products,
+  purchases,
+  purchaseStatus,
+  type PurchaseStatus,
+  sellerOrders,
+  sellers,
+  type WalletStatus,
+  webhookEvents,
+} from '@/lib/db/schema';
 import type { Cart } from '@/lib/domain/cart';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import type { PurchaseProposal } from '@/lib/domain/proposal';
@@ -48,7 +61,7 @@ async function addBuyer(db: Db) {
   return buyer;
 }
 
-function mandateRow(buyerId: string, status: 'active' | 'revoked' | 'expired' = 'active') {
+function mandateRow(buyerId: string, status: MandateStatus = 'active') {
   return {
     buyerId,
     sourceText: '$60 a month on groceries and spices, ask me above $25, never electronics',
@@ -230,4 +243,25 @@ it('indexes the lookups the purchase flow, job worker and spend cap run', async 
       'llm_calls USING btree (created_at)',
     ]),
   );
+});
+
+it('exports one status type per lifecycle enum', () => {
+  expectTypeOf<PurchaseStatus>().toEqualTypeOf<
+    | 'proposed'
+    | 'blocked'
+    | 'charging'
+    | 'awaiting_approval'
+    | 'cancelled'
+    | 'captured'
+    | 'failed'
+    | 'accepted'
+    | 'refunded'
+    | 'settled'
+    | 'disputed'
+    | 'resolved'
+  >();
+  expectTypeOf<MandateStatus>().toEqualTypeOf<'active' | 'revoked' | 'expired'>();
+  expectTypeOf<WalletStatus>().toEqualTypeOf<'pending' | 'linked' | 'revoked'>();
+  expectTypeOf<JobStatus>().toEqualTypeOf<'queued' | 'running' | 'done' | 'dead'>();
+  expect(purchaseStatus.enumValues).toHaveLength(12);
 });

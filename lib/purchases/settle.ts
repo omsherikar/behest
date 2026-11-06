@@ -1,6 +1,6 @@
 import { and, eq, ne } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
-import { payouts, purchases, sellers } from '@/lib/db/schema';
+import { payouts, purchases, sellers, type PurchaseStatus } from '@/lib/db/schema';
 import { enqueue } from '@/lib/jobs/queue';
 import { PayPalApiError } from '@/lib/paypal/http';
 import { PayoutAlreadyExists } from '@/lib/paypal/payouts';
@@ -29,6 +29,9 @@ const FAILED_ITEM_STATUSES = ['FAILED', 'RETURNED', 'BLOCKED', 'REFUNDED', 'REVE
 const FAILED_BATCH_STATUSES: ReadonlySet<string> = new Set(['DENIED', 'CANCELED']);
 /** Statuses, of the item or of a batch with no item, that leave the seller unpaid. Settling then needs an operator. */
 const FAILED_STATUSES: ReadonlySet<string> = new Set([...FAILED_ITEM_STATUSES, ...FAILED_BATCH_STATUSES]);
+
+/** Statuses a purchase reaches only by settling. */
+const SETTLED_OR_LATER: ReadonlySet<PurchaseStatus> = new Set(['settled', 'disputed', 'resolved']);
 
 /** The oldest payout the poll resends: a day inside the 30 days PayPal remembers a sender batch id. */
 const RESEND_WINDOW_MS = 29 * 24 * 60 * 60 * 1000;
@@ -87,7 +90,8 @@ export async function payoutSeller(deps: SettleDeps, purchaseId: string): Promis
  * Follows a purchase's payout: the `payout_poll` job's handler. `done` once the purchase has settled,
  * once PayPal reports the item failed, or the batch denied or cancelled before it reported an item
  * (recorded on the payout and as a `payout_failed` event, with the purchase left `accepted`), or once
- * the purchase has moved on some other way, such as a refund.
+ * the purchase has moved on some other way, such as a refund. A payout that succeeds for a purchase
+ * refunded while PayPal was asked is logged as a `payout_after_refund` event.
  * `retry` while the item is pending, unclaimed, on hold, missing or in a status not known here.
  * Throws, to be retried, if PayPal cannot be asked, or has the payout but did not name its batch, and
  * without asking PayPal if the payout was never answered and is too old to resend safely.
@@ -115,15 +119,21 @@ export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<
   // The item decides. A batch PayPal ended before reporting an item failed as a whole.
   const status = itemStatus ?? (FAILED_BATCH_STATUSES.has(batchStatus) ? batchStatus : null);
   if (status === null) return 'retry';
-  await recordStatus(db, purchaseId, status, { payoutBatchId, batchStatus, itemStatus });
+  const firstToRecord = await recordStatus(db, purchaseId, status, { payoutBatchId, batchStatus, itemStatus });
   if (FAILED_STATUSES.has(status)) return 'done';
   if (status !== 'SUCCESS') return 'retry';
 
   try {
     await transition(db, purchaseId, 'accepted', 'settled');
   } catch (error) {
-    // The purchase moved on while PayPal was asked, settled by an overlapping poll or refunded.
     if (!(error instanceof StaleTransition)) throw error;
+    // The purchase moved on while PayPal was asked. Unless an overlapping poll settled it, it was
+    // refunded, and the seller has been paid for an order whose buyer got the money back. The poll
+    // that first recorded the payout's success logs that, once.
+    const [{ status: current }] = await db.select({ status: purchases.status }).from(purchases).where(eq(purchases.id, purchaseId));
+    if (firstToRecord && !SETTLED_OR_LATER.has(current)) {
+      await appendEvent(db, purchaseId, 'payout_after_refund', { status: current });
+    }
   }
   return 'done';
 }
@@ -168,16 +178,17 @@ function describeFailure(error: unknown): Record<string, unknown> {
 }
 
 /**
- * Stores the payout's latest status. The first time that status is a failure, logs a `payout_failed`
- * event with what PayPal reported, in the same transaction, so overlapping polls log it once.
+ * Stores the payout's latest status, and returns whether this call changed it. The first time that
+ * status is a failure, logs a `payout_failed` event with what PayPal reported, in the same
+ * transaction, so overlapping polls log it once.
  */
 async function recordStatus(
   db: Db,
   purchaseId: string,
   status: string,
   reported: { payoutBatchId: string; batchStatus: string; itemStatus: string | null },
-): Promise<void> {
-  await db.transaction(async (tx) => {
+): Promise<boolean> {
+  return db.transaction(async (tx) => {
     const changed = await tx
       .update(payouts)
       .set({ status })
@@ -186,5 +197,6 @@ async function recordStatus(
     if (changed.length > 0 && FAILED_STATUSES.has(status)) {
       await appendEvent(tx, purchaseId, 'payout_failed', reported);
     }
+    return changed.length > 0;
   });
 }

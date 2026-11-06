@@ -331,19 +331,33 @@ describe('pollPayout', () => {
     expect(paypal.callsTo('getPayoutBatch')).toEqual([]);
   });
 
-  it('leaves a purchase that moved on while PayPal was asked where it is', async () => {
-    const { db, paypal, purchaseId, deps, batchId } = await sent();
-    paypal.setPayoutStatus(batchId, { batchStatus: 'SUCCESS', itemStatus: 'SUCCESS' });
-    const ask = paypal.getPayoutBatch.bind(paypal);
-    vi.spyOn(paypal, 'getPayoutBatch').mockImplementationOnce(async (id) => {
-      await db.update(purchases).set({ status: 'refunded' }).where(eq(purchases.id, purchaseId));
+  /** A paid payout whose purchase is refunded while PayPal is first asked about it. */
+  async function refundedWhilePolling() {
+    const setup = await sent();
+    setup.paypal.setPayoutStatus(setup.batchId, { batchStatus: 'SUCCESS', itemStatus: 'SUCCESS' });
+    const ask = setup.paypal.getPayoutBatch.bind(setup.paypal);
+    vi.spyOn(setup.paypal, 'getPayoutBatch').mockImplementationOnce(async (id) => {
+      await setup.db.update(purchases).set({ status: 'refunded' }).where(eq(purchases.id, setup.purchaseId));
       return ask(id);
     });
+    return setup;
+  }
+
+  it('leaves a purchase refunded while PayPal was asked where it is, and records that the seller was paid anyway', async () => {
+    const { db, purchaseId, deps } = await refundedWhilePolling();
 
     expect(await pollPayout(deps, purchaseId)).toBe('done');
 
     expect(await statusOf(db, purchaseId)).toBe('refunded');
-    expect(await eventsOf(db, purchaseId)).toEqual([]);
+    expect(await eventsOf(db, purchaseId)).toEqual([{ kind: 'payout_after_refund', data: { status: 'refunded' } }]);
+  });
+
+  it('records a payout after a refund once when two polls overlap', async () => {
+    const { db, purchaseId, deps } = await refundedWhilePolling();
+
+    expect(await Promise.all([pollPayout(deps, purchaseId), pollPayout(deps, purchaseId)])).toEqual(['done', 'done']);
+
+    expect(await eventsOf(db, purchaseId)).toEqual([{ kind: 'payout_after_refund', data: { status: 'refunded' } }]);
   });
 
   it('fails, to be retried, when PayPal has the payout but does not say which batch it is', async () => {

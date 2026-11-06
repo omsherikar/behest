@@ -50,3 +50,6 @@ next-env.d.ts
 
 # agent worktrees
 /.worktrees/
+
+# implementation plans (process notes, not for reviewers)
+/docs/superpowers/

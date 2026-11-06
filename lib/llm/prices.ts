@@ -17,15 +17,25 @@ export type TokenUsage = {
   cache_creation_input_tokens?: number | null;
 };
 
-/** Whether the model has a price, and so can be held to the daily cap. */
+/** Whether the model has a price of its own. */
 export function hasPrice(model: string): boolean {
   return Object.hasOwn(PRICES, model);
 }
 
-/** The estimated cost of one call in US dollars, rounded to the micro-dollar the log stores. */
+/** Each rate at its highest across PRICES, for a model without a price (such as a fallback model). */
+const HIGHEST_PRICE: ModelPrice = {
+  input: Math.max(...Object.values(PRICES).map((price) => price.input)),
+  output: Math.max(...Object.values(PRICES).map((price) => price.output)),
+  cacheRead: Math.max(...Object.values(PRICES).map((price) => price.cacheRead)),
+  cacheWrite: Math.max(...Object.values(PRICES).map((price) => price.cacheWrite)),
+};
+
+/**
+ * The estimated cost of one model attempt in US dollars, rounded to the micro-dollar the log stores.
+ * A model without a price is charged the highest rates, so tokens already spent are never left out.
+ */
 export function estimateCostUsd(model: string, usage: TokenUsage): number {
-  if (!hasPrice(model)) throw new Error(`No price for model ${model}`);
-  const price = PRICES[model];
+  const price = hasPrice(model) ? PRICES[model] : HIGHEST_PRICE;
   const perMillion =
     usage.input_tokens * price.input +
     usage.output_tokens * price.output +

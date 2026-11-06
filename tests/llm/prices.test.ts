@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { estimateCostUsd, PRICES } from '@/lib/llm/prices';
+import { estimateCostUsd, hasPrice, PRICES } from '@/lib/llm/prices';
 
 it('lists per-million-token prices for each model', () => {
   expect(PRICES).toEqual({
@@ -35,8 +35,14 @@ it('rounds to the micro-dollar the cost column stores', () => {
   expect(estimateCostUsd('claude-haiku-5-5', { input_tokens: 4, output_tokens: 0 })).toBe(0);
 });
 
-it('refuses to price a model it has no price for', () => {
-  expect(() => estimateCostUsd('claude-unknown-1', { input_tokens: 1, output_tokens: 1 })).toThrow(
-    'No price for model claude-unknown-1',
-  );
+it('prices a model it has no price for at the highest rates', () => {
+  expect(estimateCostUsd('claude-unknown-1', { input_tokens: 1000, output_tokens: 500 })).toBe(0.014);
+  const cached = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 1_000_000 };
+  expect(estimateCostUsd('claude-unknown-1', cached)).toBe(5.2);
+});
+
+it('knows which models have a price', () => {
+  expect(hasPrice('claude-haiku-5-5')).toBe(true);
+  expect(hasPrice('claude-unknown-1')).toBe(false);
+  expect(hasPrice('toString')).toBe(false);
 });

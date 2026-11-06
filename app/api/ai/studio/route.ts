@@ -7,7 +7,7 @@ import { connection, type NextRequest } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { createClaude } from '@/lib/llm/client';
 import { type LlmStreamEvent, type StreamRequest, streamReply } from '@/lib/llm/stream';
-import { MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
+import { rateLimit, STUDIO_ANALYST_LIMIT } from '@/lib/ratelimit';
 import { getPersona, SESSION_COOKIE } from '@/lib/session';
 
 // The dashboard analyst. AG Studio's adapter (app/dashboard/studio/anthropic-adapter.ts) runs in
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
 
   const persona = await getPersona(request.cookies.get(SESSION_COOKIE)?.value);
   if (!persona) return error(401, 'Pick a persona on the home page first.');
-  if (!rateLimit(`${ROUTE}:${clientAddress(request)}:${persona}`, MODEL_ROUTE_LIMIT)) {
+  if (!rateLimit(`${ROUTE}:${clientAddress(request)}:${persona}`, STUDIO_ANALYST_LIMIT)) {
     return error(429, 'Too many questions at once. Try again in a minute.');
   }
 

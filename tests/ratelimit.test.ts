@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRateLimiter, MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
+import { createRateLimiter, MODEL_ROUTE_LIMIT, rateLimit, STUDIO_ANALYST_LIMIT } from '@/lib/ratelimit';
 
 /** A limiter on a clock the test moves by hand. */
 function limiterAt(start = 0) {
@@ -16,6 +16,10 @@ function allowed(limit: ReturnType<typeof createRateLimiter>, key: string, attem
 describe('rate limiter', () => {
   it('uses a bucket of 10 refilled at 10 a minute for model routes', () => {
     expect(MODEL_ROUTE_LIMIT).toEqual({ capacity: 10, refillPerMinute: 10 });
+  });
+
+  it('uses a bucket of 30 refilled at 20 a minute for the dashboard analyst, whose questions take several turns', () => {
+    expect(STUDIO_ANALYST_LIMIT).toEqual({ capacity: 30, refillPerMinute: 20 });
   });
 
   it('allows 10 then refuses', () => {

@@ -108,7 +108,7 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
 
     expect(response.status).toBe(429);
     expect(await response.json()).toEqual({ error: { message: 'Too many questions at once. Try again in a minute.' } });
-    expect(rateLimit).toHaveBeenCalledWith('studio_analyst:203.0.113.7:seller', { capacity: 10, refillPerMinute: 10 });
+    expect(rateLimit).toHaveBeenCalledWith('studio_analyst:203.0.113.7:seller', { capacity: 30, refillPerMinute: 20 });
     expect(createClaude).not.toHaveBeenCalled();
 
     await POST(await request(turn, { headers: { 'x-real-ip': '198.51.100.4' } }));

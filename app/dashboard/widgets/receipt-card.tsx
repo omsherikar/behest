@@ -8,7 +8,7 @@
 // follows the page's filters, so selecting a purchase in a decision ledger on the same page shows
 // that purchase's receipt.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { AgWidgetDataFormat, AgWidgetParams } from 'ag-studio';
 import {
   decodeReceipt,
@@ -20,7 +20,7 @@ import {
 } from '@/lib/dashboard/receipt';
 import { Cart } from '@/lib/domain/cart';
 import { WIDGET_FIELDS } from '../studio/fields';
-import { asDate, findFields, WidgetMessage } from './shared';
+import { asDate, findFields, LoadFailed, MissingFields, useWidgetLoad, WidgetMessage } from './shared';
 
 export type ReceiptCardStyle = {
   /** Also list the claims carried under the signature (decision, rules, mandate, payment). */
@@ -38,6 +38,7 @@ type ReceiptRow = { id: string; issuedAt: Date | null; sellerSlug: string | null
 const F = WIDGET_FIELDS;
 const RECEIPT_FIELDS = [F.receiptId, F.receiptIssuedAt, F.receiptSellerSlug, F.receiptJws, F.receiptCart] as const;
 
+/** The receipts in view, newest first; null when the report lacks the receipt fields. */
 async function loadReceipts({ widgetApi }: AgWidgetParams<ReceiptCardDef>): Promise<ReceiptRow[] | null> {
   const f = findFields(widgetApi, RECEIPT_FIELDS);
   if (!f) return null;
@@ -120,13 +121,13 @@ function StatusPill({ status }: { status: Status }) {
 
 function ClaimMark({ verified }: { verified: boolean }) {
   return verified ? (
-    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-pp-success text-white" aria-label="Verified">
+    <span aria-label="Verified" className="flex size-5 shrink-0 items-center justify-center rounded-full bg-pp-success text-white">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-3">
         <path d="m5 12.5 4.5 4.5L19 7.5" />
       </svg>
     </span>
   ) : (
-    <span className="size-5 shrink-0 rounded-full border-2 border-dashed border-pp-border" aria-label="Not verified" />
+    <span aria-label="Not verified" className="size-5 shrink-0 rounded-full border-2 border-dashed border-pp-border" />
   );
 }
 
@@ -167,31 +168,13 @@ function PagerButton({ label, disabled, onClick, children }: { label: string; di
 // --- Widget -----------------------------------------------------------------------
 
 export function ReceiptCardWidget(params: AgWidgetParams<ReceiptCardDef>) {
-  const [receipts, setReceipts] = useState<ReceiptRow[] | null | undefined>(undefined);
+  const load = useWidgetLoad(params, loadReceipts);
+  const receipts = load.status === 'loaded' ? load.value : null;
   const [position, setPosition] = useState(0);
   // Verifier answers by receipt id and attempt, so "Verify again" asks afresh.
   const [answers, setAnswers] = useState<Record<string, Verification>>({});
   const [attempt, setAttempt] = useState(0);
-  const loaded = useRef(false);
   const showSignedClaims = params.format?.style?.showSignedClaims !== false;
-
-  useEffect(() => {
-    let stale = false;
-    params.widgetApi.setDisplayState('loading', { prominent: !loaded.current });
-    loadReceipts(params)
-      .then((rows) => {
-        if (stale) return;
-        loaded.current = true;
-        setReceipts(rows);
-        params.widgetApi.setDisplayState('displayed');
-      })
-      .catch(() => {
-        if (!stale) params.widgetApi.setDisplayState('noData');
-      });
-    return () => {
-      stale = true;
-    };
-  }, [params]);
 
   const index = receipts ? Math.min(position, Math.max(receipts.length - 1, 0)) : 0;
   const receipt = receipts?.[index];
@@ -207,8 +190,10 @@ export function ReceiptCardWidget(params: AgWidgetParams<ReceiptCardDef>) {
     return () => controller.abort();
   }, [receipt, answerKey, answers]);
 
-  if (receipts === undefined) return null;
-  if (receipts === null || !receipt) {
+  if (load.status === 'loading') return null;
+  if (load.status === 'failed') return <LoadFailed />;
+  if (receipts === null) return <MissingFields widget="receipt card" />;
+  if (!receipt) {
     return (
       <WidgetMessage title="No receipts in view">
         A receipt is issued for every paid purchase. Select a paid purchase in the ledger, or clear the filters.

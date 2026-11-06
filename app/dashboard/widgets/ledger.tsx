@@ -6,7 +6,7 @@
 // shows that purchase's receipt). Cross-filters only highlight rows here, so every purchase stays
 // in reach. The Columns data mapping adds or removes columns.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import {
   studioGridTheme,
   type AgWidgetDataFormat,
@@ -25,7 +25,7 @@ import {
 import { AgGridProvider, AgGridReact, type CustomCellRendererProps } from 'ag-grid-react';
 import type { Verdict } from '@/lib/domain/verdict';
 import { WIDGET_FIELDS } from '../studio/fields';
-import { findFields, isVerdict, VerdictChip } from './shared';
+import { findFields, isVerdict, LoadFailed, MissingFields, useWidgetLoad, VerdictChip } from './shared';
 
 export type LedgerStyle = {
   /** Show the rules that asked or blocked each purchase. */
@@ -121,6 +121,9 @@ async function loadLedger(params: AgWidgetParams<LedgerDef>): Promise<Ledger | n
   return { columns, rows, highlighted, hasReasons: r !== null };
 }
 
+// Studio shows its own "no data" overlay when no purchase is in view.
+const noPurchases = (ledger: Ledger | null) => ledger !== null && ledger.rows.length === 0;
+
 function VerdictCell({ data }: CustomCellRendererProps<LedgerRow>) {
   return data ? <VerdictChip verdict={data.verdict} /> : null;
 }
@@ -178,29 +181,10 @@ function VerdictMix({ rows }: { rows: LedgerRow[] }) {
 
 export function LedgerWidget(params: AgWidgetParams<LedgerDef>) {
   const { widgetApi, format } = params;
-  const [ledger, setLedger] = useState<Ledger | null>(null);
-  const loaded = useRef(false);
+  const load = useWidgetLoad(params, loadLedger, noPurchases);
+  const ledger = load.status === 'loaded' ? load.value : null;
   const showReasons = format?.style?.showReasons !== false && ledger?.hasReasons !== false;
   const showVerdictMix = format?.style?.showVerdictMix !== false;
-
-  // Studio passes new params whenever the mapping, the filters or the data change.
-  useEffect(() => {
-    let stale = false;
-    params.widgetApi.setDisplayState('loading', { prominent: !loaded.current });
-    loadLedger(params)
-      .then((next) => {
-        if (stale) return;
-        loaded.current = true;
-        setLedger(next);
-        params.widgetApi.setDisplayState(next && next.rows.length > 0 ? 'displayed' : 'noData');
-      })
-      .catch(() => {
-        if (!stale) params.widgetApi.setDisplayState('noData');
-      });
-    return () => {
-      stale = true;
-    };
-  }, [params]);
 
   const idField = useMemo(() => findFields(widgetApi, [F.purchaseId])?.[F.purchaseId], [widgetApi]);
   const highlighted = ledger?.highlighted ?? null;
@@ -253,7 +237,10 @@ export function LedgerWidget(params: AgWidgetParams<LedgerDef>) {
     });
   };
 
-  if (!ledger || ledger.rows.length === 0) return null;
+  if (load.status === 'loading') return null;
+  if (load.status === 'failed') return <LoadFailed />;
+  if (!ledger) return <MissingFields widget="decision ledger" />;
+  if (ledger.rows.length === 0) return null;
   return (
     <div className="flex h-full flex-col px-2 pb-2 font-paypal">
       {showVerdictMix && <VerdictMix rows={ledger.rows} />}

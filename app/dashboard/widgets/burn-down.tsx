@@ -6,11 +6,11 @@
 // top is money already captured. It reads the Budget this period and Budget steps tables
 // (../studio/data.ts) and ignores page filters: a budget is a fact about the mandate.
 
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useState, type PointerEvent } from 'react';
 import type { AgWidgetDataFormat, AgWidgetParams } from 'ag-studio';
 import { formatUsd } from '@/lib/domain/money';
 import { WIDGET_FIELDS } from '../studio/fields';
-import { asDate, findFields, toCents, WidgetMessage } from './shared';
+import { asDate, findFields, LoadFailed, MissingFields, toCents, useWidgetLoad, WidgetMessage } from './shared';
 
 export type BurnDownStyle = {
   /** Draw the even-pace line from the full budget at the start to nothing at the end. */
@@ -50,7 +50,11 @@ const BUDGET_FIELDS = [
 const STEP_FIELDS = [F.stepMandateId, F.stepAt, F.stepSpent, F.stepInFlight] as const;
 const UNFILTERED = { filter: false, crossFilter: 'none' } as const;
 
-async function loadBurnDown({ widgetApi }: AgWidgetParams<BurnDownDef>): Promise<BurnData | null> {
+/**
+ * The newest active mandate's budget and its steps; 'no-mandate' when no mandate is active; null
+ * when the report lacks the budget fields.
+ */
+async function loadBurnDown({ widgetApi }: AgWidgetParams<BurnDownDef>): Promise<BurnData | 'no-mandate' | null> {
   const f = findFields(widgetApi, [...BUDGET_FIELDS, ...STEP_FIELDS]);
   if (!f) return null;
   const [budgets, steps] = await Promise.all([
@@ -66,7 +70,7 @@ async function loadBurnDown({ widgetApi }: AgWidgetParams<BurnDownDef>): Promise
 
   const row = budgets.results.rows[0];
   const start = row && asDate(row[f[F.budgetPeriodStart].key]);
-  if (!row || !start) return null;
+  if (!row || !start) return 'no-mandate';
   const budget: Budget = {
     mandateId: String(row[f[F.budgetMandateId].key]),
     period: String(row[f[F.budgetPeriod].key]),
@@ -302,29 +306,10 @@ function Legend({ budget, showPace }: { budget: Budget; showPace: boolean }) {
 }
 
 export function BurnDownWidget(params: AgWidgetParams<BurnDownDef>) {
-  const [data, setData] = useState<BurnData | null | undefined>(undefined);
+  const load = useWidgetLoad(params, loadBurnDown);
   const [chart, setChart] = useState<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const loaded = useRef(false);
   const showPace = params.format?.style?.showPace !== false;
-
-  useEffect(() => {
-    let stale = false;
-    params.widgetApi.setDisplayState('loading', { prominent: !loaded.current });
-    loadBurnDown(params)
-      .then((next) => {
-        if (stale) return;
-        loaded.current = true;
-        setData(next);
-        params.widgetApi.setDisplayState('displayed');
-      })
-      .catch(() => {
-        if (!stale) params.widgetApi.setDisplayState('noData');
-      });
-    return () => {
-      stale = true;
-    };
-  }, [params]);
 
   useEffect(() => {
     if (!chart) return;
@@ -335,8 +320,11 @@ export function BurnDownWidget(params: AgWidgetParams<BurnDownDef>) {
     return () => observer.disconnect();
   }, [chart]);
 
-  if (data === undefined) return null;
-  if (data === null) {
+  if (load.status === 'loading') return null;
+  if (load.status === 'failed') return <LoadFailed />;
+  const data = load.value;
+  if (data === null) return <MissingFields widget="budget burn-down" />;
+  if (data === 'no-mandate') {
     return (
       <WidgetMessage title="No active mandate">
         The burn-down shows a buyer&apos;s budget for the current period once they sign a mandate.

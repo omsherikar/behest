@@ -1,5 +1,5 @@
 {
-  "id": "02c8a338-9ceb-4c97-86c3-4f4cad7ebc0c",
+  "id": "cc103b37-0643-421f-a4b5-c224d823ff38",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -226,7 +226,29 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "jobs_status_run_at_idx": {
+          "name": "jobs_status_run_at_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "run_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -336,7 +358,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "llm_calls_created_at_idx": {
+          "name": "llm_calls_created_at_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -771,7 +809,29 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "purchase_events_purchase_seq_idx": {
+          "name": "purchase_events_purchase_seq_idx",
+          "columns": [
+            {
+              "expression": "purchase_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "purchase_events_purchase_id_purchases_id_fk": {
           "name": "purchase_events_purchase_id_purchases_id_fk",
@@ -959,7 +1019,44 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "purchases_buyer_created_idx": {
+          "name": "purchases_buyer_created_idx",
+          "columns": [
+            {
+              "expression": "buyer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "purchases_paypal_capture_id_idx": {
+          "name": "purchases_paypal_capture_id_idx",
+          "columns": [
+            {
+              "expression": "paypal_capture_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "purchases_buyer_id_buyers_id_fk": {
           "name": "purchases_buyer_id_buyers_id_fk",
@@ -1002,7 +1099,15 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "purchases_paypal_order_id_unique": {
+          "name": "purchases_paypal_order_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "paypal_order_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

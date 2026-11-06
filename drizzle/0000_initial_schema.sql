@@ -141,7 +141,8 @@ CREATE TABLE "purchases" (
 	"approve_url" text,
 	"captured_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "purchases_paypal_order_id_unique" UNIQUE("paypal_order_id")
 );
 --> statement-breakpoint
 CREATE TABLE "receipts" (
@@ -222,5 +223,10 @@ ALTER TABLE "receipts" ADD CONSTRAINT "receipts_purchase_id_purchases_id_fk" FOR
 ALTER TABLE "refunds" ADD CONSTRAINT "refunds_purchase_id_purchases_id_fk" FOREIGN KEY ("purchase_id") REFERENCES "public"."purchases"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "seller_orders" ADD CONSTRAINT "seller_orders_seller_id_sellers_id_fk" FOREIGN KEY ("seller_id") REFERENCES "public"."sellers"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "wallets" ADD CONSTRAINT "wallets_buyer_id_buyers_id_fk" FOREIGN KEY ("buyer_id") REFERENCES "public"."buyers"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "jobs_status_run_at_idx" ON "jobs" USING btree ("status","run_at");--> statement-breakpoint
+CREATE INDEX "llm_calls_created_at_idx" ON "llm_calls" USING btree ("created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "mandates_one_active_per_buyer" ON "mandates" USING btree ("buyer_id") WHERE "mandates"."status" = 'active';--> statement-breakpoint
+CREATE INDEX "purchase_events_purchase_seq_idx" ON "purchase_events" USING btree ("purchase_id","seq");--> statement-breakpoint
+CREATE INDEX "purchases_buyer_created_idx" ON "purchases" USING btree ("buyer_id","created_at");--> statement-breakpoint
+CREATE INDEX "purchases_paypal_capture_id_idx" ON "purchases" USING btree ("paypal_capture_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "seller_orders_accepted_receipt_unique" ON "seller_orders" USING btree ("receipt_id","seller_id") WHERE "seller_orders"."status" = 'accepted';

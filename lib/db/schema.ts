@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
+  index,
   integer,
   jsonb,
   numeric,
@@ -152,61 +153,72 @@ export type StoredIntentResult = {
   reasons: string[];
 };
 
-export const purchases = pgTable('purchases', {
-  id: id(),
-  buyerId: uuid('buyer_id')
-    .notNull()
-    .references(() => buyers.id),
-  mandateId: uuid('mandate_id')
-    .notNull()
-    .references(() => mandates.id),
-  /** Null only when the proposal named a seller Behest does not know; such a purchase is blocked. */
-  sellerId: uuid('seller_id').references(() => sellers.id),
-  /** The shopping agent run that proposed this purchase, if any. */
-  runId: text('run_id'),
-  /** The buyer's request the agent was acting on. */
-  request: text('request').notNull(),
-  /** The agent's proposal exactly as received: seller slug, SKUs, quantities and its unverified rationale. */
-  proposal: jsonb('proposal').$type<PurchaseProposal>().notNull(),
-  /** The canonical cart rebuilt from the catalog. Null when the gate could not build a valid cart. */
-  cart: jsonb('cart').$type<Cart>(),
-  cartHash: text('cart_hash'),
-  totalCents: integer('total_cents'),
-  currency: currency(),
-  gateVerdict: verdict('gate_verdict').notNull(),
-  /** Details of the gate rules that did not pass, in rule order. */
-  gateReasons: jsonb('gate_reasons').$type<string[]>().notNull().default([]),
-  /** Every gate rule's outcome, in rule order. */
-  gateOutcomes: jsonb('gate_outcomes').$type<StoredRuleOutcome[]>().notNull().default([]),
-  rulesetVersion: text('ruleset_version').notNull(),
-  /** Null when the intent check did not run (the gate blocked). */
-  intent: jsonb('intent').$type<StoredIntentResult>(),
-  /** The gate verdict after the intent check tightened it. Null until the intent check has run or been skipped. */
-  finalVerdict: verdict('final_verdict'),
-  /** Who approved the payment: the policy for ALLOW, the buyer for ASK. Null until approved. */
-  approver: approver('approver'),
-  status: purchaseStatus('status').notNull().default('proposed'),
-  paypalOrderId: text('paypal_order_id'),
-  paypalCaptureId: text('paypal_capture_id'),
-  /** The PayPal link the buyer opens to approve an ASK purchase. */
-  approveUrl: text('approve_url'),
-  capturedAt: timestamp('captured_at', { withTimezone: true }),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const purchases = pgTable(
+  'purchases',
+  {
+    id: id(),
+    buyerId: uuid('buyer_id')
+      .notNull()
+      .references(() => buyers.id),
+    mandateId: uuid('mandate_id')
+      .notNull()
+      .references(() => mandates.id),
+    /** Null only when the proposal named a seller Behest does not know; such a purchase is blocked. */
+    sellerId: uuid('seller_id').references(() => sellers.id),
+    /** The shopping agent run that proposed this purchase, if any. */
+    runId: text('run_id'),
+    /** The buyer's request the agent was acting on. */
+    request: text('request').notNull(),
+    /** The agent's proposal exactly as received: seller slug, SKUs, quantities and its unverified rationale. */
+    proposal: jsonb('proposal').$type<PurchaseProposal>().notNull(),
+    /** The canonical cart rebuilt from the catalog. Null when the gate could not build a valid cart. */
+    cart: jsonb('cart').$type<Cart>(),
+    cartHash: text('cart_hash'),
+    totalCents: integer('total_cents'),
+    currency: currency(),
+    gateVerdict: verdict('gate_verdict').notNull(),
+    /** Details of the gate rules that did not pass, in rule order. */
+    gateReasons: jsonb('gate_reasons').$type<string[]>().notNull().default([]),
+    /** Every gate rule's outcome, in rule order. */
+    gateOutcomes: jsonb('gate_outcomes').$type<StoredRuleOutcome[]>().notNull().default([]),
+    rulesetVersion: text('ruleset_version').notNull(),
+    /** Null when the intent check did not run (the gate blocked). */
+    intent: jsonb('intent').$type<StoredIntentResult>(),
+    /** The gate verdict after the intent check tightened it. Null until the intent check has run or been skipped. */
+    finalVerdict: verdict('final_verdict'),
+    /** Who approved the payment: the policy for ALLOW, the buyer for ASK. Null until approved. */
+    approver: approver('approver'),
+    status: purchaseStatus('status').notNull().default('proposed'),
+    paypalOrderId: text('paypal_order_id').unique(),
+    paypalCaptureId: text('paypal_capture_id'),
+    /** The PayPal link the buyer opens to approve an ASK purchase. */
+    approveUrl: text('approve_url'),
+    capturedAt: timestamp('captured_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('purchases_buyer_created_idx').on(t.buyerId, t.createdAt),
+    index('purchases_paypal_capture_id_idx').on(t.paypalCaptureId),
+  ],
+);
 
 /** Append-only log of a purchase's transitions and agent steps. Rows are never updated or deleted. */
-export const purchaseEvents = pgTable('purchase_events', {
-  id: id(),
-  /** Insertion order. Timestamps alone can tie inside one transaction. */
-  seq: bigint('seq', { mode: 'number' }).notNull().generatedAlwaysAsIdentity(),
-  purchaseId: uuid('purchase_id')
-    .notNull()
-    .references(() => purchases.id),
-  kind: text('kind').notNull(),
-  data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
-  createdAt: createdAt(),
-});
+export const purchaseEvents = pgTable(
+  'purchase_events',
+  {
+    id: id(),
+    /** Insertion order. Timestamps alone can tie inside one transaction. */
+    seq: bigint('seq', { mode: 'number' }).notNull().generatedAlwaysAsIdentity(),
+    purchaseId: uuid('purchase_id')
+      .notNull()
+      .references(() => purchases.id),
+    kind: text('kind').notNull(),
+    data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [index('purchase_events_purchase_seq_idx').on(t.purchaseId, t.seq)],
+);
 
 // Receipts and seller orders
 
@@ -341,34 +353,42 @@ export const webhookEvents = pgTable('webhook_events', {
 });
 
 /** One row per Claude call, with tokens and estimated cost. The daily spend cap sums `cost_usd`. */
-export const llmCalls = pgTable('llm_calls', {
-  id: id(),
-  route: text('route').notNull(),
-  model: text('model').notNull(),
-  effort: text('effort').notNull(),
-  inputTokens: integer('input_tokens').notNull().default(0),
-  outputTokens: integer('output_tokens').notNull().default(0),
-  cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
-  cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
-  costUsd: numeric('cost_usd', { precision: 10, scale: 6, mode: 'number' }).notNull().default(0),
-  stopReason: text('stop_reason'),
-  /** Anthropic's request id, for support and log correlation. */
-  requestId: text('request_id'),
-  latencyMs: integer('latency_ms'),
-  ok: boolean('ok').notNull(),
-  error: text('error'),
-  createdAt: createdAt(),
-});
+export const llmCalls = pgTable(
+  'llm_calls',
+  {
+    id: id(),
+    route: text('route').notNull(),
+    model: text('model').notNull(),
+    effort: text('effort').notNull(),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+    cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+    costUsd: numeric('cost_usd', { precision: 10, scale: 6, mode: 'number' }).notNull().default(0),
+    stopReason: text('stop_reason'),
+    /** Anthropic's request id, for support and log correlation. */
+    requestId: text('request_id'),
+    latencyMs: integer('latency_ms'),
+    ok: boolean('ok').notNull(),
+    error: text('error'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('llm_calls_created_at_idx').on(t.createdAt)],
+);
 
 export const jobStatus = pgEnum('job_status', ['queued', 'running', 'done', 'dead']);
 
-export const jobs = pgTable('jobs', {
-  id: id(),
-  kind: text('kind').notNull(),
-  payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
-  status: jobStatus('status').notNull().default('queued'),
-  runAt: timestamp('run_at', { withTimezone: true }).notNull().defaultNow(),
-  attempts: integer('attempts').notNull().default(0),
-  lastError: text('last_error'),
-  createdAt: createdAt(),
-});
+export const jobs = pgTable(
+  'jobs',
+  {
+    id: id(),
+    kind: text('kind').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+    status: jobStatus('status').notNull().default('queued'),
+    runAt: timestamp('run_at', { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('jobs_status_run_at_idx').on(t.status, t.runAt)],
+);

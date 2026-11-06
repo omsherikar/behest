@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import { buyers, mandates, products, purchases, sellerOrders, sellers, webhookEvents } from '@/lib/db/schema';
@@ -199,4 +199,35 @@ it('allows an active mandate alongside a revoked one', async () => {
   await db.insert(mandates).values(mandateRow(buyer.id, 'revoked'));
   await db.insert(mandates).values(mandateRow(buyer.id, 'active'));
   expect(await db.select().from(mandates)).toHaveLength(2);
+});
+
+it('rejects a duplicate PayPal order id but allows many purchases without one', async () => {
+  const db = await createTestDb();
+  const parties = await seedParties(db);
+  await db.insert(purchases).values([purchaseRow(parties), purchaseRow(parties)]);
+  await db.insert(purchases).values({ ...purchaseRow(parties), paypalOrderId: '5O190127TN364715T' });
+  await expect(
+    db
+      .insert(purchases)
+      .values({ ...purchaseRow(parties), paypalOrderId: '5O190127TN364715T' })
+      .execute(),
+  ).rejects.toMatchObject(UNIQUE_VIOLATION);
+});
+
+it('indexes the lookups the purchase flow, job worker and spend cap run', async () => {
+  const db = await createTestDb();
+  const result = (await db.execute(sql`select indexdef from pg_indexes where schemaname = 'public'`)) as {
+    rows: { indexdef: string }[];
+  };
+  const defs = result.rows.map((r) => r.indexdef.replace(/^.* ON public\./, ''));
+  expect(defs).toEqual(
+    expect.arrayContaining([
+      'purchases USING btree (buyer_id, created_at)',
+      'purchases USING btree (paypal_order_id)',
+      'purchases USING btree (paypal_capture_id)',
+      'purchase_events USING btree (purchase_id, seq)',
+      'jobs USING btree (status, run_at)',
+      'llm_calls USING btree (created_at)',
+    ]),
+  );
 });

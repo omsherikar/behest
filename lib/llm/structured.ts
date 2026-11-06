@@ -139,6 +139,22 @@ function refusalDetail(details: BetaRefusalStopDetails | null): string | undefin
 }
 
 /**
+ * The failure a reply's stop reason means whatever the reply holds: the model refused, or the reply
+ * was cut off. Null for any other stop reason.
+ */
+export function stopFailure(
+  message: Pick<BetaMessage, 'stop_reason' | 'stop_details'>,
+): { error: Extract<LlmFailure, 'refusal' | 'max_tokens'>; detail?: string } | null {
+  if (message.stop_reason === 'refusal') {
+    return { error: 'refusal', detail: refusalDetail(message.stop_details) };
+  }
+  if (message.stop_reason === 'max_tokens' || message.stop_reason === 'model_context_window_exceeded') {
+    return { error: 'max_tokens', detail: `The reply stopped with ${message.stop_reason}` };
+  }
+  return null;
+}
+
+/**
  * Asks the route's model for a reply matching `req.schema`, unless today's spend has reached the
  * cap, and logs the call. Every failure of the call itself is returned; only misconfiguration
  * (an override, cap or schema it cannot use) and database errors throw.
@@ -201,12 +217,8 @@ export async function callStructured<T>(
   }
 
   const outcome = ((): Outcome<T> => {
-    if (message.stop_reason === 'refusal') {
-      return { ok: false, error: 'refusal', detail: refusalDetail(message.stop_details) };
-    }
-    if (message.stop_reason === 'max_tokens' || message.stop_reason === 'model_context_window_exceeded') {
-      return { ok: false, error: 'max_tokens', detail: `The reply stopped with ${message.stop_reason}` };
-    }
+    const stopped = stopFailure(message);
+    if (stopped) return { ok: false, ...stopped };
     if (message.stop_reason !== 'end_turn') {
       return { ok: false, error: 'invalid_output', detail: `The reply stopped with ${message.stop_reason}` };
     }

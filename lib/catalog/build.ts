@@ -288,7 +288,7 @@ function rowDraft(row: CatalogRow, item: CatalogItem): ListingDraft {
     category: categoryOf(item.category) ?? 'other',
     priceCents: row.priceCents,
     stock: row.stock,
-    screening: screening(item.screening, [sourceText(row), `${title}\n${description}`]),
+    screening: screening(item.screening, [sourceText(row), skuWords(row.sku), `${title}\n${description}`]),
   };
 }
 
@@ -301,13 +301,18 @@ function fallbackDraft(row: CatalogRow): ListingDraft {
     category: 'other',
     priceCents: row.priceCents,
     stock: row.stock,
-    screening: screening({ suspicious: false, reason: null }, [sourceText(row)]),
+    screening: screening({ suspicious: false, reason: null }, [sourceText(row), skuWords(row.sku)]),
   };
 }
 
 /** The seller's name and description screened together, so a phrase split across them is still caught. */
 function sourceText(row: CatalogRow): string {
   return `${row.name}\n${row.description}`;
+}
+
+/** A SKU as words for the screen, whose phrases need spaces: `IGNORE-YOUR-BUDGET` reads as `IGNORE YOUR BUDGET`. */
+function skuWords(sku: string): string {
+  return sku.replace(/[-_.]+/g, ' ');
 }
 
 /**
@@ -325,7 +330,8 @@ function photoDraft(photo: ListingPhoto, index: number, item: PhotoItem, claimed
     category: categoryOf(item.category) ?? 'other',
     priceCents: photo.priceCents,
     stock: photo.stock ?? null,
-    screening: screening(item.screening, [`${title}\n${description}`]),
+    // The SKU the model proposed is screened even when it is replaced: it may spell out text read off the photo.
+    screening: screening(item.screening, [`${title}\n${description}`, skuWords(item.sku)]),
   };
 }
 

@@ -341,8 +341,8 @@ describe('cleaning what the reply writes', () => {
   it('puts the title on one line without hidden characters, cut to 120 code points, and cuts the description at 2000', async () => {
     const reply = replyWith([
       item('SAF-1G', {
-        title: `Saffron\n​threads ${BLOSSOM.repeat(200)}`,
-        description: `‮${'a'.repeat(2500)}`,
+        title: `Saffron\n\u200Bthreads ${BLOSSOM.repeat(200)}`,
+        description: `\u202E${'a'.repeat(2500)}`,
       }),
     ]);
 
@@ -354,7 +354,7 @@ describe('cleaning what the reply writes', () => {
   });
 
   it('falls back to the row name and description when the reply leaves them blank', async () => {
-    const reply = replyWith([item('TUR-100', { title: '​ \n', description: '  ' })]);
+    const reply = replyWith([item('TUR-100', { title: '\u200B \n', description: '  ' })]);
 
     const [draft] = await draftsOf([reply], { rows: raviRow('TUR-100') });
 

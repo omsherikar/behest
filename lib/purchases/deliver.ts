@@ -11,12 +11,21 @@ import { describeFailure, payoutSeller } from './settle';
 // the merchant of record and holds the money.
 //
 // A purchase is delivered once. A seller spends a receipt id on the first order it accepts and
-// rejects any later order with that receipt as replayed, and such a rejection must never refund an
-// order the seller is filling. completeCapture delivers only from the call that recorded the capture.
+// rejects any later order with that receipt as replayed, or as expired once the receipt has aged
+// out, and such a rejection must never refund an order the seller is filling. completeCapture
+// delivers only from the call that recorded the capture, and a rejection that may follow an earlier
+// acceptance is never refunded.
 
 type DeliverDeps = Pick<PurchaseDeps, 'db' | 'paypal' | 'sellers' | 'now'>;
 type SellerAnswer = Awaited<ReturnType<DeliverDeps['sellers']['acceptAgentOrder']>>;
 type RefundAnswer = Awaited<ReturnType<PaypalPort['refundCapture']>>;
+
+/**
+ * Rejections a seller also gives when an order it has already accepted is delivered again: the
+ * receipt is spent (`replayed`) or has aged out (`expired`). They do not prove the seller turned the
+ * order down.
+ */
+const AMBIGUOUS_REJECTIONS: ReadonlySet<string> = new Set(['replayed', 'expired']);
 
 /** Refund statuses with which PayPal has returned, or is returning, the buyer's money. */
 const REFUNDING: ReadonlySet<string> = new Set(['COMPLETED', 'PENDING']);
@@ -24,10 +33,11 @@ const REFUNDING: ReadonlySet<string> = new Set(['COMPLETED', 'PENDING']);
 /**
  * Presents a captured purchase's cart and receipt to its seller. Accepted: logs `seller_accepted`,
  * moves the purchase to `accepted` and pays the seller with payoutSeller, which queues its own poll.
- * Rejected: refunds the buyer (see refundRejectedOrder). If the seller cannot be asked or its answer
- * is lost, the seller may have accepted, so nothing is refunded or paid: a `seller_unknown` event is
- * logged and the purchase stays `captured` for an operator. A purchase no longer `captured` is left
- * alone. Throws for a purchase with no receipt.
+ * Rejected: refunds the buyer (see refundRejectedOrder), unless the reason is one a seller also
+ * gives an order it accepted earlier. If the seller cannot be asked or its answer is lost, or its
+ * rejection is such an ambiguous one, the seller may have accepted, so nothing is refunded or paid: a
+ * `seller_unknown` or `seller_ambiguous` event is logged and the purchase stays `captured` for an
+ * operator. A purchase no longer `captured` is left alone. Throws for a purchase with no receipt.
  */
 export async function deliverToSeller(deps: DeliverDeps, purchaseId: string): Promise<void> {
   const { db } = deps;
@@ -61,6 +71,10 @@ export async function deliverToSeller(deps: DeliverDeps, purchaseId: string): Pr
       await transition(tx, purchaseId, 'captured', 'accepted');
     });
     await payoutSeller(deps, purchaseId);
+    return;
+  }
+  if (answer.reason !== undefined && AMBIGUOUS_REJECTIONS.has(answer.reason)) {
+    await appendEvent(db, purchaseId, 'seller_ambiguous', { reason: answer.reason });
     return;
   }
   await refundRejectedOrder(deps, purchaseId, answer.reason ?? null);

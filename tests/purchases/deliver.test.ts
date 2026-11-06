@@ -178,6 +178,28 @@ describe('deliverToSeller', () => {
     ]);
   });
 
+  it.each([
+    ['replayed', 0],
+    ['expired', 16 * 60 * 1000],
+  ])('refunds nothing when a second delivery is rejected as %s after the seller accepted the first', async (reason, later) => {
+    const { db, deps, paypal, seller, clock, purchaseId } = await setUpReceipted();
+    seller.mode = 'lose_answer';
+    await deliverToSeller(deps, purchaseId);
+    seller.mode = 'verify';
+    clock.now = new Date(clock.now.getTime() + later);
+
+    await deliverToSeller(deps, purchaseId);
+
+    expect(seller.orders).toHaveLength(2);
+    expect(paypal.callsTo('refundCapture')).toEqual([]);
+    expect(await db.select().from(refunds)).toEqual([]);
+    expect(await statusOf(db, purchaseId)).toBe('captured');
+    expect(await eventsAfterReceipt(db, purchaseId)).toEqual([
+      { kind: 'seller_unknown', data: { error: 'fetch failed', errorClass: 'TypeError' } },
+      { kind: 'seller_ambiguous', data: { reason } },
+    ]);
+  });
+
   it('does not hand over a purchase that is no longer captured', async () => {
     const { db, deps, paypal, seller, purchaseId } = await setUpReceipted();
     await db.update(purchases).set({ status: 'accepted' }).where(eq(purchases.id, purchaseId));

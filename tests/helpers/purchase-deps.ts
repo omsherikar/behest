@@ -29,12 +29,12 @@ type Order = Parameters<SellerPort['acceptAgentOrder']>[0];
 
 /**
  * A seller that checks each receipt as an outside seller would, with nothing but Behest's public
- * keys, and accepts each receipt id once. A test can make it refuse every order, or fail to answer,
- * and can run something while the seller is deciding.
+ * keys, and accepts each receipt id once. A test can make it refuse every order, fail to answer, or
+ * accept an order and lose its answer, and can run something while the seller is deciding.
  */
 export class FakeSeller implements SellerPort {
   readonly orders: Order[] = [];
-  mode: 'verify' | 'reject' | 'unreachable' = 'verify';
+  mode: 'verify' | 'reject' | 'unreachable' | 'lose_answer' = 'verify';
   whileDeciding: () => Promise<void> = async () => {};
   private readonly accepted = new Set<string>();
 
@@ -55,6 +55,7 @@ export class FakeSeller implements SellerPort {
     });
     if (!result.ok) return { status: 'rejected', reason: result.reason };
     this.accepted.add(result.payload.id);
+    if (this.mode === 'lose_answer') throw new TypeError('fetch failed');
     return { status: 'accepted' };
   }
 }

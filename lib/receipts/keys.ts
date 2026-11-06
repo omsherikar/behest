@@ -1,4 +1,4 @@
-import { createPublicKey } from 'node:crypto';
+import { createPublicKey, type KeyObject } from 'node:crypto';
 import { calculateJwkThumbprint, exportJWK, exportPKCS8, generateKeyPair, importPKCS8, type JWK } from 'jose';
 import { sha256Hex } from './canonical';
 
@@ -30,13 +30,15 @@ export async function loadSigningKey(env: {
   if (!pem) throw new Error('missing RECEIPT_SIGNING_KEY');
 
   let privateKey: CryptoKey;
+  let publicKey: KeyObject;
   try {
     privateKey = await importPKCS8(pem, ALG);
+    publicKey = createPublicKey(pem);
   } catch (cause) {
     throw new Error('RECEIPT_SIGNING_KEY is not an Ed25519 private key in PKCS8 PEM form', { cause });
   }
 
-  const publicJwk = await exportJWK(createPublicKey(pem));
+  const publicJwk = await exportJWK(publicKey);
   const kid = await keyIdOf(publicJwk);
   const givenKid = env.RECEIPT_KEY_ID;
   if (givenKid && givenKid !== kid) {

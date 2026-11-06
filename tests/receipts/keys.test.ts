@@ -108,3 +108,12 @@ it('refuses a RECEIPT_SIGNING_KEY that is not an Ed25519 PKCS8 private key', asy
     );
   }
 });
+
+it('refuses a PEM flattened onto one line with the same clear error', async () => {
+  const { pem } = await generateSigningKey();
+  for (const value of [pem.replaceAll('\n', ''), pem.replaceAll('\n', ' ')]) {
+    expect(await loadError({ RECEIPT_SIGNING_KEY: value })).toBe(
+      'RECEIPT_SIGNING_KEY is not an Ed25519 private key in PKCS8 PEM form',
+    );
+  }
+});

@@ -196,6 +196,22 @@ it('stores only the first 500 characters of an error message and never the stack
   expect((await jobRow(db, thrownString)).lastError).toBe('socket hang up');
 });
 
+it('stores a fixed message when the thrown value cannot be turned into text', async () => {
+  const db = await createTestDb();
+  const id = await enqueue(db, 'webhook', { eventId: 'WH-1' }, T);
+  const webhook: JobHandler<Deps> = async () => {
+    // No prototype, so no toString or Symbol.toPrimitive: String() on it throws a TypeError.
+    throw Object.create(null);
+  };
+
+  expect(await runDueJobs(db, handlersWith({ webhook }), deps, T)).toBe(1);
+  expect(await jobRow(db, id)).toMatchObject({
+    status: 'queued',
+    attempts: 1,
+    lastError: 'handler failed with an unprintable error',
+  });
+});
+
 it('marks a job dead when no handler is registered for its kind, and still runs the others', async () => {
   const db = await createTestDb();
   const unhandled = await enqueue(db, 'charge_retry', { purchaseId: 'pur-1' }, T);

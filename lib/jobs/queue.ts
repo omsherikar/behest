@@ -134,8 +134,15 @@ async function runJob<D>(
     .where(stillClaimed);
 }
 
-/** The thrown value's message, never its stack, cut to the first 500 characters. */
+/**
+ * The thrown value's message, never its stack, cut to the first 500 characters. A value that
+ * cannot be turned into text, such as an object without a prototype, gets a fixed message.
+ */
 function errorMessage(thrown: unknown): string {
-  const message = thrown instanceof Error ? thrown.message || thrown.name : String(thrown);
-  return message.slice(0, ERROR_MESSAGE_LIMIT);
+  try {
+    const message = thrown instanceof Error ? thrown.message || thrown.name : thrown;
+    return String(message).slice(0, ERROR_MESSAGE_LIMIT);
+  } catch {
+    return 'handler failed with an unprintable error';
+  }
 }

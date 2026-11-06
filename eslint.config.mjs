@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local tooling folders that hold other checkouts and scratch files.
+    ".worktrees/**",
+    ".superpowers/**",
+    ".data/**",
   ]),
 ]);
 

@@ -17,7 +17,7 @@ Every field is required.
 - version: always 1.
 - currency: the ISO 4217 code of the currency the buyer's amounts are in. Behest handles US dollars only, so a mandate in dollars, or one that names no currency, is "USD". When the buyer gives amounts in another currency, such as rupees or euros, write that currency's code (for example "INR") and leave every amount unconverted, in that currency's minor unit. Behest then rejects the mandate and the buyer can restate it in dollars, which is safer than an exchange rate they never saw.
 - Amounts in a USD mandate are whole numbers of cents: $60 is 6000 and $2.50 is 250.
-- budget.amountCents: the most the agent may spend in each budget period.
+- budget.amountCents: the most the agent may spend in each budget period, always an amount the buyer stated (see below for a mandate without one).
 - budget.period: "day", "week", "month" or "once". Days, weeks and months are UTC calendar periods, and a week runs Monday to Sunday. "once" is a single total that never resets.
 - perPurchaseMaxCents: any single purchase above this amount is blocked. When the buyer sets no limit for a single purchase, use the budget amount. It never exceeds the budget.
 - askAboveCents: purchases above this amount need the buyer's approval, and it is always below perPurchaseMaxCents. Null means no purchase ever needs approval because of its amount alone, so it is null only when the buyer sets no approval threshold.
@@ -48,7 +48,7 @@ The policy holds only the fields above, so some limits cannot be enforced: days 
 
 ## Missing or unclear information
 
-When the mandate says something these rules leave unclear, ask rather than guess. While a question like this is open, fill the parts of the policy it affects with the reading that allows the least, and say so in assumptions. For a seller you cannot identify, such as "Ravi", that is an empty merchants.allow list, so no seller is allowed until the buyer answers.
+When the mandate leaves out something the policy needs, or says something these rules leave unclear, ask rather than guess. A mandate with no amount, such as "buy my groceries, never electronics", gets a question such as budget_amount: never guess a budget, and never write zero, which the policy rejects. While a question like this is open, fill the parts of the policy it affects with the reading that allows the least, and say so in assumptions. For a missing amount that is a budget and a per-purchase limit of 1 cent with askAboveCents 0, in the period the buyer named or "once", so nothing can be bought without the buyer. For a seller you cannot identify, such as "Ravi", it is an empty merchants.allow list, so no seller is allowed until the buyer answers.
 
 ## Assumptions and questions
 

@@ -4,6 +4,7 @@ import { createClaude } from '@/lib/llm/client';
 import { compileMandate } from '@/lib/mandate/compile';
 import { MANDATE_SYSTEM_PROMPT } from '@/lib/mandate/prompts';
 import demoReply from '@/tests/fixtures/llm/mandate_compile/demo.json';
+import noAmountReply from '@/tests/fixtures/llm/mandate_compile/no-amount.json';
 import nonUsdReply from '@/tests/fixtures/llm/mandate_compile/non-usd.json';
 import refusalReply from '@/tests/fixtures/llm/mandate_compile/refusal.json';
 import unknownSellerReply from '@/tests/fixtures/llm/mandate_compile/unknown-seller.json';
@@ -151,6 +152,35 @@ describe('a mandate Behest cannot honour is never compiled silently', () => {
       policy: { ...demoPolicy, merchants: { allow: [], deny: [] } },
       readback: expect.arrayContaining(['No seller is allowed.']),
       questions: [{ id: 'ravi_seller', question: expect.stringContaining('"Ravi"'), options: [] }],
+    });
+  });
+
+  it('asks for an amount the mandate leaves out, and lets nothing be bought without the buyer meanwhile', async () => {
+    const { result } = await compileWith(noAmountReply, 'Buy my groceries, never electronics');
+
+    expect(result).toMatchObject({
+      ok: true,
+      policy: { budget: { amountCents: 1, period: 'once' }, perPurchaseMaxCents: 1, askAboveCents: 0 },
+      readback: expect.arrayContaining([
+        'Your agent can spend up to $0.01 in total.',
+        'Purchases over $0.00 need your approval.',
+      ]),
+      questions: [{ id: 'budget_amount', question: expect.any(String), options: [] }],
+    });
+  });
+
+  it('rejects a zero budget', async () => {
+    const { result } = await compileWith(
+      replyWithPolicy({ budget: { amountCents: 0, period: 'month' }, perPurchaseMaxCents: 0, askAboveCents: null }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      error: 'invalid_policy',
+      issues: [
+        'budget.amountCents: Too small: expected number to be >0',
+        'perPurchaseMaxCents: Too small: expected number to be >0',
+      ],
     });
   });
 

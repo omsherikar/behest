@@ -47,9 +47,11 @@ export async function POST(request: NextRequest) {
   const { text, policy, confirmToken } = body;
   if (!isConfirmToken(confirmToken, text, policy)) return error(409, 'answer the open questions first');
 
-  // Read before anything is signed, so a missing setting stores nothing.
+  // Every setting this route needs (APP_URL, the signing key and the PayPal credentials) is read
+  // before the mandate is signed, so a missing one fails the request with nothing stored.
   const base = appUrl();
   const signer = await appSigner();
+  const paypal = appPaypal();
   const db = appDb();
   const buyerId = await demoBuyerId(db);
 
@@ -67,7 +69,7 @@ export async function POST(request: NextRequest) {
 
   let setup: { id: string; approveUrl: string; customerId: string };
   try {
-    setup = await appPaypal().createSetupToken({
+    setup = await paypal.createSetupToken({
       returnUrl: `${base}/api/wallet/return`,
       cancelUrl: `${base}/buyer?wallet=cancelled`,
       description: 'Let your Behest agent pay within your mandate',

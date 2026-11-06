@@ -199,6 +199,26 @@ describe('POST /api/mandates/confirm', () => {
     expect(paypal.calls).toEqual([]);
   });
 
+  it.each([
+    ['APP_URL', () => vi.stubEnv('APP_URL', ''), /APP_URL/],
+    ['the signing key', () => vi.mocked(appSigner).mockRejectedValueOnce(new Error('missing RECEIPT_SIGNING_KEY')), /RECEIPT_SIGNING_KEY/],
+    [
+      'the PayPal credentials',
+      () =>
+        vi.mocked(appPaypal).mockImplementationOnce(() => {
+          throw new Error('PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET must be set (see .env.example)');
+        }),
+      /PAYPAL_CLIENT_ID/,
+    ],
+  ])('fails without %s before signing, so nothing is stored', async (_, unset, failure) => {
+    await addDemoBuyer();
+    unset();
+
+    await expect(POST(await request(confirmed()))).rejects.toThrow(failure);
+    expect(await db.select().from(mandates)).toEqual([]);
+    expect(await db.select().from(wallets)).toEqual([]);
+  });
+
   it('answers 404 when the buyer is gone by the time the mandate is signed', async () => {
     vi.mocked(demoBuyerId).mockResolvedValueOnce(crypto.randomUUID());
 

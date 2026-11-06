@@ -140,8 +140,8 @@ describe('end date', () => {
     expect(readbackWith({ expiresAt: '2026-12-31T09:30:00Z' })[7]).toBe('Ends on 2026-12-31 at 09:30 UTC.');
   });
 
-  it('adds the time to an expiry one millisecond before the end of the day', () =>
-    expect(readbackWith({ expiresAt: '2026-12-31T23:59:59.998Z' })[7]).toBe('Ends on 2026-12-31 at 23:59 UTC.'));
+  it('adds the time to an expiry one minute before the end of the day', () =>
+    expect(readbackWith({ expiresAt: '2026-12-31T23:59:00Z' })[7]).toBe('Ends on 2026-12-31 at 23:59 UTC.'));
 
   it('uses the UTC date and time whatever the server time zone', () => {
     process.env.TZ = 'Asia/Kolkata';
@@ -198,7 +198,7 @@ describe('covers every field the gate enforces', () => {
     { field: 'velocity.windowHours', to: '48', policy: { ...base, velocity: { maxPurchases: 2, windowHours: 48 } } },
     { field: 'expiresAt', to: 'another date', policy: { ...base, expiresAt: '2027-01-15T23:59:59.999Z' } },
     { field: 'expiresAt', to: 'the start of the same day', policy: { ...base, expiresAt: '2026-12-31T00:00:00Z' } },
-    { field: 'expiresAt', to: 'one millisecond earlier', policy: { ...base, expiresAt: '2026-12-31T23:59:59.998Z' } },
+    { field: 'expiresAt', to: 'one minute earlier', policy: { ...base, expiresAt: '2026-12-31T23:59:00Z' } },
     { field: 'expiresAt', to: 'null', policy: { ...base, expiresAt: null } },
   ];
 

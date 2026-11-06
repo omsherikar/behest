@@ -1,7 +1,9 @@
 import {
   bigint,
+  boolean,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -309,4 +311,49 @@ export const disputes = pgTable('disputes', {
   submittedAt: timestamp('submitted_at', { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
+});
+
+// Webhook events, model call log and jobs
+
+/** Verified PayPal webhook events as received, unique by PayPal's event id so each is processed once. */
+export const webhookEvents = pgTable('webhook_events', {
+  id: id(),
+  eventId: text('event_id').notNull().unique(),
+  eventType: text('event_type').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+});
+
+/** One row per Claude call, with tokens and estimated cost. The daily spend cap sums `cost_usd`. */
+export const llmCalls = pgTable('llm_calls', {
+  id: id(),
+  route: text('route').notNull(),
+  model: text('model').notNull(),
+  effort: text('effort').notNull(),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+  cacheWriteTokens: integer('cache_write_tokens').notNull().default(0),
+  costUsd: numeric('cost_usd', { precision: 10, scale: 6, mode: 'number' }).notNull().default(0),
+  stopReason: text('stop_reason'),
+  /** Anthropic's request id, for support and log correlation. */
+  requestId: text('request_id'),
+  latencyMs: integer('latency_ms'),
+  ok: boolean('ok').notNull(),
+  error: text('error'),
+  createdAt: createdAt(),
+});
+
+export const jobStatus = pgEnum('job_status', ['queued', 'running', 'done', 'dead']);
+
+export const jobs = pgTable('jobs', {
+  id: id(),
+  kind: text('kind').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+  status: jobStatus('status').notNull().default('queued'),
+  runAt: timestamp('run_at', { withTimezone: true }).notNull().defaultNow(),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  createdAt: createdAt(),
 });

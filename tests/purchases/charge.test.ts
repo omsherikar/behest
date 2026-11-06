@@ -237,6 +237,19 @@ describe('chargeAllowed', () => {
     expect(await eventsOf(db, purchaseId)).toEqual([]);
   });
 
+  it('charges, receipts, delivers and pays once when two calls overlap', async () => {
+    const { db, deps, paypal, seller, purchaseId } = await setUp();
+
+    await Promise.all([chargeAllowed(deps, purchaseId), chargeAllowed(deps, purchaseId)]);
+
+    expect(paypal.callsTo('chargeSavedWallet')).toHaveLength(1);
+    expect(paypal.captures).toHaveLength(1);
+    expect(await db.select().from(receipts)).toHaveLength(1);
+    expect(seller.orders).toHaveLength(1);
+    expect(paypal.payouts).toHaveLength(1);
+    expect(await statusOf(db, purchaseId)).toBe('accepted');
+  });
+
   it('returns where the purchase stands, charging nothing more, when called again', async () => {
     const { deps, paypal, seller, purchaseId } = await setUp();
     const first = await chargeAllowed(deps, purchaseId);
@@ -291,6 +304,20 @@ describe('retryCharge', () => {
     expect(seller.orders).toHaveLength(1);
     expect(paypal.payouts).toHaveLength(1);
     expect(await statusOf(db, purchaseId)).toBe('accepted');
+  });
+
+  it('captures, receipts, delivers and pays once when two replays overlap', async () => {
+    const { db, deps, paypal, seller, purchaseId } = await setUpUnknownCharge({ lost: true });
+
+    expect(await Promise.all([retryCharge(deps, purchaseId), retryCharge(deps, purchaseId)])).toEqual(['done', 'done']);
+
+    // Both replays asked PayPal, so they truly overlapped; PayPal answered both from the one charge.
+    expect(chargeRequestIds(paypal)).toEqual(Array(4).fill(chargeRequestId(purchaseId)));
+    expect(paypal.captures).toHaveLength(1);
+    expect(await db.select().from(receipts)).toHaveLength(1);
+    expect(seller.orders).toHaveLength(1);
+    expect(paypal.payouts).toHaveLength(1);
+    expect(await stepsOf(db, purchaseId)).toEqual(['charge', 'charge_unknown', 'capture', 'receipt', 'seller_accepted']);
   });
 
   it('charges once when PayPal never received the first two attempts', async () => {

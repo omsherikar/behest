@@ -1,10 +1,52 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import Anthropic from '@anthropic-ai/sdk';
 import { and, gte, lt, sum } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import { llmCalls } from '@/lib/db/schema';
+import { LLM_ROUTES, ROUTE_HEADER } from './routes';
 
 // Every model call goes through lib/llm. Each one is logged to llm_calls with its estimated cost, and
 // no call starts once the day's logged cost reaches LLM_DAILY_CAP_USD.
+
+/** Where LLM_STUB finds the reply recorded for each route: `<route>/stub.json`. */
+const STUB_DIR = path.join('tests', 'fixtures', 'llm');
+
+function apiErrorResponse(status: number, type: string, message: string): Response {
+  return Response.json({ type: 'error', error: { type, message } }, { status });
+}
+
+/** A `fetch` that answers each request with the reply recorded for the route its header names. */
+const replayRecordedReply: typeof fetch = async (input, init) => {
+  const route = new Request(input, init).headers.get(ROUTE_HEADER);
+  if (!route || !(LLM_ROUTES as string[]).includes(route)) {
+    return apiErrorResponse(400, 'invalid_request_error', `The ${ROUTE_HEADER} header names no known route`);
+  }
+  const file = path.join(STUB_DIR, route, 'stub.json');
+  let body: string;
+  try {
+    body = await readFile(path.join(process.cwd(), file), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    return apiErrorResponse(404, 'not_found_error', `No recorded reply at ${file}`);
+  }
+  return new Response(body, { headers: { 'content-type': 'application/json', 'request-id': 'stub' } });
+};
+
+/**
+ * The Claude client. It reads ANTHROPIC_API_KEY from the environment. With LLM_STUB=1 it sends
+ * nothing and replays recorded replies instead, so the app can be exercised without spending; that
+ * is refused in production.
+ */
+export function createClaude(opts: { fetch?: typeof fetch } = {}): Anthropic {
+  if (process.env.LLM_STUB === '1') {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('LLM_STUB replays recorded replies and must not be set in production');
+    }
+    return new Anthropic({ apiKey: 'stub', fetch: replayRecordedReply });
+  }
+  return new Anthropic({ fetch: opts.fetch });
+}
 
 export interface LlmDeps {
   db: Db;

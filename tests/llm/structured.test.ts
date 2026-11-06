@@ -1,9 +1,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages';
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { llmCalls } from '@/lib/db/schema';
-import { recordCall } from '@/lib/llm/client';
+import { createClaude, recordCall } from '@/lib/llm/client';
 import { LLM_ROUTES, type LlmRoute } from '@/lib/llm/routes';
 import { callStructured } from '@/lib/llm/structured';
 import { fakeClaude, messageJson } from '@/tests/helpers/fake-claude';
@@ -21,6 +21,10 @@ const SERVER_ERROR = {
   headers: { 'retry-after-ms': '0' },
   body: { type: 'error', error: { type: 'api_error', message: 'Internal server error' } },
 };
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 async function setup(
   responses: object[],
@@ -219,4 +223,47 @@ it('honours CLAUDE_MODEL_ and CLAUDE_EFFORT_ overrides', async () => {
   expect(await db.select().from(llmCalls)).toEqual([
     expect.objectContaining({ model: 'claude-sonnet-5-5', effort: 'low', costUsd: 0.007 }),
   ]);
+});
+
+it('replays the route stub when LLM_STUB=1 and refuses to in production', async () => {
+  vi.stubEnv('LLM_STUB', '1');
+  const db = await createTestDb();
+  const deps = { db, claude: createClaude(), now: () => NOW, env: { NODE_ENV: 'test' as const } };
+  const Intent = z.object({
+    verdict: z.enum(['consistent', 'needs_human', 'inconsistent']),
+    reasons: z.array(z.string()),
+  });
+
+  const result = await callStructured(deps, 'intent_check', { ...request, schema: Intent });
+
+  expect(result).toMatchObject({ ok: true, value: { verdict: 'consistent', reasons: [expect.any(String)] } });
+  expect(await db.select().from(llmCalls)).toEqual([
+    expect.objectContaining({ route: 'intent_check', ok: true, requestId: 'stub', costUsd: 0 }),
+  ]);
+
+  vi.stubEnv('NODE_ENV', 'production');
+  expect(() => createClaude()).toThrow('LLM_STUB replays recorded replies and must not be set in production');
+});
+
+it('reports a route without a recorded reply as an API error', async () => {
+  vi.stubEnv('LLM_STUB', '1');
+  const db = await createTestDb();
+  const deps = { db, claude: createClaude(), now: () => NOW, env: { NODE_ENV: 'test' as const } };
+
+  expect(await callStructured(deps, 'studio_analyst', request)).toMatchObject({
+    ok: false,
+    error: 'api_error',
+    detail: expect.stringContaining('tests/fixtures/llm/studio_analyst/stub.json'),
+  });
+});
+
+it('sends real requests through the given fetch when LLM_STUB is not set', async () => {
+  vi.stubEnv('LLM_STUB', '');
+  vi.stubEnv('ANTHROPIC_API_KEY', 'test');
+  const db = await createTestDb();
+  const fake = fakeClaude([messageJson({ json: { answer: 'yes' } })]);
+  const deps = { db, claude: createClaude({ fetch: fake.fetch }), now: () => NOW, env: { NODE_ENV: 'test' as const } };
+
+  expect(await callStructured(deps, 'mandate_compile', request)).toMatchObject({ ok: true, value: { answer: 'yes' } });
+  expect(fake.requests).toHaveLength(1);
 });

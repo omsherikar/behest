@@ -78,6 +78,9 @@ const textBlock = (text: string) => ({ type: 'text', text, citations: null });
 /** A tool call the model makes. */
 export type FakeToolUse = { id: string; name: string; input: unknown };
 
+const toolUseBlocks = (toolUses: FakeToolUse[]) =>
+  toolUses.map(({ id, name, input }) => ({ type: 'tool_use', id, name, input }));
+
 /**
  * A Messages API response body from `model`. `json` is serialized into the text block; `text` is
  * used as is. Without either the reply has no text. `toolUses` follow the text as `tool_use`
@@ -85,9 +88,9 @@ export type FakeToolUse = { id: string; name: string; input: unknown };
  * zero tokens.
  *
  * `fallbackFrom` makes it a reply rescued by server-side fallback: the declining model's `text`
- * (if any), then a `fallback` block handing over to `model`, then the reply. Unless `usage` gives
- * `iterations`, they are the declining model's attempt with no tokens and a `fallback_message`
- * attempt by `model` with the top-level tokens.
+ * and `toolUses` (if any), then a `fallback` block handing over to `model`, then the reply. Unless
+ * `usage` gives `iterations`, they are the declining model's attempt with no tokens and a
+ * `fallback_message` attempt by `model` with the top-level tokens.
  */
 export function messageJson({
   text,
@@ -104,19 +107,17 @@ export function messageJson({
   stop_reason?: BetaStopReason;
   usage?: Partial<Usage> & { iterations?: object[] };
   model?: string;
-  fallbackFrom?: { model: string; text?: string };
+  fallbackFrom?: { model: string; text?: string; toolUses?: FakeToolUse[] };
 } = {}) {
   const body = text ?? (json === undefined ? undefined : JSON.stringify(json));
-  const reply = [
-    ...(body === undefined ? [] : [textBlock(body)]),
-    ...toolUses.map(({ id, name, input }) => ({ type: 'tool_use', id, name, input })),
-  ];
+  const reply = [...(body === undefined ? [] : [textBlock(body)]), ...toolUseBlocks(toolUses)];
   const { iterations, ...counts } = usage ?? {};
   const tokens = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, ...counts };
 
   const content = fallbackFrom
     ? [
         ...(fallbackFrom.text === undefined ? [] : [textBlock(fallbackFrom.text)]),
+        ...toolUseBlocks(fallbackFrom.toolUses ?? []),
         {
           type: 'fallback',
           from: { model: fallbackFrom.model },

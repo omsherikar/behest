@@ -10,7 +10,9 @@ export type { PurchaseStatus };
 export const ALLOWED: Readonly<Record<PurchaseStatus, readonly PurchaseStatus[]>> = {
   proposed: ['blocked', 'charging', 'awaiting_approval'],
   awaiting_approval: ['charging', 'cancelled'],
-  charging: ['captured', 'failed'],
+  // Back to `awaiting_approval` only when PayPal refuses to capture an approval order with
+  // ORDER_NOT_APPROVED: no money moved, and the buyer can still approve the order.
+  charging: ['captured', 'failed', 'awaiting_approval'],
   captured: ['accepted', 'refunded'],
   accepted: ['settled', 'refunded'],
   settled: ['disputed', 'refunded'],

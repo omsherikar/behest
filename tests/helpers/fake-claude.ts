@@ -56,8 +56,11 @@ type Usage = {
   cache_creation_input_tokens: number;
 };
 
-/** One entry of `usage.iterations`: an attempt by one model. Token counts default to zero. */
-export function iteration(type: 'message' | 'fallback_message', model: string, tokens: Partial<Usage> = {}) {
+/**
+ * One entry of `usage.iterations`: an attempt by one model, or by a model the API does not name
+ * (`null`). Token counts default to zero.
+ */
+export function iteration(type: 'message' | 'fallback_message', model: string | null, tokens: Partial<Usage> = {}) {
   return {
     type,
     model,

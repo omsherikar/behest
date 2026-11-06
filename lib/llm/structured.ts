@@ -91,13 +91,16 @@ export type BilledUsage = {
  * The tokens and estimated cost of a reply. After a server-side fallback the top-level usage covers
  * only the model that served the reply, and `usage.iterations` lists every model's attempt, so each
  * attempt is priced at its own model's rates and the counts are summed. An attempt that names no
- * model is the requested model's.
+ * model is the requested model's, unless the reply fell back: then it could be any model in the
+ * chain, so it is charged the highest rates.
  */
 export function billedUsage(message: Pick<BetaMessage, 'model' | 'usage'>, requestedModel: string): BilledUsage {
   const iterations = message.usage.iterations ?? [];
-  const attempts: { model: string; usage: TokenUsage }[] =
+  const fellBack = iterations.some((usage) => usage.type === 'fallback_message');
+  const unnamedModel = fellBack ? null : requestedModel;
+  const attempts: { model: string | null; usage: TokenUsage }[] =
     iterations.length > 0
-      ? iterations.map((usage) => ({ model: ('model' in usage && usage.model) || requestedModel, usage }))
+      ? iterations.map((usage) => ({ model: ('model' in usage && usage.model) || unnamedModel, usage }))
       : [{ model: message.model, usage: message.usage }];
   const total = (count: (usage: TokenUsage) => number) =>
     attempts.reduce((sum, attempt) => sum + count(attempt.usage), 0);

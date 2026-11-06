@@ -1,11 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages';
+import type { BetaMessage, BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages';
 import { afterEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { llmCalls } from '@/lib/db/schema';
 import { createClaude, recordCall } from '@/lib/llm/client';
 import { LLM_ROUTES, type LlmRoute } from '@/lib/llm/routes';
-import { callStructured } from '@/lib/llm/structured';
+import { billedUsage, callStructured } from '@/lib/llm/structured';
 import { fakeClaude, iteration, messageJson } from '@/tests/helpers/fake-claude';
 import { createTestDb } from '@/tests/helpers/test-db';
 
@@ -341,6 +341,30 @@ it('prices each fallback hop at its own model and logs the model that served the
   expect(await db.select().from(llmCalls)).toEqual([
     expect.objectContaining({ model: 'claude-sonnet-5', inputTokens: 2000, outputTokens: 600, costUsd: 0.038 }),
   ]);
+});
+
+it('charges an attempt that names no model at the highest rates when the reply fell back', () => {
+  const reply = messageJson({
+    model: 'claude-opus-4-8',
+    usage: {
+      iterations: [
+        iteration('message', null, { input_tokens: 1000, output_tokens: 100 }),
+        iteration('fallback_message', 'claude-opus-4-8', { input_tokens: 1000, output_tokens: 500 }),
+      ],
+    },
+  }) as unknown as BetaMessage;
+
+  // The unnamed attempt may be any model in the chain, so the highest rates: 1000 x $10 + 100 x $50 per
+  // million = $0.015. claude-opus-4-8 at its own rates: 1000 x $5 + 500 x $25 per million = $0.0175.
+  expect(billedUsage(reply, 'claude-opus-5-5')).toMatchObject({ model: 'claude-opus-4-8', costUsd: 0.0325 });
+});
+
+it('charges an attempt that names no model at the requested rates when the reply did not fall back', () => {
+  const reply = messageJson({
+    usage: { iterations: [iteration('message', null, { input_tokens: 1000, output_tokens: 500 })] },
+  }) as unknown as BetaMessage;
+
+  expect(billedUsage(reply, 'claude-opus-5-5')).toMatchObject({ costUsd: 0.014 });
 });
 
 it('replays the route stub when LLM_STUB=1 and refuses to in production', async () => {

@@ -55,8 +55,8 @@ if (process.env.NODE_ENV !== 'production') {
 type DashboardProps = {
   persona: Persona;
   licenseKey?: string;
-  /** OpenAI models the assistant may use; omitted when no key is configured, which hides the assistant. */
-  aiModels?: string[];
+  /** Whether to offer the AI analyst, which is hidden when the server cannot call Claude. */
+  analyst?: boolean;
 };
 
 type ReportsDashboardProps = DashboardProps & {
@@ -102,7 +102,7 @@ function LoadedDashboard(props: DashboardProps) {
   );
 }
 
-function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, licenseKey, aiModels }: ReportsDashboardProps) {
+function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, licenseKey, analyst }: ReportsDashboardProps) {
   const { store, latest, update, editReport } = useReports(persona);
   const apiRef = useRef<AgStudioApi<BehestRegistry> | null>(null);
 
@@ -122,7 +122,7 @@ function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, lice
   const state = studioState ?? initialState;
   const studioData = useMemo(() => buildStudioData(data), [data]);
   // `ai` is read once, when Studio is created.
-  const ai = useMemo(() => (aiModels?.length ? buildAi(aiModels) : undefined), [aiModels]);
+  const ai = useMemo(() => (analyst ? buildAi() : undefined), [analyst]);
 
   // --- Driving Studio ---------------------------------------------------------------
   const load = (

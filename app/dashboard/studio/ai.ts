@@ -1,8 +1,9 @@
-// The AG Studio AI assistant. The adapter calls `${endpoint}/responses`, i.e. this app's proxy at
-// app/api/ai/responses, which holds the OpenAI key, so nothing secret is sent from the browser.
+// The AG Studio AI analyst. Its adapter posts each turn to this app's analyst route at
+// /api/ai/studio, which calls Claude with the server's Anthropic key, so nothing secret is sent
+// from the browser. The route picks the model and the effort, so the chat offers no choice of model.
 
 import { createAiHarness, type AgAiHarnessSetup, type AgAiPromptStarter } from 'ag-studio';
-import { openaiAdapter } from './openai-adapter';
+import { anthropicAdapter } from './anthropic-adapter';
 
 // Suggestions shown in a new AI conversation, before anything has been typed.
 const PROMPT_STARTERS: AgAiPromptStarter[] = [
@@ -20,15 +21,12 @@ const PROMPT_STARTERS: AgAiPromptStarter[] = [
   },
 ];
 
-// `models` are the ids allowed by OPENAI_MODELS on the server; the first is the default, and the
-// picker only shows for two or more.
-export function buildAi(models: string[]): AgAiHarnessSetup {
-  const adapter = openaiAdapter({ endpoint: '/api/ai', model: models[0] });
+export function buildAi(): AgAiHarnessSetup {
+  const adapter = anthropicAdapter({ endpoint: '/api/ai/studio' });
 
   return ({ api }) =>
     createAiHarness(api, {
       adapter,
       promptStarters: PROMPT_STARTERS,
-      models: models.length > 1 ? models.map((id) => ({ id, label: id })) : undefined,
     });
 }

@@ -206,22 +206,52 @@ describe('covers every field the gate enforces', () => {
     expect(renderReadback(MandatePolicy.parse(policy))).not.toEqual(renderReadback(base)),
   );
 
+  /** Schema types that hold a single value with no fields inside it. */
+  const VALUE_TYPES = [z.ZodString, z.ZodISODateTime, z.ZodNumber, z.ZodBoolean, z.ZodEnum];
+  const isValue = (schema: unknown) => VALUE_TYPES.some((type) => schema instanceof type);
+
   /**
-   * Every field of the policy schema that can take more than one value: each leaf, plus each
-   * nullable object, which can switch between null and a value. Literals such as version and
-   * currency have only one valid value, so they cannot change.
+   * Every field of a schema that can take more than one value: each value, plus each wrapped
+   * object, which can switch between a value and null, absence or its default. Literals such as
+   * version and currency have only one valid value, so they cannot change. Any other schema type
+   * throws, so a field can never sit behind a wrapper the walk does not look inside.
    */
   function changeableFields(schema: unknown, path: string[] = []): string[] {
-    const nullable = schema instanceof z.ZodNullable;
-    const inner = nullable ? schema.unwrap() : schema;
-    if (inner instanceof z.ZodLiteral) return [];
-    if (!(inner instanceof z.ZodObject)) return [path.join('.')];
-    const fields = Object.entries(inner.shape).flatMap(([key, value]) => changeableFields(value, [...path, key]));
-    return nullable ? [path.join('.'), ...fields] : fields;
+    const field = path.join('.');
+    if (schema instanceof z.ZodNullable || schema instanceof z.ZodOptional || schema instanceof z.ZodDefault) {
+      const inner = changeableFields(schema.unwrap(), path);
+      return inner.includes(field) ? inner : [field, ...inner];
+    }
+    if (schema instanceof z.ZodObject) {
+      return Object.entries(schema.shape).flatMap(([key, value]) => changeableFields(value, [...path, key]));
+    }
+    if (schema instanceof z.ZodLiteral) return [];
+    if (isValue(schema) || (schema instanceof z.ZodArray && isValue(schema.element))) return [field];
+    throw new Error(`the field walk does not recognise the schema at ${field || 'the root'}`);
   }
 
   it('has a change for every policy field, so no field is enforced without being shown', () =>
     expect(new Set(changes.map((c) => c.field))).toEqual(new Set(changeableFields(MandatePolicy))));
+
+  it('walks into nullable, optional and defaulted fields', () =>
+    expect(
+      changeableFields(
+        z.object({
+          a: z.string().optional(),
+          b: z.object({ c: z.number(), d: z.literal(1) }).default({ c: 1, d: 1 }),
+          e: z.object({ f: z.array(z.enum(['x', 'y'])) }).nullable(),
+          g: z.object({ h: z.boolean() }),
+        }),
+      ),
+    ).toEqual(['a', 'b', 'b.c', 'e', 'e.f', 'g.h']));
+
+  it.each([
+    ['a read-only field', z.object({ a: z.string().readonly() }), 'a'],
+    ['a transformed field', z.object({ a: z.object({ b: z.string().transform((s) => s.length) }) }), 'a.b'],
+    ['a list of objects', z.object({ a: z.array(z.object({ b: z.string() })) }), 'a'],
+  ])('refuses %s rather than skip fields it cannot see', (_, schema, field) =>
+    expect(() => changeableFields(schema)).toThrow(`at ${field}`),
+  );
 });
 
 it('ends every line with a full stop and uses no em dash', () => {

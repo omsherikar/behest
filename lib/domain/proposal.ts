@@ -17,7 +17,11 @@ export const PurchaseProposal = z
           .strict(),
       )
       .min(1)
-      .max(20),
+      .max(20)
+      // One line per SKU, so the gate's per-SKU quantity and stock rules see the full quantity.
+      .refine((items) => new Set(items.map((i) => i.sku)).size === items.length, {
+        message: 'each SKU may appear only once',
+      }),
     rationale: z.string().max(1000),
   })
   .strict();

@@ -367,6 +367,19 @@ it('charges an attempt that names no model at the requested rates when the reply
   expect(billedUsage(reply, 'claude-opus-5-5')).toMatchObject({ costUsd: 0.014 });
 });
 
+it('refuses to price usage whose token counts are not counts', () => {
+  const withIterations = (iterations: object[]) =>
+    ({ ...messageJson(), usage: { input_tokens: 1, output_tokens: 1, iterations } }) as unknown as BetaMessage;
+
+  for (const reply of [
+    withIterations([{ type: 'message', model: 'claude-opus-5-5' }]),
+    withIterations([iteration('message', 'claude-opus-5-5', { output_tokens: -1 })]),
+    withIterations([{ ...iteration('message', 'claude-opus-5-5'), cache_read_input_tokens: '7' }]),
+  ]) {
+    expect(() => billedUsage(reply, 'claude-opus-5-5')).toThrow('The reply reported token usage that is not a count');
+  }
+});
+
 it('replays the route stub when LLM_STUB=1 and refuses to in production', async () => {
   vi.stubEnv('LLM_STUB', '1');
   const db = await createTestDb();

@@ -18,7 +18,14 @@ import type {
   BetaToolResultBlockParam,
   BetaToolUseBlockParam,
 } from '@anthropic-ai/sdk/resources/beta/messages';
-import type { AgAiEvent, AgAiOutputItem, AgLlmRequest, AgLlmResponse } from 'ag-studio';
+import type {
+  AgAiEvent,
+  AgAiOutputItem,
+  AgLlmAdapter,
+  AgLlmRequest,
+  AgLlmResponse,
+  AgLlmResponseHandler,
+} from 'ag-studio';
 import type { LlmStreamEvent, StreamRequest } from '@/lib/llm/stream';
 
 // --- Turn ids ---------------------------------------------------------------------
@@ -423,4 +430,49 @@ export async function* decodeStream(
     failure = error;
   }
   yield* decoder.finish(outcome, failure);
+}
+
+// --- The adapter --------------------------------------------------------------------
+
+/** The stream events of the route's reply to `request`. A route that turns the turn away throws. */
+async function* routeEvents(endpoint: string, request: AgLlmRequest, signal?: AbortSignal) {
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(encodeRequest(request)),
+    signal,
+  });
+  if (!response.ok || !response.body) {
+    const answer: { error?: { message?: string } } | null = await response.json().catch(() => null);
+    throw new Error(answer?.error?.message ?? `The analyst could not answer (HTTP ${response.status}).`);
+  }
+  yield* readSse(response.body);
+}
+
+function runTurn(endpoint: string, request: AgLlmRequest, signal?: AbortSignal): AgLlmResponseHandler {
+  let settle: { resolve: (response: AgLlmResponse) => void; reject: (error: Error) => void } | undefined;
+  const complete = new Promise<AgLlmResponse>((resolve, reject) => {
+    settle = { resolve, reject };
+  });
+  // Studio ends a run when `complete` rejects. This marks the rejection seen for a reader that stops
+  // reading the stream and never awaits `complete`; anyone who does await it still gets the error.
+  void complete.catch(() => {});
+
+  async function* turn(): AsyncGenerator<AgAiEvent, void, undefined> {
+    const outcome: TurnOutcome = {};
+    yield* decodeStream(routeEvents(endpoint, request, signal), outcome);
+    if (outcome.response) settle?.resolve(outcome.response);
+    else settle?.reject(outcome.error ?? new Error('The reply ended before it was complete.'));
+  }
+
+  const stream = turn();
+  return { stream: { [Symbol.asyncIterator]: () => stream }, complete };
+}
+
+/**
+ * The AG Studio adapter for the analyst route at `endpoint`. The route picks the model and the
+ * effort, so whatever model a turn names is ignored.
+ */
+export function anthropicAdapter(options: { endpoint: string }): AgLlmAdapter {
+  return { executeTurn: (request, turnOptions) => runTurn(options.endpoint, request, turnOptions?.signal) };
 }

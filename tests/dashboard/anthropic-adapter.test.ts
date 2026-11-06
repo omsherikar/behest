@@ -8,10 +8,16 @@ import type {
   AgAiToolSchema,
   AgLlmRequest,
 } from 'ag-studio';
-import { describe, expect, it } from 'vitest';
-import { decodeStream, encodeRequest, readSse, type TurnOutcome } from '@/app/dashboard/studio/anthropic-adapter';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  anthropicAdapter,
+  decodeStream,
+  encodeRequest,
+  readSse,
+  type TurnOutcome,
+} from '@/app/dashboard/studio/anthropic-adapter';
 import type { LlmStreamEvent } from '@/lib/llm/stream';
-import { recordedStream, sseEvents } from '@/tests/helpers/sse';
+import { recordedStream, sseBody, sseEvents } from '@/tests/helpers/sse';
 
 // --- Conversation items, as AG Studio holds them ----------------------------------
 
@@ -508,5 +514,67 @@ describe('decodeStream', () => {
       cachedInputTokens: 1200,
       cacheWriteTokens: 300,
     });
+  });
+});
+
+// --- The adapter ------------------------------------------------------------------
+
+describe('anthropicAdapter', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const turn = request([user('Which purchases needed approval this week and why?')]);
+
+  async function run(answer: Response) {
+    const fetchMock = vi.fn(async () => answer);
+    vi.stubGlobal('fetch', fetchMock);
+    const signal = new AbortController().signal;
+    const handler = anthropicAdapter({ endpoint: '/api/ai/studio' }).executeTurn(turn, { signal });
+    const events = [];
+    for await (const event of handler.stream) events.push(event);
+    return { fetchMock, signal, events, complete: handler.complete };
+  }
+
+  const streamed = (text: string) => new Response(body(text), { headers: { 'content-type': 'text/event-stream' } });
+
+  it('posts the encoded turn to the route and completes with the reply it streams back', async () => {
+    const { fetchMock, signal, events, complete } = await run(streamed(recordedStream('tool-turn')));
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/ai/studio', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(encodeRequest(turn)),
+      signal,
+    });
+    expect(events.map((event) => event.type)).toEqual([
+      'TEXT_MESSAGE_START',
+      'TEXT_MESSAGE_CONTENT',
+      'TEXT_MESSAGE_END',
+      'TOOL_CALL_START',
+      'TOOL_CALL_ARGS',
+      'TOOL_CALL_ARGS',
+      'TOOL_CALL_END',
+    ]);
+    const response = await complete;
+    expect(response).toMatchObject({ id: 'msg_tool_turn', status: 'completed' });
+    expect(response.output).toContainEqual(expect.objectContaining({ type: 'function_call', arguments: QUERY_ARGS }));
+  });
+
+  it('fails the turn with the message of a route that turns it away', async () => {
+    const { events, complete } = await run(
+      Response.json({ error: { message: 'Too many questions at once. Try again in a minute.' } }, { status: 429 }),
+    );
+
+    expect(events).toEqual([]);
+    await expect(complete).rejects.toThrow('Too many questions at once. Try again in a minute.');
+  });
+
+  it('fails the turn with the error event that ends the stream', async () => {
+    const { complete } = await run(
+      streamed(sseBody([{ type: 'error', error: { type: 'spend_cap', message: 'Spent $5 of the $5 daily model budget' } }])),
+    );
+
+    await expect(complete).rejects.toThrow('Spent $5 of the $5 daily model budget');
   });
 });

@@ -12,7 +12,7 @@ export function recordedStream(name: string): string {
 }
 
 /** An SSE body that sends each event as one frame, named by its type. */
-export function sseBody(events: { type: string }[]): string {
+export function sseBody(events: { type: string; [key: string]: unknown }[]): string {
   return events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('');
 }
 

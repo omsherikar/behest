@@ -52,22 +52,22 @@ In production `.env.local` isn't deployed: set the variable in your host's envir
 ## How it works
 
 ```
-lib/paypal.ts            Every PayPal call: OAuth token, paging, retries, response types
+lib/paypal/              Every PayPal call: OAuth token, paging, retries, response types
 lib/dashboard-data.ts    Turns those responses into the dashboard's related tables
 app/(endpoints)/         One page per endpoint, each rendering an AG Grid
 app/dashboard/           The AG Studio dashboard
 app/api/ai/responses/    Server-side proxy for the dashboard's AI assistant
 ```
 
-[`lib/paypal.ts`](lib/paypal.ts) calls the REST API with plain `fetch`, no SDK. It gets an OAuth access token with the client-credentials grant and caches it until just before it expires. It follows `page`/`total_pages` paging, and retries on 401, 429 and 5xx responses. Its types are hand-written for the fields this demo reads, in the API's own snake_case.
+[`lib/paypal`](lib/paypal) calls the REST API with plain `fetch`, no SDK. It gets an OAuth access token with the client-credentials grant and caches it until just before it expires. It follows `page`/`total_pages` paging, and retries on 401, 429 and 5xx responses. Its types are hand-written for the fields this demo reads, in the API's own snake_case.
 
 Every page is a server component that calls `await connection()`, so it renders per request with live data instead of being prerendered at build time. PayPal credentials never leave the server.
 
 ## Endpoint pages
 
-Each page in [`app/(endpoints)`](app/(endpoints)) calls one function in `lib/paypal.ts`, maps the response to flat rows, and passes them with plain column definitions to the shared [`DataGrid`](app/(endpoints)/data-grid.tsx). The page header shows the REST calls behind it.
+Each page in [`app/(endpoints)`](app/(endpoints)) calls one function in `lib/paypal`, maps the response to flat rows, and passes them with plain column definitions to the shared [`DataGrid`](app/(endpoints)/data-grid.tsx). The page header shows the REST calls behind it.
 
-| Page | `lib/paypal.ts` function | REST calls |
+| Page | `lib/paypal` function | REST calls |
 |---|---|---|
 | [`/products`](app/(endpoints)/products/page.tsx) | `listProducts()` | `GET /v1/catalogs/products`, then `GET /v1/catalogs/products/{id}` per product |
 | [`/plans`](app/(endpoints)/plans/page.tsx) | `listPlans()` | `GET /v1/billing/plans`, then `GET /v1/billing/plans/{id}` per plan |

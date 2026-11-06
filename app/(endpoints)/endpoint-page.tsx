@@ -3,7 +3,7 @@ import type { ColDef } from 'ag-grid-community';
 import { DataGrid, type Row } from './data-grid';
 
 // The frame shared by the endpoint pages: which PayPal calls produced the data, which function in
-// lib/paypal.ts makes them, and the rows in an AG Grid.
+// lib/paypal makes them, and the rows in an AG Grid.
 export function EndpointPage({
   title,
   calls,
@@ -15,7 +15,7 @@ export function EndpointPage({
   title: string;
   /** The REST calls behind the page, e.g. 'GET /v1/catalogs/products'. */
   calls: string[];
-  /** The lib/paypal.ts function the page calls. */
+  /** The lib/paypal function the page calls. */
   source: string;
   note?: string;
   rows: Row[];

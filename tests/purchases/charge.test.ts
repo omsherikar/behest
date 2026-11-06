@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { jobs, purchases, receipts, wallets } from '@/lib/db/schema';
 import { runDueJobs } from '@/lib/jobs/queue';
@@ -18,12 +18,24 @@ beforeAll(async () => {
 }, 60_000);
 
 const HOUR_MS = 60 * 60 * 1000;
+/** When the `charge_retry` job queued with a charge first runs. */
+const RETRY_AT = new Date(NOW.getTime() + 2 * 60 * 1000);
 
 const chargeRequestId = (purchaseId: string) => `${purchaseId}:charge`;
 
 /** The request id of every charge PayPal was asked for, in order. */
 function chargeRequestIds(paypal: FakePaypal): string[] {
   return paypal.callsTo('chargeSavedWallet').map(([request]) => request.requestId);
+}
+
+/** The kinds of the queued and finished jobs, sorted. */
+async function jobKinds(db: PurchaseDeps['db']): Promise<string[]> {
+  return (await db.select({ kind: jobs.kind }).from(jobs)).map((j) => j.kind).sort();
+}
+
+/** Runs the jobs due by the clock, with retryCharge as the `charge_retry` handler. */
+function runRetryJobs(deps: PurchaseDeps, clock: { now: Date }): Promise<number> {
+  return runDueJobs(deps.db, { charge_retry: (payload, d) => retryCharge(d, String(payload.purchaseId)) }, deps, () => clock.now);
 }
 
 /** The kinds of the purchase's events other than status changes, in order. */
@@ -89,7 +101,8 @@ describe('chargeAllowed', () => {
     });
     expect(seller.orders).toEqual([{ sellerSlug: SEEDED_SELLER.slug, cart: seededCart, receiptJws: receipt.jws }]);
     expect(paypal.payouts).toHaveLength(1);
-    expect(await db.select({ kind: jobs.kind }).from(jobs)).toEqual([{ kind: 'payout_poll' }]);
+    // The retry queued with the charge, which will find the purchase moved on, and the payout's poll.
+    expect(await jobKinds(db)).toEqual(['charge_retry', 'payout_poll']);
   });
 
   it('logs the charge, capture, receipt and seller acceptance in order, each before the status it causes', async () => {
@@ -137,7 +150,7 @@ describe('chargeAllowed', () => {
     expect(paypal.captures).toEqual([]);
     expect(await db.select().from(receipts)).toEqual([]);
     expect(seller.orders).toEqual([]);
-    expect(await db.select().from(jobs)).toEqual([]);
+    expect(await jobKinds(db)).toEqual(['charge_retry']);
     expect((await eventsOf(db, purchaseId)).slice(1)).toEqual([
       expect.objectContaining({ kind: 'charge' }),
       { kind: 'charge_declined', data: { requestId: chargeRequestId(purchaseId) } },
@@ -145,7 +158,7 @@ describe('chargeAllowed', () => {
     ]);
   });
 
-  it('leaves the purchase charging, its budget reserved, with a charge_retry job queued when PayPal fails twice', async () => {
+  it('leaves the purchase charging, its budget reserved, with one charge_retry job queued when PayPal fails twice', async () => {
     const { db, deps, paypal, seller, purchaseId } = await setUp();
     paypal.failNext('chargeSavedWallet', 'network');
     paypal.failNext('chargeSavedWallet', 'network');
@@ -156,7 +169,7 @@ describe('chargeAllowed', () => {
     expect(outcome).toMatchObject({ status: 'charging', receiptId: null });
     expect(await statusOf(db, purchaseId)).toBe('charging');
     expect(await db.select({ kind: jobs.kind, payload: jobs.payload, runAt: jobs.runAt }).from(jobs)).toEqual([
-      { kind: 'charge_retry', payload: { purchaseId }, runAt: new Date(NOW.getTime() + 30_000) },
+      { kind: 'charge_retry', payload: { purchaseId }, runAt: RETRY_AT },
     ]);
     expect(await db.select().from(receipts)).toEqual([]);
     expect(seller.orders).toEqual([]);
@@ -181,8 +194,9 @@ describe('chargeAllowed', () => {
     });
     expect(await db.select().from(receipts)).toEqual([]);
     expect(seller.orders).toEqual([]);
-    // Only PayPal's webhook can say when the capture completes, so nothing is queued to ask again.
-    expect(await db.select().from(jobs)).toEqual([]);
+    // Only PayPal's webhook can say when the capture completes. The retry queued with the charge
+    // finds the capture stored and stops.
+    expect(await jobKinds(db)).toEqual(['charge_retry']);
     expect((await eventsOf(db, purchaseId)).slice(2)).toEqual([{ kind: 'capture_pending', data: { orderId, captureId } }]);
   });
 
@@ -197,6 +211,7 @@ describe('chargeAllowed', () => {
 
     expect(outcome).toMatchObject({ status: 'failed', receiptId: null });
     expect(paypal.calls).toEqual([]);
+    expect(await jobKinds(db)).toEqual([]);
     expect(await eventsOf(db, purchaseId)).toEqual([
       { kind: 'status', data: { from: 'proposed', to: 'charging' } },
       { kind: 'charge_failed', data: { reason: 'The buyer has no linked PayPal wallet.' } },
@@ -230,16 +245,10 @@ describe('chargeAllowed', () => {
 describe('retryCharge', () => {
   it('runs from its job, replays the same request id and ends accepted with exactly one capture', async () => {
     const { db, deps, paypal, clock, purchaseId } = await setUpUnknownCharge({ lost: true });
-    clock.now = new Date(NOW.getTime() + 30_000);
+    clock.now = RETRY_AT;
 
-    const processed = await runDueJobs(
-      db,
-      { charge_retry: (payload, d) => retryCharge(d, String(payload.purchaseId)) },
-      deps,
-      () => clock.now,
-    );
+    expect(await runRetryJobs(deps, clock)).toBe(1);
 
-    expect(processed).toBe(1);
     expect(await db.select({ kind: jobs.kind, status: jobs.status }).from(jobs).where(eq(jobs.kind, 'charge_retry'))).toEqual([
       { kind: 'charge_retry', status: 'done' },
     ]);
@@ -248,6 +257,33 @@ describe('retryCharge', () => {
     expect(await statusOf(db, purchaseId)).toBe('accepted');
     expect(await db.select().from(receipts)).toHaveLength(1);
     expect(await stepsOf(db, purchaseId)).toEqual(['charge', 'charge_unknown', 'capture', 'receipt', 'seller_accepted']);
+  });
+
+  it('recovers a completed charge whose capture the database failed to record, through the job queued with it', async () => {
+    const { db, deps, paypal, seller, clock, purchaseId } = await setUp();
+    // The database refuses to record the capture, as if it went away just after PayPal answered.
+    await db.execute(sql`
+      create function refuse_capture() returns trigger language plpgsql as $$
+      begin raise exception 'the database went away'; end $$`);
+    await db.execute(sql`
+      create trigger refuse_capture before update on purchases
+      for each row when (new.status = 'captured') execute function refuse_capture()`);
+
+    await expect(chargeAllowed(deps, purchaseId)).rejects.toThrow();
+
+    expect(paypal.captures).toHaveLength(1);
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({ status: 'charging', paypalCaptureId: null });
+    await db.execute(sql`drop trigger refuse_capture on purchases`);
+    clock.now = RETRY_AT;
+
+    expect(await runRetryJobs(deps, clock)).toBe(1);
+
+    expect(chargeRequestIds(paypal)).toEqual([chargeRequestId(purchaseId), chargeRequestId(purchaseId)]);
+    expect(paypal.captures).toHaveLength(1);
+    expect(await db.select().from(receipts)).toHaveLength(1);
+    expect(seller.orders).toHaveLength(1);
+    expect(paypal.payouts).toHaveLength(1);
+    expect(await statusOf(db, purchaseId)).toBe('accepted');
   });
 
   it('charges once when PayPal never received the first two attempts', async () => {

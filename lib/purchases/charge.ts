@@ -16,7 +16,9 @@ import { describeFailure } from './settle';
 // Every charge of a purchase carries the request id `${purchaseId}:charge`, so PayPal answers a
 // repeat with the first result and never charges twice. Only a DECLINED answer means no money
 // moved. Any error may follow a charge PayPal carried out, so the purchase then stays `charging`,
-// still counted against the budget, until a replay under the same request id finds out. No database
+// still counted against the budget, until a replay under the same request id finds out. That replay
+// is queued as a `charge_retry` job before PayPal is first asked, so a charge whose answer is never
+// recorded, because the process stopped or the database failed, is still followed up. No database
 // lock is held while PayPal is asked.
 
 type ChargeDeps = Pick<PurchaseDeps, 'db' | 'paypal' | 'signer' | 'sellers' | 'now'>;
@@ -27,10 +29,10 @@ type Capture = { orderId: string; captureId: string };
 const NO_WALLET = 'The buyer has no linked PayPal wallet.';
 
 /**
- * How long after two failed attempts the `charge_retry` job first runs. Two failures in a row
- * suggest PayPal or the network is struggling, so the replay waits a little rather than ask at once.
+ * How long after a charge starts its `charge_retry` job first runs. By then a charge that went
+ * normally has long been recorded, and the job finds nothing to do.
  */
-const CHARGE_RETRY_DELAY_MS = 30_000;
+const CHARGE_RETRY_DELAY_MS = 2 * 60 * 1000;
 
 /**
  * The longest after its first attempt that a charge is replayed. PayPal keeps the request id of an
@@ -41,14 +43,15 @@ const REPLAY_WINDOW_MS = 5 * 60 * 60 * 1000;
 
 /**
  * Charges an allowed purchase's buyer from their saved wallet and carries it as far as it can go.
- * Moves the purchase from `proposed` to `charging` and logs a `charge` event, then asks PayPal,
- * asking once more with the same request id if that throws. Then:
+ * Moves the purchase from `proposed` to `charging`, logs a `charge` event and queues a
+ * `charge_retry` job for retryCharge, all in one transaction, then asks PayPal, asking once more
+ * with the same request id if that throws. Then:
  * - COMPLETED: completeCapture records the capture, issues the receipt and delivers the order;
  * - PENDING: the order and capture ids are stored and a `capture_pending` event logged; the purchase
  *   stays `charging` with no receipt until PayPal's webhook reports the capture completed;
  * - DECLINED: a `charge_declined` event, and the purchase ends `failed`;
- * - a second thrown error: a `charge_unknown` event and a `charge_retry` job for retryCharge, with
- *   the purchase left `charging`.
+ * - a second thrown error: a `charge_unknown` event, with the purchase left `charging` for the
+ *   queued job to replay.
  * A buyer with no linked wallet fails the purchase with a `charge_failed` event saying so, and
  * PayPal is never asked. A purchase another call has already moved on from `proposed` is returned
  * as it stands. Throws, changing nothing, for a purchase whose final verdict is not ALLOW.
@@ -74,24 +77,23 @@ export async function chargeAllowed(deps: ChargeDeps, purchaseId: string): Promi
   try {
     answer = await sendCharge(deps.paypal, request);
   } catch (error) {
-    await db.transaction(async (tx) => {
-      await appendEvent(tx, purchaseId, 'charge_unknown', { requestId: request.requestId, ...describeFailure(error) });
-      await enqueue(tx, 'charge_retry', { purchaseId }, new Date(deps.now().getTime() + CHARGE_RETRY_DELAY_MS));
-    });
+    // The job queued with the charge replays it; one job per charge is enough.
+    await appendEvent(db, purchaseId, 'charge_unknown', { requestId: request.requestId, ...describeFailure(error) });
     return purchaseOutcome(db, purchaseId);
   }
   return applyAnswer(deps, purchaseId, request.requestId, answer);
 }
 
 /**
- * Replays the charge of a purchase whose charge ended in errors: the `charge_retry` job's handler.
- * It sends the same request id, so PayPal either reports the charge it already made or makes it
- * now, and goes on as chargeAllowed does with the answer. `done` once PayPal has answered, and
- * also, without asking PayPal, for a purchase no longer `charging` or one whose capture is pending,
- * which only PayPal's webhook can move on. Throws, so the job is retried with backoff, while PayPal
- * still cannot answer. Also throws, without asking PayPal, for a purchase with no saved-wallet
- * charge to replay, one charged too long ago to replay safely, or one whose buyer has no linked
- * wallet any more: money may have moved, so an operator checks PayPal.
+ * Replays the charge of a purchase whose charge was never recorded: the handler of the
+ * `charge_retry` job queued with every charge. It sends the same request id, so PayPal either
+ * reports the charge it already made or makes it now, and goes on as chargeAllowed does with the
+ * answer; that is safe even while another call acts on the same answer. `done` once PayPal has
+ * answered, and also, without asking PayPal, for a purchase no longer `charging` or one whose
+ * capture is pending, which only PayPal's webhook can move on. Throws, so the job is retried with
+ * backoff, while PayPal still cannot answer. Also throws, without asking PayPal, for a purchase
+ * with no saved-wallet charge to replay, one charged too long ago to replay safely, or one whose
+ * buyer has no linked wallet any more: money may have moved, so an operator checks PayPal.
  */
 export async function retryCharge(deps: ChargeDeps, purchaseId: string): Promise<JobOutcome> {
   const { db } = deps;
@@ -176,9 +178,10 @@ export async function purchaseOutcome(db: Db, purchaseId: string): Promise<Propo
 }
 
 /**
- * Moves the purchase from `proposed` to `charging`, with the policy as its approver, and returns
- * the charge to send. With no linked wallet it fails the purchase instead, and returns null; it
- * also returns null for a purchase another call has already moved on.
+ * Moves the purchase from `proposed` to `charging`, with the policy as its approver, logs the
+ * charge and queues its `charge_retry` job, and returns the charge to send. With no linked wallet
+ * it fails the purchase instead, and returns null; it also returns null for a purchase another call
+ * has already moved on.
  */
 async function startCharge(
   { db, now }: ChargeDeps,
@@ -202,6 +205,7 @@ async function startCharge(
         amountCents: totalCents,
         startedAt: now().toISOString(),
       });
+      await enqueue(tx, 'charge_retry', { purchaseId }, new Date(now().getTime() + CHARGE_RETRY_DELAY_MS));
       return request;
     });
   } catch (error) {

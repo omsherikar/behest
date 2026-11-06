@@ -438,10 +438,10 @@ describe('retryCharge', () => {
     expect(await statusOf(db, purchaseId)).toBe('charging');
   });
 
-  it('refuses a charging purchase that has no saved-wallet charge to replay', async () => {
+  it('refuses a charging purchase that has no recorded charge or capture to replay', async () => {
     const { db, deps, paypal, purchaseId } = await setUp('charging');
 
-    await expect(retryCharge(deps, purchaseId)).rejects.toThrow('no saved-wallet charge to replay');
+    await expect(retryCharge(deps, purchaseId)).rejects.toThrow('no recorded charge or capture to replay');
 
     expect(paypal.calls).toEqual([]);
     expect(await statusOf(db, purchaseId)).toBe('charging');

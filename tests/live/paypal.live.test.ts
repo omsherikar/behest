@@ -4,7 +4,7 @@
 // never reaches the network. It reads PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET and PAYEE_EMAIL, and
 // pays PAYEE_EMAIL one cent of sandbox money per run:
 //
-//   PAYPAL_LIVE=1 npx vitest run tests/live --testTimeout=120000
+//   PAYPAL_LIVE=1 npm test -- tests/live
 
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -20,6 +20,8 @@ const ITEM_STATUSES = ['SUCCESS', 'FAILED', 'PENDING', 'UNCLAIMED', 'RETURNED', 
 
 const POLL_FOR_MS = 60_000;
 const POLL_EVERY_MS = 5_000;
+/** Room for the payout poll plus the calls around it, well past vitest's default per-test timeout. */
+const TEST_TIMEOUT_MS = 120_000;
 
 function payeeEmail(): string {
   const email = process.env.PAYEE_EMAIL;
@@ -37,7 +39,7 @@ async function settledPayoutBatch(payoutBatchId: string): Promise<Awaited<Return
   }
 }
 
-describe.skipIf(process.env.PAYPAL_LIVE !== '1')('the PayPal client against the sandbox', () => {
+describe.skipIf(process.env.PAYPAL_LIVE !== '1')('the PayPal client against the sandbox', { timeout: TEST_TIMEOUT_MS }, () => {
   it('creates a setup token the buyer can approve on the sandbox', async () => {
     const token = await createSetupToken({
       returnUrl: 'https://example.com/behest/mandate/approved',

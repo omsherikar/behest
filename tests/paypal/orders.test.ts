@@ -306,6 +306,28 @@ describe('chargeSavedWallet', () => {
     expect(error).toMatchObject({ status: 422, body: expect.stringContaining('DUPLICATE_INVOICE_ID') });
   });
 
+  it('rethrows an INSTRUMENT_DECLINED error that is not a 422', async () => {
+    stubFetch([{ ...unprocessable(ORDERS, 'INSTRUMENT_DECLINED'), status: 400 }]);
+
+    const error = await chargeSavedWallet(chargeInput).catch((e) => e);
+
+    expect(error).toBeInstanceOf(PayPalApiError);
+    expect(error).toMatchObject({ status: 400, body: expect.stringContaining('INSTRUMENT_DECLINED') });
+  });
+
+  it('rethrows a 422 whose body is not JSON, even if it mentions INSTRUMENT_DECLINED', async () => {
+    const f = fakeFetch([oauth]);
+    const html = '<html><body>422 INSTRUMENT_DECLINED</body></html>';
+    const stub: typeof fetch = async (input, init) =>
+      new URL(String(input)).pathname === ORDERS ? new Response(html, { status: 422 }) : f.fetch(input, init);
+    vi.stubGlobal('fetch', stub);
+
+    const error = await chargeSavedWallet(chargeInput).catch((e) => e);
+
+    expect(error).toBeInstanceOf(PayPalApiError);
+    expect(error).toMatchObject({ status: 422, body: html });
+  });
+
   it('rethrows a server error, since the charge may have gone through', async () => {
     stubFetch([{ method: 'POST', path: ORDERS, status: 500, body: { name: 'INTERNAL_SERVER_ERROR' } }]);
 

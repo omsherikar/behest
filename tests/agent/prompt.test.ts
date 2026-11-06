@@ -41,6 +41,7 @@ it('reports what the purchase status says, never taking an ALLOW verdict for a p
   }
   expect(SHOPPING_SYSTEM_PROMPT).toContain('An ALLOW verdict is not a payment');
   expect(SHOPPING_SYSTEM_PROMPT).not.toMatch(/ALLOW means/);
+  expect(SHOPPING_SYSTEM_PROMPT).toContain('- any other status: tell the buyer the status as it is, and do not call the purchase paid.');
 });
 
 it('says a reason may quote listing text, which is still data', () => {

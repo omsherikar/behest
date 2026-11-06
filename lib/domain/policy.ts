@@ -12,6 +12,21 @@ const category = z.enum(CATEGORIES);
  * 63 characters. With no commas, spaces or upper case, a list of slugs reads back unambiguously.
  */
 const merchantSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
+/**
+ * When a mandate ends: a whole minute, which the readback shows as a date and time, or the last
+ * millisecond of a UTC day, which it shows as that date. Either way the buyer reads the exact
+ * instant the gate enforces.
+ */
+const expiry = z.iso.datetime().refine(
+  (at) => {
+    const time = new Date(at);
+    // Zod runs this even when the datetime check failed; that check already rejects the value.
+    if (Number.isNaN(time.getTime())) return true;
+    const iso = time.toISOString();
+    return iso.endsWith(':00.000Z') || iso.endsWith('T23:59:59.999Z');
+  },
+  { message: 'expiresAt must be a whole minute or the end of a day' },
+);
 
 export const BudgetPeriod = z.enum(['day', 'week', 'month', 'once']);
 export type BudgetPeriod = z.infer<typeof BudgetPeriod>;
@@ -46,7 +61,7 @@ export const MandatePolicy = z
       .strict()
       .nullable(),
     /** ISO timestamp after which the mandate no longer authorizes anything. */
-    expiresAt: z.iso.datetime().nullable(),
+    expiresAt: expiry.nullable(),
   })
   .strict()
   .refine((p) => p.perPurchaseMaxCents <= p.budget.amountCents, {

@@ -38,3 +38,24 @@ it.each([
   expect(acceptsSellers({ allow: [slug], deny: [] })).toBe(false);
   expect(acceptsSellers({ allow: null, deny: [slug] })).toBe(false);
 });
+
+const withExpiry = (expiresAt: string) => MandatePolicy.safeParse({ ...demoPolicy, expiresAt });
+
+it.each(['2026-12-31T14:05:00Z', '2026-12-31T00:00:00Z', '2026-12-31T23:59:59.999Z'])(
+  'accepts %s as an expiry',
+  (expiresAt) => expect(withExpiry(expiresAt).success).toBe(true),
+);
+
+it.each(['2026-12-31T23:59:59Z', '2026-12-31T14:05:30Z', '2026-12-31T14:05:00.500Z', '2026-12-31T23:59:59.998Z'])(
+  'rejects %s as an expiry, since it is neither a whole minute nor the end of a day',
+  (expiresAt) => {
+    const result = withExpiry(expiresAt);
+    expect(result.success).toBe(false);
+    expect(result.error?.issues).toEqual([
+      expect.objectContaining({ path: ['expiresAt'], message: 'expiresAt must be a whole minute or the end of a day' }),
+    ]);
+  },
+);
+
+it('rejects an expiry that is not a timestamp without throwing', () =>
+  expect(withExpiry('not a date').success).toBe(false));

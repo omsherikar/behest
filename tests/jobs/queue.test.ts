@@ -2,7 +2,14 @@ import { eq } from 'drizzle-orm';
 import { expect, it, vi } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import { jobs } from '@/lib/db/schema';
-import { backoffMs, enqueue, type JobHandler, type JobHandlers, runDueJobs } from '@/lib/jobs/queue';
+import {
+  backoffMs,
+  enqueue,
+  type JobHandler,
+  type JobHandlers,
+  type JobOutcome,
+  runDueJobs,
+} from '@/lib/jobs/queue';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 const SECOND = 1000;
@@ -31,6 +38,17 @@ function handlersWith(overrides: Partial<JobHandlers<Deps>> = {}): JobHandlers<D
 async function jobRow(db: Db, id: string) {
   const [row] = await db.select().from(jobs).where(eq(jobs.id, id));
   return row;
+}
+
+/** A handler that signals once it starts and settles only when the test calls `finish`. */
+function heldHandler() {
+  const started = Promise.withResolvers<void>();
+  const outcome = Promise.withResolvers<JobOutcome>();
+  const handler: JobHandler<Deps> = () => {
+    started.resolve();
+    return outcome.promise;
+  };
+  return { handler, started: started.promise, finish: outcome.resolve };
 }
 
 it('stores a new job as queued with no attempts', async () => {
@@ -215,14 +233,10 @@ it('runs a job again once a stopped worker has left it running for over 10 minut
   const db = await createTestDb();
   // Overdue by an hour, so only the claim time can keep it from looking abandoned at once.
   const id = await enqueue(db, 'charge_retry', { purchaseId: 'pur-1' }, after(-HOUR));
-  const claimed = Promise.withResolvers<void>();
-  const stuck: JobHandler<Deps> = () => {
-    claimed.resolve();
-    return new Promise(() => {});
-  };
   // This run claims the job at T and never finishes, like a worker whose process died.
-  void runDueJobs(db, handlersWith({ charge_retry: stuck }), deps, T);
-  await claimed.promise;
+  const stuck = heldHandler();
+  void runDueJobs(db, handlersWith({ charge_retry: stuck.handler }), deps, T);
+  await stuck.started;
 
   const chargeRetry = vi.fn<JobHandler<Deps>>(async () => 'done');
   const handlers = handlersWith({ charge_retry: chargeRetry });
@@ -234,22 +248,23 @@ it('runs a job again once a stopped worker has left it running for over 10 minut
   expect(await jobRow(db, id)).toMatchObject({ status: 'done', attempts: 0 });
 });
 
-it('keeps the outcome of the run that reclaimed a job when the abandoned run finishes late', async () => {
+it('records only the outcome of the run that reclaimed a job, not of the abandoned run', async () => {
   const db = await createTestDb();
   const id = await enqueue(db, 'payout_poll', { purchaseId: 'pur-1' }, T);
-  const claimed = Promise.withResolvers<void>();
-  const finish = Promise.withResolvers<'retry'>();
-  const slow: JobHandler<Deps> = () => {
-    claimed.resolve();
-    return finish.promise;
-  };
-  const slowRun = runDueJobs(db, handlersWith({ payout_poll: slow }), deps, T);
-  await claimed.promise;
+  const abandoned = heldHandler();
+  const abandonedRun = runDueJobs(db, handlersWith({ payout_poll: abandoned.handler }), deps, T);
+  await abandoned.started;
 
-  expect(await runDueJobs(db, handlersWith(), deps, after(11 * MINUTE))).toBe(1);
-  finish.resolve('retry');
-  await slowRun;
+  const reclaimed = heldHandler();
+  const reclaimedRun = runDueJobs(db, handlersWith({ payout_poll: reclaimed.handler }), deps, after(11 * MINUTE));
+  await reclaimed.started;
 
+  abandoned.finish('retry');
+  await abandonedRun;
+  expect(await jobRow(db, id)).toMatchObject({ status: 'running', attempts: 0, runAt: after(11 * MINUTE) });
+
+  reclaimed.finish('done');
+  expect(await reclaimedRun).toBe(1);
   expect(await jobRow(db, id)).toMatchObject({ status: 'done', attempts: 0 });
 });
 

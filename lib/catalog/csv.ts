@@ -28,6 +28,8 @@ export const ROW_LIMIT = 200;
 const NAME_MAX = 120;
 const DESCRIPTION_MAX = 2000;
 const SKU_MAX = 64;
+/** The longest price cell read, far more than `USD 21,474,836.47` needs. */
+const PRICE_CELL_MAX = 32;
 const SKU = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 /** The largest value of a Postgres integer, the column type of price and stock. */
 const INT_MAX = 2_147_483_647;
@@ -185,10 +187,14 @@ function aliasList(field: Field): string {
  * Cents from a price cell, or null when the cell is not a plain amount in dollars. Accepts `4.50`, `4.5`,
  * `4,50`, `$4.50`, `USD 4.50`, `4.50 USD` and `1,234.50`. A comma followed by three digits and no decimal
  * part, as in `1,234`, could be a thousands separator or a mistyped decimal, so it is not accepted, and
- * neither is a dot used as a thousands separator, as in `1.234,50`.
+ * neither is a dot used as a thousands separator, as in `1.234,50`. A cell longer than `PRICE_CELL_MAX`
+ * once trimmed is no price, so it is rejected before any pattern runs on it.
  */
 function parsePriceCents(cell: string): number | null {
-  const amount = /^(?:usd\s*)?\$?\s*([\d.,]+)\s*(?:usd)?$/i.exec(cell.trim())?.[1];
+  const text = cell.trim();
+  if (text.length > PRICE_CELL_MAX) return null;
+  // No two adjacent parts of this pattern can match the same characters, so it runs in linear time.
+  const amount = /^(?:usd)?\s*(?:\$\s*)?([\d.,]+)\s*(?:usd)?$/i.exec(text)?.[1];
   if (amount === undefined) return null;
   const parts = /^(\d+)(?:[.,](\d{1,2}))?$/.exec(amount) ?? /^(\d{1,3}(?:,\d{3})+)\.(\d{1,2})$/.exec(amount);
   if (parts === null) return null;

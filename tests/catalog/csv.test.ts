@@ -175,6 +175,19 @@ describe('parseCatalogCsv', () => {
     },
   );
 
+  it('rejects a price cell longer than 32 characters without reading it', () => {
+    expect(priceOf(`${'0'.repeat(28)}4.50`)).toBe(450);
+    expect(priceOf(`${'0'.repeat(29)}4.50`)).toBe('price must be a positive amount');
+  });
+
+  it.each(['usd', '$', '1'])('rejects a 100,000 character price cell starting %j in well under 100 ms', (start) => {
+    const hostile = `${start}${' '.repeat(100_000)}x`;
+    const began = performance.now();
+
+    expect(priceOf(hostile)).toBe('price must be a positive amount');
+    expect(performance.now() - began).toBeLessThan(100);
+  });
+
   it('rejects a price too large to store', () => {
     expect(priceOf('21474836.48')).toBe('price is too large');
     expect(priceOf('99999999999999999999999')).toBe('price is too large');

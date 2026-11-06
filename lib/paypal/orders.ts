@@ -26,9 +26,10 @@ function captureStatus(status: string): CaptureResult['status'] {
   return status === 'COMPLETED' || status === 'PENDING' ? status : 'DECLINED';
 }
 
-function readCapture(order: Order): CaptureResult {
+/** Reads the first capture of an order. `orderId` is the order we asked about, which the body may not repeat. */
+function readCapture(orderId: string, order: Order): CaptureResult {
   const capture = order.purchase_units?.[0]?.payments?.captures?.[0];
-  if (!capture) throw new Error(`PayPal order ${order.id} is ${order.status} with no capture`);
+  if (!capture) throw new Error(`PayPal order ${orderId} is ${order.status} with no capture`);
   return { captureId: capture.id, status: captureStatus(capture.status) };
 }
 
@@ -68,7 +69,7 @@ export const chargeSavedWallet: PaypalPort['chargeSavedWallet'] = async (i) => {
   if (order.status === 'APPROVED' || order.status === 'CREATED') {
     return { orderId: order.id, ...(await captureOrder(order.id, `${i.requestId}-capture`)) };
   }
-  return { orderId: order.id, ...readCapture(order) };
+  return { orderId: order.id, ...readCapture(order.id, order) };
 };
 
 export const createApprovalOrder: PaypalPort['createApprovalOrder'] = async (i) => {
@@ -106,5 +107,5 @@ export const captureOrder: PaypalPort['captureOrder'] = async (orderId, requestI
     if (isInstrumentDeclined(error)) return { captureId: '', status: 'DECLINED' };
     throw error;
   }
-  return readCapture(order);
+  return readCapture(orderId, order);
 };

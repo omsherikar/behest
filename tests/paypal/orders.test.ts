@@ -175,8 +175,8 @@ describe('captureOrder', () => {
     expect(error).toMatchObject({ status: 422, body: expect.stringContaining('ORDER_ALREADY_CAPTURED') });
   });
 
-  it('fails, naming the order, when the response has no capture', async () => {
-    const noCapture = { ...captureCompleted, purchase_units: [{ reference_id: 'default' }] };
+  it('fails, naming the order it was asked to capture, when the response has no capture', async () => {
+    const noCapture = { status: 'COMPLETED', purchase_units: [{ reference_id: 'default' }] };
     stubFetch([{ method: 'POST', path: APPROVAL_CAPTURE, status: 201, body: noCapture }]);
 
     await expect(captureOrder(APPROVAL_ORDER_ID, requestId)).rejects.toThrow(/9GT47180MC2365043/);

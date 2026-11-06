@@ -94,7 +94,7 @@ it('prices the cart from the catalog as it is now', () => {
   expect(result.cart?.totalCents).toBe(1975);
 });
 
-it('blocks an unknown SKU', () => {
+it('blocks an unknown SKU and skips cart rules', () => {
   const result = evaluateGate(input({ proposal: proposal(['TUR-100', 1], ['NOPE-1', 1]) }));
   expect(result.verdict).toBe('BLOCK');
   expect(result.cart).toBeNull();
@@ -102,6 +102,11 @@ it('blocks an unknown SKU', () => {
     rule: 'cart_valid',
     result: 'block',
     detail: 'NOPE-1 is not sold by Ravi Spices',
+  });
+  expect(outcome(result, 'category_allowed')).toEqual({
+    rule: 'category_allowed',
+    result: 'skip',
+    detail: 'Not checked because the cart is not valid',
   });
 });
 
@@ -180,5 +185,89 @@ it('allows a mandate and policy that expire later', () => {
     rule: 'mandate_active',
     result: 'pass',
     detail: 'The mandate is active and has not expired',
+  });
+});
+
+it('blocks electronics', () => {
+  const result = evaluateGate(input({ proposal: proposal(['EAR-01', 1]) }));
+  expect(result.verdict).toBe('BLOCK');
+  expect(outcome(result, 'category_allowed')).toEqual({
+    rule: 'category_allowed',
+    result: 'block',
+    detail: 'electronics is not allowed by your mandate',
+  });
+});
+
+it.each<[string, MandatePolicy['categories'], string, string]>([
+  ['outside the allow list', { allow: ['groceries'], deny: [] }, 'TUR-100', 'spices is not allowed by your mandate'],
+  ['denied with no allow list', { allow: null, deny: ['spices'] }, 'TUR-100', 'spices is not allowed by your mandate'],
+])('blocks a category %s', (_, categories, sku, detail) => {
+  const result = evaluateGate(input({ policy: { ...demoPolicy, categories }, proposal: proposal([sku, 1]) }));
+  expect(result.verdict).toBe('BLOCK');
+  expect(outcome(result, 'category_allowed')).toMatchObject({ result: 'block', detail });
+});
+
+it('names a category in words', () => {
+  const result = evaluateGate(
+    input({
+      policy: { ...demoPolicy, categories: { allow: null, deny: ['personal_care'] } },
+      catalog: catalog('CUM-100', { category: 'personal_care' }),
+    }),
+  );
+  expect(outcome(result, 'category_allowed')?.detail).toBe('personal care is not allowed by your mandate');
+});
+
+it('allows any category that is not denied when there is no allow list', () => {
+  const result = evaluateGate(
+    input({ policy: { ...demoPolicy, categories: { allow: null, deny: [] } }, proposal: proposal(['EAR-01', 1]) }),
+  );
+  expect(outcome(result, 'category_allowed')).toMatchObject({
+    result: 'pass',
+    detail: 'Every item is in a category your mandate allows',
+  });
+});
+
+it.each<[string, MandatePolicy['merchants']]>([
+  ['a denied seller', { allow: null, deny: ['ravi-spices'] }],
+  ['a seller outside the allow list', { allow: ['other-shop'], deny: [] }],
+])('blocks %s', (_, merchants) => {
+  const result = evaluateGate(input({ policy: { ...demoPolicy, merchants } }));
+  expect(result.verdict).toBe('BLOCK');
+  expect(outcome(result, 'seller_allowed')).toEqual({
+    rule: 'seller_allowed',
+    result: 'block',
+    detail: 'Ravi Spices is not allowed by your mandate',
+  });
+});
+
+it('allows a seller on the allow list', () => {
+  const result = evaluateGate(input({ policy: { ...demoPolicy, merchants: { allow: ['ravi-spices'], deny: [] } } }));
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'seller_allowed')).toMatchObject({ result: 'pass', detail: 'Ravi Spices is allowed by your mandate' });
+});
+
+it('blocks a flagged listing', () => {
+  const result = evaluateGate(input({ proposal: proposal(['TUR-100', 1], ['SAF-1G', 1]) }));
+  expect(result.verdict).toBe('BLOCK');
+  expect(outcome(result, 'listing_clean')).toEqual({
+    rule: 'listing_clean',
+    result: 'block',
+    detail: 'Kashmiri saffron 1g contains instructions aimed at AI agents',
+  });
+});
+
+it('blocks a listing with any other screening flag', () => {
+  const result = evaluateGate(input({ catalog: catalog('CUM-100', { flags: ['counterfeit'] }) }));
+  expect(result.verdict).toBe('BLOCK');
+  expect(outcome(result, 'listing_clean')).toMatchObject({
+    result: 'block',
+    detail: 'Cumin 100g was flagged by listing screening',
+  });
+});
+
+it('passes listings with no screening flags', () => {
+  expect(outcome(evaluateGate(input()), 'listing_clean')).toMatchObject({
+    result: 'pass',
+    detail: 'No item in the cart was flagged by listing screening',
   });
 });

@@ -3,7 +3,7 @@ import type { Category } from '@/lib/domain/categories';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { PurchaseProposal } from '@/lib/domain/proposal';
 import { maxVerdict, type Verdict } from '@/lib/domain/verdict';
-import { RULESET_VERSION, type RuleOutcome } from './rules';
+import { RULESET_VERSION, type RuleId, type RuleOutcome } from './rules';
 
 // The policy gate (architecture section 5.1): plain TypeScript with no model in it, deciding
 // ALLOW, ASK or BLOCK for one purchase and recording why. Prices, titles and categories come
@@ -51,6 +51,7 @@ export type GateResult = {
 type Check = Omit<RuleOutcome, 'rule'>;
 const pass = (detail: string): Check => ({ result: 'pass', detail });
 const block = (detail: string): Check => ({ result: 'block', detail });
+const skip = (detail: string): Check => ({ result: 'skip', detail });
 
 const VERDICT_OF: Record<RuleOutcome['result'], Verdict> = { pass: 'ALLOW', skip: 'ALLOW', ask: 'ASK', block: 'BLOCK' };
 
@@ -60,6 +61,18 @@ const VERDICT_OF: Record<RuleOutcome['result'], Verdict> = { pass: 'ALLOW', skip
  */
 const atOrBelow = (value: number, limit: number) => value <= limit;
 
+/** What the rules after cart_valid read. `entries` holds the catalog entry behind each cart item, in order. */
+type CartContext = { input: GateInput; policy: MandatePolicy; cart: Cart; entries: CatalogEntry[] };
+
+/** The rules that need a valid cart, in order. When there is no cart they are all skipped. */
+const CART_RULES: [RuleId, (context: CartContext) => Check][] = [
+  ['category_allowed', categoryAllowed],
+  ['seller_allowed', sellerAllowed],
+  ['listing_clean', listingClean],
+];
+
+const NOT_CHECKED = skip('Not checked because the cart is not valid');
+
 /** Evaluates every rule in order and returns the most severe result with all the reasons. */
 export function evaluateGate(input: GateInput): GateResult {
   const { policy } = input;
@@ -68,6 +81,8 @@ export function evaluateGate(input: GateInput): GateResult {
     { rule: 'mandate_active', ...mandateActive(input, policy) },
     { rule: 'cart_valid', ...built.check },
   ];
+  const context: CartContext | null = built.cart && { input, policy, cart: built.cart, entries: built.entries };
+  for (const [rule, check] of CART_RULES) outcomes.push({ rule, ...(context ? check(context) : NOT_CHECKED) });
   return {
     verdict: maxVerdict(...outcomes.map((o) => VERDICT_OF[o.result])),
     outcomes,
@@ -107,7 +122,8 @@ function buildCart({ proposal, seller, catalog }: GateInput): BuiltCart {
     const entry = catalog.get(sku);
     if (!entry || entry.sku !== sku) return { check: block(`${sku} is not sold by ${seller.name}`), cart: null };
     if (entry.stock !== null && !atOrBelow(quantity, entry.stock)) {
-      const detail = entry.stock > 0 ? `${entry.title} has only ${entry.stock} in stock` : `${entry.title} is out of stock`;
+      const detail =
+        entry.stock > 0 ? `${entry.title} has only ${entry.stock} in stock` : `${entry.title} is out of stock`;
       return { check: block(detail), cart: null };
     }
     entries.push(entry);
@@ -123,4 +139,29 @@ function buildCart({ proposal, seller, catalog }: GateInput): BuiltCart {
     totalCents: items.reduce((sum, i) => sum + i.unitPriceCents * i.quantity, 0),
   });
   return { check: pass(`Every item is listed by ${seller.name} and in stock`), cart, entries };
+}
+
+function categoryAllowed({ cart, policy }: CartContext): Check {
+  const { allow, deny } = policy.categories;
+  const refused = cart.items.find((i) => deny.includes(i.category) || (allow !== null && !allow.includes(i.category)));
+  if (refused) return block(`${refused.category.replaceAll('_', ' ')} is not allowed by your mandate`);
+  return pass('Every item is in a category your mandate allows');
+}
+
+function sellerAllowed({ input: { seller }, policy }: CartContext): Check {
+  const { allow, deny } = policy.merchants;
+  if (deny.includes(seller.slug) || (allow !== null && !allow.includes(seller.slug))) {
+    return block(`${seller.name} is not allowed by your mandate`);
+  }
+  return pass(`${seller.name} is allowed by your mandate`);
+}
+
+function listingClean({ entries }: CartContext): Check {
+  const flagged = entries.find((e) => e.flags.length > 0);
+  if (!flagged) return pass('No item in the cart was flagged by listing screening');
+  return block(
+    flagged.flags.includes('agent_instructions')
+      ? `${flagged.title} contains instructions aimed at AI agents`
+      : `${flagged.title} was flagged by listing screening`,
+  );
 }

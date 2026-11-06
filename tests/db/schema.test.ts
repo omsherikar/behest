@@ -19,26 +19,14 @@ import {
   webhookEvents,
 } from '@/lib/db/schema';
 import type { Cart } from '@/lib/domain/cart';
-import type { MandatePolicy } from '@/lib/domain/policy';
 import type { PurchaseProposal } from '@/lib/domain/proposal';
+import { demoPolicy } from '@/tests/helpers/fixtures';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 // Postgres reports a unique constraint violation as SQLSTATE 23505; Drizzle keeps the driver error as `cause`.
 const UNIQUE_VIOLATION = { cause: { code: '23505' } };
 
 const HASH = 'a'.repeat(64);
-
-const policy: MandatePolicy = {
-  version: 1,
-  currency: 'USD',
-  budget: { amountCents: 6000, period: 'month' },
-  perPurchaseMaxCents: 6000,
-  askAboveCents: 2500,
-  categories: { allow: ['groceries', 'spices'], deny: ['electronics'] },
-  merchants: { allow: null, deny: [] },
-  velocity: null,
-  expiresAt: null,
-};
 
 const proposal: PurchaseProposal = {
   sellerSlug: 'ravi-spices',
@@ -68,7 +56,7 @@ function mandateRow(buyerId: string, status: MandateStatus = 'active') {
   return {
     buyerId,
     sourceText: '$60 a month on groceries and spices, ask me above $25, never electronics',
-    policy,
+    policy: demoPolicy,
     policyHash: HASH,
     readback: ['Your agent can spend up to $60.00 per calendar month (UTC).'],
     readbackHash: HASH,

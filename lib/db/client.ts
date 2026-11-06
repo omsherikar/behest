@@ -31,6 +31,9 @@ function openDb(): DbHandle {
   const url = process.env.DATABASE_URL;
   if (url) {
     const pool = new Pool({ connectionString: url });
+    // An idle client losing its connection emits 'error' on the pool. Without a listener that
+    // would crash the process; the pool replaces the client on the next query.
+    pool.on('error', (error) => console.error(`Postgres pool error: ${error.message}`));
     return { db: drizzlePg({ client: pool, schema }), close: () => pool.end() };
   }
   // PGlite creates its data directory but not the parents.

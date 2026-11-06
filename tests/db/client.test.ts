@@ -15,6 +15,14 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+it('logs Postgres pool errors instead of crashing', () => {
+  vi.stubEnv('DATABASE_URL', UNREACHABLE_POSTGRES);
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const pool = poolOf(getDb());
+  pool.emit('error', new Error('terminating connection due to administrator command'));
+  expect(log).toHaveBeenCalledWith(expect.stringContaining('terminating connection due to administrator command'));
+});
+
 it('closes the database so the next getDb() opens a new one', async () => {
   vi.stubEnv('DATABASE_URL', UNREACHABLE_POSTGRES);
   const db = getDb();

@@ -3,7 +3,7 @@ import type { BetaRunnableTool } from '@anthropic-ai/sdk/lib/tools/BetaRunnableT
 import type { BetaMessage, BetaMessageParam, BetaStopReason } from '@anthropic-ai/sdk/resources/beta/messages';
 import { dailyCapUsd, type LlmDeps, type LlmFailure, type LlmResult, recordCall, spendCapFailure } from './client';
 import { type LlmRoute, ROUTE_HEADER, routeConfig } from './routes';
-import { type BilledUsage, billedUsage, FALLBACK_BETA, isMessage, stopFailure } from './structured';
+import { type BilledUsage, billedUsage, FALLBACK_BETA, isMessage, salvagedUsage, stopFailure } from './structured';
 
 // A bounded agent loop: the model calls the given tools, the SDK's tool runner runs them and sends
 // their results back, until the model stops calling tools or the turns run out. Each turn is one
@@ -119,18 +119,24 @@ export async function runToolLoop(
   try {
     for (let count = 1; ; count++) {
       turn = { startedAt: null, requestId: null };
+      let response: unknown;
       let message: BetaMessage;
       let billed: BilledUsage;
       try {
         // Runs the tools of the previous reply, if any, then sends this turn's request.
         const next = await turns.next();
         if (next.done) break;
-        message = next.value;
+        response = message = next.value;
         if (!isMessage(message)) throw new Error('The response was not a message');
         billed = billedUsage(message, model);
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        const callId = await recordCall(deps.db, { ...logged(), ok: false, error: `api_error: ${detail}` });
+        const callId = await recordCall(deps.db, {
+          ...logged(),
+          ...salvagedUsage(response, model),
+          ok: false,
+          error: `api_error: ${detail}`,
+        });
         return { ok: false, error: 'api_error', callId, detail };
       }
 

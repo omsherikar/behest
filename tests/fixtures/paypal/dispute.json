@@ -1,0 +1,60 @@
+{
+  "dispute_id": "PP-R-QXT-10071254",
+  "create_time": "2026-11-04T16:22:41.000Z",
+  "update_time": "2026-11-04T16:23:07.000Z",
+  "disputed_transactions": [
+    {
+      "buyer_transaction_id": "6CB19447XT0352117",
+      "seller_transaction_id": "3KX75190LV2280416",
+      "create_time": "2026-11-03T11:40:02.000Z",
+      "transaction_status": "COMPLETED",
+      "gross_amount": {
+        "currency_code": "USD",
+        "value": "18.75"
+      },
+      "buyer": {
+        "name": "Dana Whitfield"
+      },
+      "seller": {
+        "merchant_id": "8LXK3ND6RW2QJ",
+        "name": "Behest"
+      }
+    }
+  ],
+  "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+  "status": "WAITING_FOR_SELLER_RESPONSE",
+  "dispute_amount": {
+    "currency_code": "USD",
+    "value": "18.75"
+  },
+  "seller_response_due_date": "2026-11-24T16:22:41.000Z",
+  "dispute_life_cycle_stage": "INQUIRY",
+  "dispute_channel": "INTERNAL",
+  "messages": [
+    {
+      "posted_by": "BUYER",
+      "time_posted": "2026-11-04T16:22:41.000Z",
+      "content": "My agent bought a 12 oz bag of whole bean coffee on November 3 and nothing has arrived."
+    }
+  ],
+  "extensions": {
+    "merchant_contacted": false
+  },
+  "links": [
+    {
+      "href": "https://api-m.sandbox.paypal.com/v1/customer/disputes/PP-R-QXT-10071254",
+      "rel": "self",
+      "method": "GET"
+    },
+    {
+      "href": "https://api-m.sandbox.paypal.com/v1/customer/disputes/PP-R-QXT-10071254/provide-evidence",
+      "rel": "provide_evidence",
+      "method": "POST"
+    },
+    {
+      "href": "https://api-m.sandbox.paypal.com/v1/customer/disputes/PP-R-QXT-10071254/send-message",
+      "rel": "send_message",
+      "method": "POST"
+    }
+  ]
+}

@@ -335,6 +335,7 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
       '[analyst] The reply failed:',
       expect.objectContaining({ message: expect.stringContaining('CLAUDE_EFFORT_STUDIO_ANALYST') }),
     );
+    expect(allSlotsFree(BUYER_KEY)).toBe(true);
   });
 
   it('frees the slot and logs the call once when the client goes away before the reply is read', async () => {

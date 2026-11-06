@@ -1,7 +1,7 @@
 import type { Middleware } from '@anthropic-ai/sdk';
 import type { BetaRunnableTool } from '@anthropic-ai/sdk/lib/tools/BetaRunnableTool';
 import type { BetaMessage, BetaMessageParam, BetaStopReason } from '@anthropic-ai/sdk/resources/beta/messages';
-import { dailyCapUsd, type LlmDeps, type LlmResult, recordCall, spendCapFailure } from './client';
+import { dailyCapUsd, type LlmDeps, type LlmFailure, type LlmResult, recordCall, spendCapFailure } from './client';
 import { type LlmRoute, ROUTE_HEADER, routeConfig } from './routes';
 import { type BilledUsage, billedUsage, FALLBACK_BETA, isMessage, stopFailure } from './structured';
 
@@ -22,6 +22,17 @@ const FINAL_STOP_REASONS: ReadonlySet<BetaStopReason | null> = new Set<BetaStopR
   'refusal',
 ]);
 
+/**
+ * Whether the reply holds a tool call from before a fallback block. Such a call was made by a model
+ * that declined the request, and a declining model must never trigger an action. Calls after the
+ * last fallback block are the serving model's.
+ */
+function hasDeclinedToolCall(message: BetaMessage): boolean {
+  const lastFallback = message.content.findLastIndex((block) => block.type === 'fallback');
+  if (lastFallback === -1) return false;
+  return message.content.slice(0, lastFallback).some((block) => block.type === 'tool_use');
+}
+
 export type ToolLoopRequest = {
   system: string;
   messages: BetaMessageParam[];
@@ -40,8 +51,9 @@ export type ToolLoopRequest = {
  * turns returns its last reply as it is: if that reply called tools, they have run, but the model has
  * not seen their results.
  *
- * Every failure of a request comes back as an LlmResult failure, with the turns before it logged; a
- * refused or cut-off turn ends the loop without running its tool calls. Only misconfiguration (an
+ * Every failure of a request comes back as an LlmResult failure, with the turns before it logged. A
+ * refused or cut-off turn ends the loop without running its tool calls, and so does a reply holding
+ * a tool call from a model that declined the request (api_error). Only misconfiguration (an
  * override, cap, turn limit or tool it cannot use) and database errors throw.
  */
 export async function runToolLoop(
@@ -85,8 +97,6 @@ export async function runToolLoop(
       fallbacks: 'default',
       max_iterations: req.maxTurns,
       // Every turn sends the whole conversation rather than continuing a server-held message thread.
-      // The requests are not streamed, so a reply that fell back carries none of the declining
-      // model's partial output, and every tool call in it is the serving model's.
       thread: false,
     },
     { headers: { [ROUTE_HEADER]: route } },
@@ -124,16 +134,19 @@ export async function runToolLoop(
         return { ok: false, error: 'api_error', callId, detail };
       }
 
-      const stopped = stopFailure(message);
+      // Checked before the runner gets control back, so a reply that fails never has its tools run.
+      const failure: { error: LlmFailure; detail?: string } | null = hasDeclinedToolCall(message)
+        ? { error: 'api_error', detail: 'A tool call came from a model that declined the request' }
+        : stopFailure(message);
       const callId = await recordCall(deps.db, {
         ...logged(),
         ...billed,
         stopReason: message.stop_reason,
-        ok: !stopped,
-        error: stopped ? [stopped.error, stopped.detail].filter(Boolean).join(': ') : null,
+        ok: !failure,
+        error: failure ? [failure.error, failure.detail].filter(Boolean).join(': ') : null,
       });
       req.onMessage?.(message);
-      if (stopped) return { ok: false, ...stopped, callId };
+      if (failure) return { ok: false, ...failure, callId };
       last = { message, callId };
 
       if (count < req.maxTurns && !FINAL_STOP_REASONS.has(message.stop_reason)) {

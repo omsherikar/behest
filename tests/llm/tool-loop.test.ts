@@ -324,6 +324,66 @@ it('prices each turn by its fallback hops and logs the model that served it', as
   ]);
 });
 
+it('stops before running a tool call that a declining model made before a fallback', async () => {
+  const { db, fake, run, loop } = await setup([
+    messageJson({
+      fallbackFrom: { model: 'claude-opus-5-5', toolUses: [searchCall] },
+      model: 'claude-opus-4-8',
+      text: 'Here is what I found.',
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 1000, output_tokens: 500 },
+    }),
+    messageJson({ text: 'Done.' }),
+  ]);
+
+  const result = await loop();
+
+  const rows = await db.select().from(llmCalls);
+  expect(result).toEqual({
+    ok: false,
+    error: 'api_error',
+    callId: rows[0].id,
+    detail: 'A tool call came from a model that declined the request',
+  });
+  expect(run).not.toHaveBeenCalled();
+  expect(fake.requests).toHaveLength(1);
+  // Logged with what the reply cost: the declining attempt had no tokens, claude-opus-4-8 1000 x $5 + 500 x $25.
+  expect(rows).toEqual([
+    expect.objectContaining({
+      ok: false,
+      model: 'claude-opus-4-8',
+      stopReason: 'tool_use',
+      costUsd: 0.0175,
+      error: 'api_error: A tool call came from a model that declined the request',
+    }),
+  ]);
+});
+
+it('runs a tool call the fallback model made after the fallback', async () => {
+  const { run, loop } = await setup([
+    messageJson({
+      fallbackFrom: { model: 'claude-opus-5-5', text: 'Let me look.' },
+      model: 'claude-opus-4-8',
+      toolUses: [searchCall],
+    }),
+    messageJson({ text: 'Done.', model: 'claude-opus-4-8' }),
+  ]);
+
+  expect(await loop()).toMatchObject({ ok: true, value: { stop_reason: 'end_turn' } });
+  expect(run).toHaveBeenCalledTimes(1);
+});
+
+it('runs every tool call of a reply that did not fall back', async () => {
+  const saffronCall = { id: 'toolu_2', name: 'search_catalog', input: { query: 'saffron' } };
+  const { run, loop } = await setup([
+    messageJson({ toolUses: [searchCall, saffronCall] }),
+    messageJson({ text: 'Done.' }),
+  ]);
+
+  expect(await loop()).toMatchObject({ ok: true, value: { stop_reason: 'end_turn' } });
+  expect(run.mock.calls.map(([input]) => input)).toEqual([{ query: 'turmeric' }, { query: 'saffron' }]);
+});
+
 it('logs how long each request took, leaving out the time its tools ran', async () => {
   let now = NOW;
   const advance = (ms: number) => {

@@ -1,10 +1,11 @@
 import { expect, it } from 'vitest';
-import type { MandatePolicy } from '@/lib/domain/policy';
+import type { BudgetPeriod, MandatePolicy } from '@/lib/domain/policy';
 import type { PurchaseProposal } from '@/lib/domain/proposal';
 import { evaluateGate, type CatalogEntry, type GateInput, type GateResult } from '@/lib/gate/evaluate';
 import type { RuleId } from '@/lib/gate/rules';
 
 const NOW = new Date('2026-11-06T12:00:00Z');
+const hoursAgo = (hours: number) => new Date(NOW.getTime() - hours * 60 * 60 * 1000);
 
 const demoPolicy: MandatePolicy = {
   version: 1,
@@ -269,5 +270,108 @@ it('passes listings with no screening flags', () => {
   expect(outcome(evaluateGate(input()), 'listing_clean')).toMatchObject({
     result: 'pass',
     detail: 'No item in the cart was flagged by listing screening',
+  });
+});
+
+it('blocks over the per-purchase maximum', () => {
+  const result = evaluateGate(
+    input({ policy: { ...demoPolicy, perPurchaseMaxCents: 3000 }, proposal: proposal(['GIFT-SET', 1]) }),
+  );
+  expect(result.verdict).toBe('BLOCK');
+  expect(outcome(result, 'per_purchase_max')).toEqual({
+    rule: 'per_purchase_max',
+    result: 'block',
+    detail: '$40.00 is over your $30.00 per-purchase limit',
+  });
+});
+
+it('allows a total exactly at the per-purchase maximum', () => {
+  const result = evaluateGate(input({ policy: { ...demoPolicy, perPurchaseMaxCents: 1875, askAboveCents: null } }));
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'per_purchase_max')).toMatchObject({
+    result: 'pass',
+    detail: '$18.75 is within your $18.75 per-purchase limit',
+  });
+});
+
+it('blocks when the period budget would be exceeded', () => {
+  const result = evaluateGate(input({ spentInPeriodCents: 3800, proposal: proposal(['GIFT-SET', 1]) }));
+  expect(result.verdict).toBe('BLOCK');
+  expect(outcome(result, 'budget_remaining')).toEqual({
+    rule: 'budget_remaining',
+    result: 'block',
+    detail: '$40.00 would exceed the $22.00 left this month',
+  });
+});
+
+it.each<[BudgetPeriod, string]>([
+  ['day', '$40.00 would exceed the $22.00 left this day'],
+  ['week', '$40.00 would exceed the $22.00 left this week'],
+  ['once', '$40.00 would exceed the $22.00 left on this mandate'],
+])('names the %s budget period', (period, detail) => {
+  const result = evaluateGate(
+    input({
+      policy: { ...demoPolicy, budget: { amountCents: 6000, period } },
+      spentInPeriodCents: 3800,
+      proposal: proposal(['GIFT-SET', 1]),
+    }),
+  );
+  expect(outcome(result, 'budget_remaining')?.detail).toBe(detail);
+});
+
+it('allows a total that uses exactly the budget left', () => {
+  const result = evaluateGate(input({ spentInPeriodCents: 4125 }));
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'budget_remaining')).toMatchObject({
+    result: 'pass',
+    detail: '$18.75 fits in the $18.75 left this month',
+  });
+});
+
+it('counts nothing as left once spend is over the budget', () => {
+  const result = evaluateGate(input({ spentInPeriodCents: 7000 }));
+  expect(result.verdict).toBe('BLOCK');
+  expect(outcome(result, 'budget_remaining')?.detail).toBe('$18.75 would exceed the $0.00 left this month');
+});
+
+it.each<[string, NonNullable<MandatePolicy['velocity']>, Date[], string]>([
+  [
+    'two purchases in a day',
+    { maxPurchases: 2, windowHours: 24 },
+    [hoursAgo(23), NOW],
+    'Your limit of 2 purchases in 24 hours is already reached',
+  ],
+  [
+    'one purchase an hour',
+    { maxPurchases: 1, windowHours: 1 },
+    [hoursAgo(0.5)],
+    'Your limit of 1 purchase in 1 hour is already reached',
+  ],
+])('blocks over the velocity limit of %s', (_, limit, recentPurchaseTimes, detail) => {
+  const result = evaluateGate(input({ policy: { ...demoPolicy, velocity: limit }, recentPurchaseTimes }));
+  expect(result.verdict).toBe('BLOCK');
+  expect(outcome(result, 'velocity')).toEqual({ rule: 'velocity', result: 'block', detail });
+});
+
+it('counts only purchases strictly inside the velocity window', () => {
+  const result = evaluateGate(
+    input({
+      policy: { ...demoPolicy, velocity: { maxPurchases: 2, windowHours: 24 } },
+      recentPurchaseTimes: [hoursAgo(1), hoursAgo(24), hoursAgo(30)],
+    }),
+  );
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'velocity')).toMatchObject({
+    result: 'pass',
+    detail: 'Within your limit of 2 purchases in 24 hours',
+  });
+});
+
+it('passes velocity when the mandate sets no limit', () => {
+  const result = evaluateGate(input({ recentPurchaseTimes: [hoursAgo(1), hoursAgo(2), hoursAgo(3)] }));
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'velocity')).toMatchObject({
+    result: 'pass',
+    detail: 'Your mandate sets no limit on how often to buy',
   });
 });

@@ -1,6 +1,7 @@
 import { Cart, type CartItem } from '@/lib/domain/cart';
 import type { Category } from '@/lib/domain/categories';
-import type { MandatePolicy } from '@/lib/domain/policy';
+import { formatUsd } from '@/lib/domain/money';
+import type { BudgetPeriod, MandatePolicy } from '@/lib/domain/policy';
 import { PurchaseProposal } from '@/lib/domain/proposal';
 import { maxVerdict, type Verdict } from '@/lib/domain/verdict';
 import { RULESET_VERSION, type RuleId, type RuleOutcome } from './rules';
@@ -61,6 +62,9 @@ const VERDICT_OF: Record<RuleOutcome['result'], Verdict> = { pass: 'ALLOW', skip
  */
 const atOrBelow = (value: number, limit: number) => value <= limit;
 
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+const HOUR_MS = 60 * 60 * 1000;
+
 /** What the rules after cart_valid read. `entries` holds the catalog entry behind each cart item, in order. */
 type CartContext = { input: GateInput; policy: MandatePolicy; cart: Cart; entries: CatalogEntry[] };
 
@@ -69,6 +73,9 @@ const CART_RULES: [RuleId, (context: CartContext) => Check][] = [
   ['category_allowed', categoryAllowed],
   ['seller_allowed', sellerAllowed],
   ['listing_clean', listingClean],
+  ['per_purchase_max', perPurchaseMax],
+  ['budget_remaining', budgetRemaining],
+  ['velocity', velocity],
 ];
 
 const NOT_CHECKED = skip('Not checked because the cart is not valid');
@@ -164,4 +171,37 @@ function listingClean({ entries }: CartContext): Check {
       ? `${flagged.title} contains instructions aimed at AI agents`
       : `${flagged.title} was flagged by listing screening`,
   );
+}
+
+function perPurchaseMax({ cart, policy }: CartContext): Check {
+  const total = formatUsd(cart.totalCents);
+  const limit = `${formatUsd(policy.perPurchaseMaxCents)} per-purchase limit`;
+  return atOrBelow(cart.totalCents, policy.perPurchaseMaxCents)
+    ? pass(`${total} is within your ${limit}`)
+    : block(`${total} is over your ${limit}`);
+}
+
+const LEFT_IN_PERIOD: Record<BudgetPeriod, string> = {
+  day: 'left this day',
+  week: 'left this week',
+  month: 'left this month',
+  once: 'left on this mandate',
+};
+
+function budgetRemaining({ cart, policy, input }: CartContext): Check {
+  const remaining = Math.max(0, policy.budget.amountCents - input.spentInPeriodCents);
+  const total = formatUsd(cart.totalCents);
+  const left = `${formatUsd(remaining)} ${LEFT_IN_PERIOD[policy.budget.period]}`;
+  return atOrBelow(cart.totalCents, remaining)
+    ? pass(`${total} fits in the ${left}`)
+    : block(`${total} would exceed the ${left}`);
+}
+
+function velocity({ policy, input }: CartContext): Check {
+  if (policy.velocity === null) return pass('Your mandate sets no limit on how often to buy');
+  const { maxPurchases, windowHours } = policy.velocity;
+  const windowStart = input.now.getTime() - windowHours * HOUR_MS;
+  const recent = input.recentPurchaseTimes.filter((t) => t.getTime() > windowStart).length;
+  const limit = `limit of ${plural(maxPurchases, 'purchase')} in ${plural(windowHours, 'hour')}`;
+  return recent < maxPurchases ? pass(`Within your ${limit}`) : block(`Your ${limit} is already reached`);
 }

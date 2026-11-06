@@ -75,7 +75,10 @@ export function llmDeps(): LlmDeps {
 /** Behest's public base URL from APP_URL, without a trailing slash: where PayPal sends buyers back. */
 export function appUrl(): string {
   const url = process.env.APP_URL?.trim().replace(/\/+$/, '') ?? '';
-  if (!URL.canParse(url)) throw new Error('APP_URL must be the absolute URL Behest is served from');
+  const protocol = URL.parse(url)?.protocol;
+  if (protocol !== 'http:' && protocol !== 'https:') {
+    throw new Error('APP_URL must be the http or https URL Behest is served from');
+  }
   return url;
 }
 

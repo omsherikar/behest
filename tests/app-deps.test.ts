@@ -62,10 +62,19 @@ describe('appUrl', () => {
     expect(appUrl()).toBe('https://behest.example.com');
   });
 
-  it.each(['', '   ', 'not a url'])('refuses an APP_URL of %j', async (value) => {
+  it.each(['', '   ', 'not a url', 'ftp://behest.example.com', 'javascript:alert(1)', 'mailto:ops@behest.example.com'])(
+    'refuses an APP_URL of %j',
+    async (value) => {
+      const { appUrl } = await freshAppDeps();
+      vi.stubEnv('APP_URL', value);
+      expect(() => appUrl()).toThrow('APP_URL must be the http or https URL Behest is served from');
+    },
+  );
+
+  it('accepts an http URL, for local development', async () => {
     const { appUrl } = await freshAppDeps();
-    vi.stubEnv('APP_URL', value);
-    expect(() => appUrl()).toThrow(/APP_URL/);
+    vi.stubEnv('APP_URL', 'http://localhost:3000/');
+    expect(appUrl()).toBe('http://localhost:3000');
   });
 });
 

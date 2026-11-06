@@ -5,6 +5,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/beta/messages';
 import { connection, type NextRequest } from 'next/server';
 import { getDb } from '@/lib/db/client';
+import { MAX_BODY_BYTES, readBody } from '@/lib/http/read-body';
 import { createClaude } from '@/lib/llm/client';
 import { type LlmStreamEvent, type StreamRequest, streamReply } from '@/lib/llm/stream';
 import { type Release, takeSlot } from '@/lib/inflight';
@@ -22,9 +23,6 @@ import { getPersona, SESSION_COOKIE } from '@/lib/session';
 // refused.
 
 const ROUTE = 'studio_analyst';
-
-/** The largest turn accepted, in bytes: about a quarter of a million tokens. */
-const MAX_BODY_BYTES = 1_000_000;
 
 /**
  * The most replies one address and persona may have streaming at once. The spend cap is checked
@@ -120,30 +118,6 @@ function withToday(system: string, now: Date): string {
 }
 
 /**
- * The request body as text, or null when it is over MAX_BODY_BYTES. A body that declares a larger
- * length is refused unread; any other is counted as it arrives, so one that misstates or leaves
- * out its length is stopped as soon as it passes the limit.
- */
-async function readBody(request: NextRequest): Promise<string | null> {
-  if (Number(request.headers.get('content-length')) > MAX_BODY_BYTES) return null;
-  if (!request.body) return '';
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_BODY_BYTES) {
-      await reader.cancel().catch(() => {});
-      return null;
-    }
-    chunks.push(value);
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-/**
  * The events as server-sent events. The reply stops when the reader cancels the stream (a closed
  * tab, or Studio's Stop button) or when `request`'s signal aborts, which is how Next.js reports a
  * client that went away even when it never reads or cancels this stream. Either way the reply
@@ -235,7 +209,8 @@ export async function POST(request: NextRequest) {
     return error(429, 'Too many questions at once. Try again in a minute.');
   }
 
-  const text = await readBody(request);
+  // The largest turn accepted: about a quarter of a million tokens.
+  const text = await readBody(request, MAX_BODY_BYTES);
   if (text === null) return error(413, 'This conversation is too long for the analyst. Start a new one.');
   const read = readTurn(text);
   if (!read.ok) return error(400, read.message);

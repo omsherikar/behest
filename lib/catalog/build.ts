@@ -25,10 +25,11 @@ export type ListingDraft = {
 };
 
 export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+type PhotoType = (typeof PHOTO_TYPES)[number];
 
 /** A product photo with the price and stock the seller gives for it. The model never sets a price. */
 export type ListingPhoto = {
-  mediaType: (typeof PHOTO_TYPES)[number];
+  mediaType: PhotoType;
   /** The image bytes in base64, without a `data:` prefix. */
   base64: string;
   priceCents: number;
@@ -46,6 +47,10 @@ export class CatalogInputError extends Error {
 export const BATCH_SIZE = 50;
 /** Photos per build. They all go in one call. */
 export const MAX_PHOTOS = 8;
+/** The most base64 text one photo may be: 5 MiB, which is 3.75 MiB of image, inside the API's limit per image. */
+export const PHOTO_BASE64_MAX = 5 * 1024 * 1024;
+/** The most base64 text all the photos may be together: 20 MiB, which keeps the request well inside the API's 32 MB. */
+export const PHOTOS_BASE64_MAX = 20 * 1024 * 1024;
 
 const TITLE_MAX = 120;
 const DESCRIPTION_MAX = 2000;
@@ -58,6 +63,15 @@ const INT_MAX = 2_147_483_647;
  */
 const BATCH_TEXT_MAX = 2_000_000;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+/**
+ * The bytes each accepted type starts with, as offsets and text in the binary string that `atob`
+ * returns. A WebP file is a RIFF file whose form type, at byte 8, is WEBP.
+ */
+const SIGNATURES: Record<PhotoType, { name: string; parts: [number, string][] }> = {
+  'image/jpeg': { name: 'JPEG', parts: [[0, '\xff\xd8\xff']] },
+  'image/png': { name: 'PNG', parts: [[0, '\x89PNG\r\n\x1a\n']] },
+  'image/webp': { name: 'WebP', parts: [[0, 'RIFF'], [8, 'WEBP']] },
+};
 /** The reason given when the model flags a listing without saying why. */
 const FLAGGED = 'flagged as text aimed at AI agents';
 
@@ -147,17 +161,29 @@ function checkRows(rows: CatalogRow[]): void {
   }
 }
 
+/**
+ * Each photo in turn: a type it accepts, base64 data of that type within the size limits, and a
+ * price and stock it can store. Sizes are given to sellers in MB of image, not of base64.
+ */
 function checkPhotos(photos: ListingPhoto[]): void {
   if (photos.length > MAX_PHOTOS) {
     throw new CatalogInputError(`At most ${MAX_PHOTOS} photos can be listed at once, got ${photos.length}`);
   }
+  let total = 0;
   photos.forEach((photo, index) => {
     const which = `Photo ${index + 1}`;
-    if (!(PHOTO_TYPES as readonly string[]).includes(photo.mediaType)) {
+    const signature = Object.hasOwn(SIGNATURES, photo.mediaType) ? SIGNATURES[photo.mediaType] : undefined;
+    if (signature === undefined) {
       throw new CatalogInputError(`${which} must be a JPEG, PNG or WebP image, not ${JSON.stringify(photo.mediaType)}`);
     }
-    if (typeof photo.base64 !== 'string' || !BASE64.test(photo.base64)) {
+    if (typeof photo.base64 === 'string' && photo.base64.length > PHOTO_BASE64_MAX) {
+      throw new CatalogInputError(`${which} is too large: each photo can be at most ${imageMb(PHOTO_BASE64_MAX)} MB`);
+    }
+    if (typeof photo.base64 !== 'string' || photo.base64.length % 4 !== 0 || !BASE64.test(photo.base64)) {
       throw new CatalogInputError(`${which} must be base64 image data without a data: prefix`);
+    }
+    if (!startsWith(photo.base64, signature.parts)) {
+      throw new CatalogInputError(`${which} is not a ${signature.name} image`);
     }
     if (!isWholeNumber(photo.priceCents, 1)) {
       throw new CatalogInputError(`${which} needs a price in whole cents from 1 to ${INT_MAX}`);
@@ -165,7 +191,24 @@ function checkPhotos(photos: ListingPhoto[]): void {
     if (photo.stock != null && !isWholeNumber(photo.stock, 0)) {
       throw new CatalogInputError(`${which} stock must be a whole number from 0 to ${INT_MAX}`);
     }
+    total += photo.base64.length;
+    if (total > PHOTOS_BASE64_MAX) {
+      throw new CatalogInputError(
+        `Photos 1 to ${index + 1} come to more than ${imageMb(PHOTOS_BASE64_MAX)} MB together; send fewer or smaller photos`,
+      );
+    }
   });
+}
+
+/** The MiB of image that `chars` characters of base64 hold, which sellers know as MB. */
+function imageMb(chars: number): number {
+  return (chars * 3) / 4 / (1024 * 1024);
+}
+
+/** Whether well-formed base64 decodes to bytes that have each of `parts` at its offset. */
+function startsWith(base64: string, parts: [number, string][]): boolean {
+  const head = atob(base64.slice(0, 16));
+  return parts.every(([offset, bytes]) => head.startsWith(bytes, offset));
 }
 
 function isWholeNumber(value: unknown, min: number): boolean {

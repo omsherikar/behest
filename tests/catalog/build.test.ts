@@ -448,6 +448,14 @@ describe('listings from photos', () => {
     ]);
   });
 
+  it('accepts a WebP photo', async () => {
+    const webp: ListingPhoto = { mediaType: 'image/webp', base64: btoa('RIFF\x24\x00\x00\x00WEBPVP8 '), priceCents: 300 };
+
+    expect(await draftsOf([replyWith([photoItem(0, 'LAMP-1')])], { images: [webp] })).toEqual([
+      expect.objectContaining({ sku: 'LAMP-1', priceCents: 300 }),
+    ]);
+  });
+
   it('lists each photo at the price and stock the seller gave, with the details the reply proposes', async () => {
     expect(await draftsOf([photosReply], { images: photos })).toEqual([
       { ...GHEE, priceCents: 899, stock: 12 },
@@ -496,6 +504,10 @@ describe('listings from photos', () => {
 
 describe('input the builder refuses before calling the model', () => {
   const photo: ListingPhoto = { mediaType: 'image/png', base64: 'iVBORw0KGgo=', priceCents: 500 };
+  /** PNG data whose base64 is `length` characters, which must be a multiple of 4. */
+  const pngOfLength = (length: number): ListingPhoto => ({ ...photo, base64: `iVBORw0KGgoA${'A'.repeat(length - 12)}` });
+  const MIB = 1024 * 1024;
+  const JPEG_DATA = '/9j/4AAQSkZJRgABAQ==';
 
   it.each<[string, BuildInput, string]>([
     ['more than 8 photos', { images: Array(9).fill(photo) }, 'At most 8 photos can be listed at once, got 9'],
@@ -512,6 +524,21 @@ describe('input the builder refuses before calling the model', () => {
     ['a photo without a price', { images: [{ ...photo, priceCents: 0 }] }, 'Photo 1 needs a price in whole cents from 1 to 2147483647'],
     ['a price in fractions of a cent', { images: [{ ...photo, priceCents: 1.5 }] }, 'Photo 1 needs a price in whole cents from 1 to 2147483647'],
     ['negative stock', { images: [photo, { ...photo, stock: -1 }] }, 'Photo 2 stock must be a whole number from 0 to 2147483647'],
+    ['a photo over 5 MiB of base64', { images: [photo, pngOfLength(5 * MIB + 4)] }, 'Photo 2 is too large: each photo can be at most 3.75 MB'],
+    [
+      'photos over 20 MiB of base64 together',
+      { images: Array(5).fill(pngOfLength(4.5 * MIB)) },
+      'Photos 1 to 5 come to more than 15 MB together; send fewer or smaller photos',
+    ],
+    [
+      'a bad photo alongside valid rows',
+      { rows: ravi, images: [pngOfLength(5 * MIB + 4)] },
+      'Photo 1 is too large: each photo can be at most 3.75 MB',
+    ],
+    ['base64 cut short', { images: [{ ...photo, base64: 'iVBORw0KGgo' }] }, 'Photo 1 must be base64 image data without a data: prefix'],
+    ['a JPEG sent as a PNG', { images: [{ ...photo, base64: JPEG_DATA }] }, 'Photo 1 is not a PNG image'],
+    ['a PNG sent as a JPEG', { images: [{ ...photo, mediaType: 'image/jpeg' }] }, 'Photo 1 is not a JPEG image'],
+    ['a PNG sent as a WebP', { images: [{ ...photo, mediaType: 'image/webp' }] }, 'Photo 1 is not a WebP image'],
     ['two rows with one SKU', { rows: [row('TUR-100'), row('tur-100')] }, 'SKU tur-100 is on more than one row'],
     ['nothing to list', { rows: [], images: [] }, 'Give at least one row or photo to build listings from'],
   ])('refuses %s', async (_, input, message) => {

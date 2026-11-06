@@ -204,7 +204,7 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<
   const proposePurchase = betaZodTool({
     name: 'propose_purchase',
     description:
-      "Ask Behest to buy items from one seller. Behest prices the cart from its own catalog, checks it against the buyer's mandate and request, and returns its decision as JSON: verdict ALLOW (paid), ASK (waiting for the buyer to approve it at PayPal) or BLOCK (not bought), with the reasons.",
+      "Ask Behest to buy items from one seller. Behest prices the cart from its own catalog, checks it against the buyer's mandate and request, and returns the outcome as JSON: its verdict, the purchase status, which says what actually happened, and the reasons.",
     inputSchema: ProposePurchaseInput,
     strict: true,
     run: async ({ sellerSlug, items, rationale }) => {

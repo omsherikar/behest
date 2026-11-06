@@ -282,4 +282,29 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
     ]);
     expect(errors).not.toHaveBeenCalled();
   });
+
+  it('holds four answers open per address and persona, and frees a slot when one ends or is cancelled', async () => {
+    const db = await useDb();
+    claudeAnswers(Array.from({ length: 9 }, () => streamReply(recordedStream('text-turn'))));
+    const post = async () => POST(await request(turn));
+
+    const held = [await post(), await post(), await post(), await post()];
+    const fifth = await post();
+
+    expect(held.map((response) => response.status)).toEqual([200, 200, 200, 200]);
+    expect(fifth.status).toBe(429);
+    expect(await fifth.json()).toEqual({ error: { message: 'Too many answers in progress. Wait for one to finish.' } });
+
+    await held[0].text();
+    const sixth = await post();
+    expect(sixth.status).toBe(200);
+
+    await Promise.all([...held.slice(1), sixth].map((response) => response.body?.cancel()));
+    const afterCancel = [await post(), await post(), await post(), await post()];
+    expect(afterCancel.map((response) => response.status)).toEqual([200, 200, 200, 200]);
+
+    await Promise.all(afterCancel.map((response) => response.body?.cancel()));
+    // Every stream that started logged exactly one call, however it ended.
+    expect(await db.select().from(llmCalls)).toHaveLength(9);
+  });
 });

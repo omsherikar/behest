@@ -7,6 +7,7 @@ import { connection, type NextRequest } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { createClaude } from '@/lib/llm/client';
 import { type LlmStreamEvent, type StreamRequest, streamReply } from '@/lib/llm/stream';
+import { type Release, takeSlot } from '@/lib/inflight';
 import { rateLimit, STUDIO_ANALYST_LIMIT } from '@/lib/ratelimit';
 import { getPersona, SESSION_COOKIE } from '@/lib/session';
 
@@ -24,6 +25,12 @@ const ROUTE = 'studio_analyst';
 
 /** The largest turn accepted, in bytes: about a quarter of a million tokens. */
 const MAX_BODY_BYTES = 1_000_000;
+
+/**
+ * The most replies one address and persona may have streaming at once. The spend cap is checked
+ * as each call starts, so this bounds how far calls running side by side can go past it.
+ */
+const MAX_REPLIES_IN_FLIGHT = 4;
 
 const error = (status: number, message: string) => Response.json({ error: { message } }, { status });
 
@@ -141,9 +148,12 @@ async function readBody(request: NextRequest): Promise<string | null> {
 /**
  * The events as server-sent events. A reader that goes away (a closed tab, or Studio's Stop
  * button) cancels the stream: the reply stops and its call is still logged once, and nothing more
- * is sent or reported as a failure.
+ * is sent or reported as a failure. `release` gives the visitor's slot back however the stream ends.
  */
-function serverSentEvents(events: AsyncGenerator<LlmStreamEvent, void, undefined>): ReadableStream<Uint8Array> {
+function serverSentEvents(
+  events: AsyncGenerator<LlmStreamEvent, void, undefined>,
+  release: Release,
+): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const frame = (event: LlmStreamEvent) => encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
   let cancelled = false;
@@ -152,9 +162,14 @@ function serverSentEvents(events: AsyncGenerator<LlmStreamEvent, void, undefined
       try {
         const next = await events.next();
         if (cancelled) return;
-        if (next.done) controller.close();
-        else controller.enqueue(frame(next.value));
+        if (next.done) {
+          release();
+          controller.close();
+        } else {
+          controller.enqueue(frame(next.value));
+        }
       } catch (failure) {
+        release();
         if (cancelled) return;
         // Misconfiguration or the database: the details go to the server log, not the browser.
         console.error('[analyst] The reply failed:', failure);
@@ -169,6 +184,8 @@ function serverSentEvents(events: AsyncGenerator<LlmStreamEvent, void, undefined
         await events.return();
       } catch (failure) {
         console.error('[analyst] Logging a cancelled reply failed:', failure);
+      } finally {
+        release();
       }
     },
   });
@@ -181,7 +198,8 @@ export async function POST(request: NextRequest) {
 
   const persona = await getPersona(request.cookies.get(SESSION_COOKIE)?.value);
   if (!persona) return error(401, 'Pick a persona on the home page first.');
-  if (!rateLimit(`${ROUTE}:${clientAddress(request)}:${persona}`, STUDIO_ANALYST_LIMIT)) {
+  const visitor = `${ROUTE}:${clientAddress(request)}:${persona}`;
+  if (!rateLimit(visitor, STUDIO_ANALYST_LIMIT)) {
     return error(429, 'Too many questions at once. Try again in a minute.');
   }
 
@@ -191,13 +209,17 @@ export async function POST(request: NextRequest) {
   if (!read.ok) return error(400, read.message);
 
   const now = () => new Date();
+  const deps = { db: getDb(), claude: createClaude(), now };
+  const release = takeSlot(visitor, MAX_REPLIES_IN_FLIGHT);
+  if (!release) return error(429, 'Too many answers in progress. Wait for one to finish.');
+
   const events = streamReply(
-    { db: getDb(), claude: createClaude(), now },
+    deps,
     ROUTE,
     { ...read.turn, system: withToday(read.turn.system, now()) },
     { signal: request.signal },
   );
-  return new Response(serverSentEvents(events), {
+  return new Response(serverSentEvents(events, release), {
     headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' },
   });
 }

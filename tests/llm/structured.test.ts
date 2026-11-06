@@ -337,9 +337,9 @@ it('prices each fallback hop at its own model and logs the model that served the
 
   expect(await call()).toMatchObject({ ok: true, value: { answer: 'yes' } });
   // claude-sonnet-5-5 at its own rates: 1000 x $2 + 100 x $10 per million = $0.003.
-  // claude-sonnet-5 has no price, so the highest rates: 1000 x $4 + 500 x $20 per million = $0.014.
+  // claude-sonnet-5 has no price, so the highest rates: 1000 x $10 + 500 x $50 per million = $0.035.
   expect(await db.select().from(llmCalls)).toEqual([
-    expect.objectContaining({ model: 'claude-sonnet-5', inputTokens: 2000, outputTokens: 600, costUsd: 0.017 }),
+    expect.objectContaining({ model: 'claude-sonnet-5', inputTokens: 2000, outputTokens: 600, costUsd: 0.038 }),
   ]);
 });
 

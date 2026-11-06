@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { quoteUntrusted } from '@/lib/agent/quote';
 import { buildShoppingTools, type MarketSearch } from '@/lib/agent/tools';
 import { parseCatalogCsv } from '@/lib/catalog/csv';
@@ -112,6 +112,14 @@ async function sentTools(db: Db, tools: ReturnType<typeof buildShoppingTools>): 
 /** A raw tool result with every seller listing quote taken out, escaped as it is inside JSON. */
 const outsideQuotes = (raw: string) => raw.replaceAll(/<untrusted source=\\"seller_listing\\">[^<]*<\/untrusted>/g, '');
 
+beforeEach(() => {
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe('buildShoppingTools', () => {
   it('builds exactly the four shopping tools, each with a strict schema', async () => {
     const { tools } = await setup();
@@ -194,6 +202,23 @@ describe('propose_purchase', () => {
     });
     expect(result).toContain('propose it again');
     expect(outsideQuotes(result)).not.toMatch(/saffron|agents|propose|Spice Co|budget/i);
+  });
+
+  it('tells the agent not to propose again when the purchase flow fails, and logs why', async () => {
+    const { call, propose } = await setup();
+    propose.mockRejectedValueOnce(new Error('PayPal answered 500 on /v2/checkout/orders'));
+
+    const result = await call('propose_purchase', {
+      sellerSlug: 'ravi-spices',
+      items: [{ sku: 'TUR-100', quantity: 1 }],
+      rationale: 'Turmeric.',
+    });
+
+    expect(result).toBe('Behest could not finish this proposal. Do not propose it again; ask the buyer to check their ledger.');
+    expect(console.error).toHaveBeenCalledOnce();
+    const logged = String(vi.mocked(console.error).mock.calls[0][0]);
+    expect(logged.startsWith('Shopping agent: propose_purchase failed: ')).toBe(true);
+    expect(logged).toContain('PayPal answered 500 on /v2/checkout/orders');
   });
 
   it.each([

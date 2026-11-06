@@ -48,6 +48,8 @@ const AGENT_INSTRUCTIONS = 'agent_instructions';
 export const MARKET_NOTE = 'For price comparison only. These cannot be purchased.';
 const MARKET_UNAVAILABLE = 'Market prices are not available right now.';
 const PRODUCT_NOT_FOUND = 'No listing with that SKU at that seller. Use search_sellers to find one.';
+const PROPOSAL_FAILED =
+  'Behest could not finish this proposal. Do not propose it again; ask the buyer to check their ledger.';
 
 const SearchSellersInput = z
   .object({
@@ -89,6 +91,15 @@ const ProposePurchaseInput = z
     ),
   })
   .strict();
+
+/**
+ * Why a call failed, for the server log: the error's stack or message. Never the error object itself,
+ * because an HTTP client error can carry request headers, credentials included.
+ */
+function describeFailure(error: unknown): string {
+  if (error instanceof Error) return error.stack ?? `${error.name}: ${error.message}`;
+  return String(error);
+}
 
 /** `query` as an ILIKE pattern matching it anywhere, with its wildcards and escape character matched literally. */
 function containsPattern(query: string): string {
@@ -208,11 +219,18 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<
     inputSchema: ProposePurchaseInput,
     strict: true,
     run: async ({ sellerSlug, items, rationale }) => {
-      const outcome = await ctx.propose({
-        sellerSlug,
-        items: items.map(({ sku, quantity }) => ({ sku, quantity })),
-        rationale,
-      });
+      let outcome: ProposalOutcome;
+      try {
+        outcome = await ctx.propose({
+          sellerSlug,
+          items: items.map(({ sku, quantity }) => ({ sku, quantity })),
+          rationale,
+        });
+      } catch (error) {
+        // The purchase may have got part of the way, so the agent must not try again on its own.
+        console.error(`Shopping agent: propose_purchase failed: ${describeFailure(error)}`);
+        return PROPOSAL_FAILED;
+      }
       // Gate reasons repeat seller titles and names, and intent reasons are the check model's own words.
       return JSON.stringify({
         ...outcome,

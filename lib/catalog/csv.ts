@@ -80,8 +80,9 @@ function readRow(record: CsvRecord, width: number, columns: Columns, claimed: Se
   const { cells } = record;
   if (record.unbalancedQuotes) return 'this row has unbalanced quotes';
   // A row that does not line up with the header, such as one with an unquoted `4,50`, would shift values
-  // into the wrong columns and could list a wrong price, so it is rejected rather than guessed at.
-  if (cells.length < width || cells.slice(width).some((cell) => cell.trim() !== '')) {
+  // into the wrong columns and could list a wrong price, so it is rejected rather than guessed at. The
+  // count must match exactly: a shift whose last field is blank leaves an extra field that is blank too.
+  if (cells.length !== width) {
     return `row has ${cells.length} fields but the header has ${width}`;
   }
   const cell = (field: Field): string => {

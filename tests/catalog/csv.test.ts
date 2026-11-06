@@ -248,8 +248,15 @@ describe('parseCatalogCsv', () => {
     expect(readOne(header, 'TUR-100,Turmeric,4.50,40,spices')).toBe('row has 5 fields but the header has 6');
   });
 
-  it('accepts empty trailing fields past the last column', () => {
-    expect(readOne('sku,name,price', 'A-1,Thing,1.00,,')).toMatchObject({ sku: 'A-1', priceCents: 100 });
+  // An unquoted `4,50` pushes every later value one column right. When the last column is blank the extra
+  // field is empty too, so only an exact field count catches the shift.
+  it.each([
+    ['sku,name,price,stock,category', 'A-1,Thing,4,50,10,', 'row has 6 fields but the header has 5'],
+    ['sku,name,price,stock', 'A-1,Thing,4,50,', 'row has 5 fields but the header has 4'],
+    ['sku,name,price', 'A-1,Thing,4,50', 'row has 4 fields but the header has 3'],
+    ['sku,name,price', 'A-1,Thing,1.00,,', 'row has 5 fields but the header has 3'],
+  ])('rejects a shifted row under %j: %j', (header, row, reason) => {
+    expect(readOne(header, row)).toBe(reason);
   });
 
   it('rejects a row with an unclosed quote, which runs to the end of the file', () => {

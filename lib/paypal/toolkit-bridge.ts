@@ -3,12 +3,13 @@
 // tools, whatever the toolkit offers. That list, not the toolkit configuration, is the guard: the
 // toolkit's handleToolCall runs any tool it knows by name without checking its configuration.
 // Everything a tool returns is third-party data, and a dispute can hold text written to steer the agent,
-// so each result is wrapped in an <untrusted> tag the content cannot close, and capped in length.
+// so each result goes to the model through wrapUntrusted, in a tag the content cannot close, capped in length.
 
 import { randomUUID } from 'node:crypto';
 import { betaTool } from '@anthropic-ai/sdk/helpers/beta/json-schema';
 import type { BetaRunnableTool } from '@anthropic-ai/sdk/lib/tools/BetaRunnableTool';
 import { PayPalAgentToolkit } from '@paypal/agent-toolkit/openai';
+import { wrapUntrusted } from '../llm/untrusted';
 
 /** The only PayPal tools the evidence agent is given. Each one only reads from PayPal. */
 export const READ_ONLY_TOOLS = ['list_disputes', 'get_dispute', 'get_order', 'get_shipment_tracking'] as const;
@@ -19,11 +20,8 @@ const CONFIGURATION = {
   context: { sandbox: true },
 };
 
-/** The longest tool result the model sees, in characters, before the wrapping tag. */
+/** The longest tool result the model sees, in characters, inside the untrusted tag. */
 const MAX_RESULT_CHARS = 8000;
-
-/** A closing untrusted tag in any case or spacing. */
-const CLOSING_TAG = /<\/\s*untrusted[^>]*>/gi;
 
 /** The part of the toolkit's tool definition the bridge reads. */
 type ToolkitFunction = { name: string; description?: string; parameters?: Record<string, unknown> };
@@ -90,7 +88,7 @@ function claudeTool(toolkit: ToolkitLike, name: string, definition: ToolkitFunct
         console.error(`The PayPal Agent Toolkit failed on ${name}: ${describeFailure(error)}`);
         throw new Error(`PayPal could not return ${name}`);
       }
-      return asUntrusted(textOf(result.content));
+      return wrapUntrusted('paypal', textOf(result.content), MAX_RESULT_CHARS);
     },
   });
 }
@@ -121,18 +119,4 @@ function describeFailure(error: unknown): string {
 
 function textOf(content: string | { text: string }[]): string {
   return typeof content === 'string' ? content : content.map((part) => part.text).join('');
-}
-
-/** `content` inside an untrusted tag it cannot close, cut to MAX_RESULT_CHARS with `...` marking a cut. */
-function asUntrusted(content: string): string {
-  // Repeated, because removing one tag can join its neighbours into a new one.
-  let text = content;
-  let previous: string;
-  do {
-    previous = text;
-    text = text.replace(CLOSING_TAG, '');
-  } while (text !== previous);
-
-  const capped = text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}...` : text;
-  return `<untrusted source="paypal">${capped}</untrusted>`;
 }

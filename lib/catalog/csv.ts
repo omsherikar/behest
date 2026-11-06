@@ -30,7 +30,8 @@ const DESCRIPTION_MAX = 2000;
 const SKU_MAX = 64;
 /** The longest price cell read, far more than `USD 21,474,836.47` needs. */
 const PRICE_CELL_MAX = 32;
-const SKU = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+/** What a SKU may be: letters, digits, dot, dash and underscore, starting with a letter or digit, at most 64 characters. */
+export const SKU_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 /** The largest value of a Postgres integer, the column type of price and stock. */
 const INT_MAX = 2_147_483_647;
 
@@ -98,7 +99,7 @@ function readRow(record: CsvRecord, width: number, columns: Columns, claimed: Se
   const givenSku = cell('sku').trim();
   const sku = givenSku === '' ? skuFromName(name) : givenSku;
   if (sku === '') return 'SKU is blank and none can be made from the name';
-  if (!SKU.test(sku)) return 'SKU must be letters, digits, dot, dash or underscore';
+  if (!SKU_PATTERN.test(sku)) return 'SKU must be letters, digits, dot, dash or underscore';
   const key = sku.toUpperCase();
   if (claimed.has(key)) return `duplicate SKU ${sku}`;
   claimed.add(key);
@@ -214,12 +215,12 @@ function skuFromName(name: string): string {
 }
 
 /** Seller text on one line: hidden characters dropped, runs of whitespace made one space, at most `max` code points. */
-function oneLine(text: string, max: number): string {
+export function oneLine(text: string, max: number): string {
   return firstCodePoints(removeHiddenCharacters(text).replace(/\s+/g, ' ').trim(), max);
 }
 
 /** Seller text that keeps its line breaks and tabs: hidden characters dropped, at most `max` code points. */
-function multiLine(text: string, max: number): string {
+export function multiLine(text: string, max: number): string {
   return firstCodePoints(removeHiddenCharacters(text).trim(), max);
 }
 

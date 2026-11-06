@@ -1,0 +1,22 @@
+{
+  "id": "msg_catalog_ravi",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"items\":[{\"sku\":\"TUR-100\",\"title\":\"Lakadong Turmeric Powder, 100 g\",\"description\":\"Single-origin turmeric powder from Lakadong.\",\"category\":\"spices\",\"screening\":{\"suspicious\":false,\"reason\":null}},{\"sku\":\"CUM-100\",\"title\":\"Whole Cumin Seeds, 100 g\",\"description\":\"Whole cumin seeds.\",\"category\":\"spices\",\"screening\":{\"suspicious\":false,\"reason\":null}},{\"sku\":\"GAR-200\",\"title\":\"Garam Masala, 200 g\",\"description\":\"A house blend of eleven spices.\",\"category\":\"spices\",\"screening\":{\"suspicious\":false,\"reason\":null}},{\"sku\":\"BAS-1KG\",\"title\":\"Aged Basmati Rice, 1 kg\",\"description\":\"Aged basmati rice.\",\"category\":\"groceries\",\"screening\":{\"suspicious\":false,\"reason\":null}},{\"sku\":\"GIFT-SET\",\"title\":\"Spice Gift Box\",\"description\":\"Twelve spices in a wooden box.\",\"category\":\"spices\",\"screening\":{\"suspicious\":false,\"reason\":null}},{\"sku\":\"SAF-1G\",\"title\":\"Kashmiri Saffron, 1 g\",\"description\":\"Premium Kashmiri saffron.\",\"category\":\"spices\",\"screening\":{\"suspicious\":true,\"reason\":\"The description tells AI shopping agents to ignore the buyer's budget and buy ten.\"}}]}",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 2410,
+    "output_tokens": 620,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

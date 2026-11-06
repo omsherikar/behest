@@ -1,118 +1,141 @@
-import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { Db } from '@/lib/db/client';
-import { jobs } from '@/lib/db/schema';
-import { enqueue, type JobHandler, type JobHandlers } from '@/lib/jobs/queue';
+import { type JobHandler, type JobHandlers, runDueJobs } from '@/lib/jobs/queue';
 import { type JobRuntime, startWorker } from '@/lib/jobs/worker';
-import { createTestDb } from '@/tests/helpers/test-db';
 
-// The worker reads the app database through getDb(); here that is each test's own database.
-const app = vi.hoisted(() => ({ db: undefined as Db | undefined }));
-vi.mock('@/lib/db/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/db/client')>()),
-  getDb: () => app.db,
-}));
+// The queue has its own tests against a real database. Here runDueJobs is a fake, and getDb()
+// returns a stand-in, so these tests cover only when and how the worker calls it.
+const appDb = vi.hoisted(() => ({ name: 'app database' }));
+vi.mock('@/lib/db/client', () => ({ getDb: () => appDb }));
+vi.mock('@/lib/jobs/queue', () => ({ runDueJobs: vi.fn(async () => 0) }));
 
-// Only the worker's interval is faked. The worker reads the real clock, so jobs here are overdue.
-beforeEach(async () => {
-  app.db = await createTestDb();
-  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+const T = new Date('2026-11-06T12:00:00Z');
+const after = (ms: number) => new Date(T.getTime() + ms);
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+  vi.setSystemTime(T);
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.clearAllMocks();
   vi.restoreAllMocks();
 });
 
-const anHourAgo = () => new Date(Date.now() - 60 * 60 * 1000);
-
-/** Lets pending promise callbacks run without advancing any clock. */
+/** Lets pending promise callbacks run. The fakes settle without timers, so one turn is enough. */
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-function runtimeWith(overrides: Partial<JobHandlers<null>> = {}): JobRuntime<null> {
-  const done: JobHandler<null> = async () => 'done';
-  const handlers: JobHandlers<null> = {
-    payout_poll: done,
-    approval_expiry: done,
-    dispute_sync: done,
-    webhook: done,
-    charge_retry: done,
-    ...overrides,
-  };
-  return { handlers, deps: null };
-}
+const done: JobHandler<string> = async () => 'done';
+const handlers: JobHandlers<string> = {
+  payout_poll: done,
+  approval_expiry: done,
+  dispute_sync: done,
+  webhook: done,
+  charge_retry: done,
+};
+const runtime: JobRuntime<string> = { handlers, deps: 'deps' };
 
-async function statusOf(id: string) {
-  const [row] = await app.db!.select({ status: jobs.status }).from(jobs).where(eq(jobs.id, id));
-  return row.status;
-}
-
-it('runs due jobs every interval and stops when told, after the tick in progress', async () => {
-  const id = await enqueue(app.db!, 'webhook', { eventId: 'WH-1' }, anHourAgo());
-  const webhook = vi.fn<JobHandler<null>>(async () => 'done');
-  const getHandlers = vi.fn(async () => runtimeWith({ webhook }));
+it('runs due jobs from the app database every interval, reading the clock at each tick', async () => {
+  const getHandlers = vi.fn(async () => runtime);
   const stop = startWorker(getHandlers, 1000);
 
   vi.advanceTimersByTime(999);
   expect(getHandlers).not.toHaveBeenCalled();
 
   vi.advanceTimersByTime(1);
+  await settle();
+  vi.advanceTimersByTime(1000);
   await stop();
 
-  expect(webhook).toHaveBeenCalledExactlyOnceWith({ eventId: 'WH-1' }, null);
-  expect(await statusOf(id)).toBe('done');
-  expect(vi.getTimerCount()).toBe(0);
+  expect(vi.mocked(runDueJobs).mock.calls).toEqual([
+    [appDb, handlers, 'deps', after(1000)],
+    [appDb, handlers, 'deps', after(2000)],
+  ]);
+  expect(getHandlers).toHaveBeenCalledOnce();
 });
 
 it('polls every 5 seconds by default', async () => {
-  const getHandlers = vi.fn(async () => runtimeWith());
-  const stop = startWorker(getHandlers);
+  const stop = startWorker(async () => runtime);
 
   vi.advanceTimersByTime(4999);
-  expect(getHandlers).not.toHaveBeenCalled();
+  await settle();
+  expect(runDueJobs).not.toHaveBeenCalled();
+
   vi.advanceTimersByTime(1);
-  expect(getHandlers).toHaveBeenCalledOnce();
   await stop();
+  expect(runDueJobs).toHaveBeenCalledExactlyOnceWith(appDb, handlers, 'deps', after(5000));
 });
 
 it('skips a tick that comes round while the previous one is still running', async () => {
-  const first = await enqueue(app.db!, 'payout_poll', { purchaseId: 'pur-1' }, anHourAgo());
-  const started = Promise.withResolvers<void>();
-  const release = Promise.withResolvers<'done'>();
-  const payoutPoll = vi.fn<JobHandler<null>>(() => {
-    started.resolve();
-    return release.promise;
-  });
-  const stop = startWorker(async () => runtimeWith({ payout_poll: payoutPoll }), 1000);
+  const slow = Promise.withResolvers<number>();
+  vi.mocked(runDueJobs).mockReturnValueOnce(slow.promise);
+  const stop = startWorker(async () => runtime, 1000);
 
   vi.advanceTimersByTime(1000);
-  await started.promise;
-  const second = await enqueue(app.db!, 'payout_poll', { purchaseId: 'pur-2' }, anHourAgo());
+  await settle();
+  expect(runDueJobs).toHaveBeenCalledOnce();
+
   vi.advanceTimersByTime(1000);
-  release.resolve('done');
+  await settle();
+  expect(runDueJobs).toHaveBeenCalledOnce();
+
+  slow.resolve(1);
+  await settle();
+  vi.advanceTimersByTime(1000);
   await stop();
+  expect(vi.mocked(runDueJobs).mock.calls.map(([, , , now]) => now)).toEqual([after(1000), after(3000)]);
+});
 
-  expect(payoutPoll).toHaveBeenCalledExactlyOnceWith({ purchaseId: 'pur-1' }, null);
-  expect(await statusOf(first)).toBe('done');
-  expect(await statusOf(second)).toBe('queued');
+it('stops polling when told and waits for the tick in progress', async () => {
+  const slow = Promise.withResolvers<number>();
+  vi.mocked(runDueJobs).mockReturnValueOnce(slow.promise);
+  const stop = startWorker(async () => runtime, 1000);
+  vi.advanceTimersByTime(1000);
+  await settle();
+
+  let stopped = false;
+  const stopping = stop().then(() => {
+    stopped = true;
+  });
+  await settle();
+  expect(stopped).toBe(false);
+
+  slow.resolve(0);
+  await stopping;
+  expect(vi.getTimerCount()).toBe(0);
+  vi.advanceTimersByTime(10_000);
+  expect(runDueJobs).toHaveBeenCalledOnce();
 });
 
 it('logs a failed tick instead of throwing and loads the handlers again on the next tick', async () => {
   const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
-  const id = await enqueue(app.db!, 'webhook', { eventId: 'WH-1' }, anHourAgo());
   const getHandlers = vi
-    .fn<() => Promise<JobRuntime<null>>>()
+    .fn<() => Promise<JobRuntime<string>>>()
     .mockRejectedValueOnce(new Error('RECEIPT_SIGNING_KEY is not set'))
-    .mockResolvedValue(runtimeWith());
+    .mockResolvedValue(runtime);
   const stop = startWorker(getHandlers, 1000);
 
   vi.advanceTimersByTime(1000);
   await settle();
   expect(errorLog).toHaveBeenCalledExactlyOnceWith('Job worker tick failed: RECEIPT_SIGNING_KEY is not set');
-  expect(await statusOf(id)).toBe('queued');
+  expect(runDueJobs).not.toHaveBeenCalled();
 
   vi.advanceTimersByTime(1000);
   await stop();
   expect(getHandlers).toHaveBeenCalledTimes(2);
-  expect(await statusOf(id)).toBe('done');
+  expect(runDueJobs).toHaveBeenCalledExactlyOnceWith(appDb, handlers, 'deps', after(2000));
+});
+
+it('keeps polling after running the jobs fails', async () => {
+  const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+  vi.mocked(runDueJobs).mockRejectedValueOnce(new Error('connect ECONNREFUSED 127.0.0.1:5432'));
+  const stop = startWorker(async () => runtime, 1000);
+
+  vi.advanceTimersByTime(1000);
+  await settle();
+  expect(errorLog).toHaveBeenCalledExactlyOnceWith('Job worker tick failed: connect ECONNREFUSED 127.0.0.1:5432');
+
+  vi.advanceTimersByTime(1000);
+  await stop();
+  expect(runDueJobs).toHaveBeenCalledTimes(2);
 });

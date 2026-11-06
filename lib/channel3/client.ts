@@ -227,11 +227,12 @@ function median(values: number[]): number | null {
 
 /**
  * The wait Retry-After asks for, as a number of seconds or as the time until an HTTP date, at most
- * `MAX_WAIT_MS`. `DEFAULT_WAIT_MS` when the header is absent or gives neither.
+ * `MAX_WAIT_MS`. `DEFAULT_WAIT_MS` when the header is absent or gives neither. A plain number,
+ * whole or not, is always seconds: `Date.parse` would read `1.5` as a date.
  */
 function retryWait(retryAfter: string | null): number {
   const text = retryAfter?.trim() ?? '';
-  if (/^\d+$/.test(text)) return Math.min(Number(text) * 1000, MAX_WAIT_MS);
+  if (/^\d+(\.\d+)?$/.test(text)) return Math.min(Number(text) * 1000, MAX_WAIT_MS);
   const date = text === '' ? Number.NaN : Date.parse(text);
   if (Number.isNaN(date)) return DEFAULT_WAIT_MS;
   return Math.min(Math.max(date - Date.now(), 0), MAX_WAIT_MS);

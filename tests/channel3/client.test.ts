@@ -337,7 +337,7 @@ describe('searchMarket errors', () => {
     expect(calls).toHaveLength(2);
   });
 
-  it('waits as many seconds as Retry-After says, at most 5, and 1 second when it says nothing usable', async () => {
+  it('waits as many seconds as Retry-After says, whole or not, at most 5, and 1 second when it says nothing usable', async () => {
     const waits = ['2', '60', 'soon'];
     const fetch: typeof globalThis.fetch = async () => {
       const retryAfter = waits.shift();
@@ -349,10 +349,10 @@ describe('searchMarket errors', () => {
     await expect(searchMarket('turmeric', { fetch })).rejects.toMatchObject({ status: 429 });
     expect(sleeps).toEqual([2000, 5000]);
 
-    waits.splice(0, waits.length, 'soon');
+    waits.splice(0, waits.length, '1.5', 'soon');
     sleeps = [];
     await expect(searchMarket('turmeric', { fetch })).resolves.toEqual([]);
-    expect(sleeps).toEqual([1000]);
+    expect(sleeps).toEqual([1500, 1000]);
   });
 
   it('waits until a Retry-After date, at most 5 seconds and not at all for a date already past', async () => {

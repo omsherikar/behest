@@ -25,22 +25,35 @@ export function pgliteDb(client: PGlite): Db {
   return drizzlePglite({ client, schema });
 }
 
-function createDb(): Db {
+type DbHandle = { db: Db; close: () => Promise<void> };
+
+function openDb(): DbHandle {
   const url = process.env.DATABASE_URL;
-  if (url) return drizzlePg({ client: new Pool({ connectionString: url }), schema });
+  if (url) {
+    const pool = new Pool({ connectionString: url });
+    return { db: drizzlePg({ client: pool, schema }), close: () => pool.end() };
+  }
   // PGlite creates its data directory but not the parents.
   mkdirSync(LOCAL_DATA_DIR, { recursive: true });
-  return pgliteDb(new PGlite(LOCAL_DATA_DIR));
+  const client = new PGlite(LOCAL_DATA_DIR);
+  return { db: pgliteDb(client), close: () => client.close() };
 }
 
 // Kept on globalThis so a dev server's module reloads reuse one pool and never open the PGlite
 // data directory twice.
-const globalForDb = globalThis as typeof globalThis & { behestDb?: Db };
+const globalForDb = globalThis as typeof globalThis & { behestDb?: DbHandle };
 
 /** The app's database, created on first use. */
 export function getDb(): Db {
-  globalForDb.behestDb ??= createDb();
-  return globalForDb.behestDb;
+  globalForDb.behestDb ??= openDb();
+  return globalForDb.behestDb.db;
+}
+
+/** Closes the app's database if it is open. The next getDb() opens a new one. */
+export async function closeDb(): Promise<void> {
+  const handle = globalForDb.behestDb;
+  globalForDb.behestDb = undefined;
+  await handle?.close();
 }
 
 /** Applies every pending migration in `drizzle/` with the migrator that matches the driver. */

@@ -1,18 +1,21 @@
-import { getDb, migrateDb } from '../lib/db/client';
+import { closeDb, getDb, migrateDb } from '../lib/db/client';
 
 // Applies pending migrations to the configured database: Postgres when DATABASE_URL is set,
-// otherwise the local PGlite database.
+// otherwise the local PGlite database. The database is closed before exit so PGlite shuts down
+// cleanly and the Postgres pool releases its connections.
 
 async function main() {
-  const db = getDb();
-  await migrateDb(db);
-  console.log('Migrations applied.');
+  try {
+    await migrateDb(getDb());
+  } finally {
+    await closeDb();
+  }
 }
 
 main().then(
-  () => process.exit(0),
+  () => console.log('Migrations applied.'),
   (error: unknown) => {
     console.error(error);
-    process.exit(1);
+    process.exitCode = 1;
   },
 );

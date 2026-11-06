@@ -101,7 +101,7 @@ describe('verdicts', () => {
     });
   });
 
-  it.each(['needs_human', 'inconsistent'])('supplies a fixed reason for a %s verdict that gives none', async (verdict) => {
+  it.each(['needs_human', 'inconsistent'])('supplies a fixed reason when the model flags %s and gives none', async (verdict) => {
     const { result } = await checkWith(messageJson({ json: { verdict, reasons: [] } }));
 
     expect(result).toEqual({ verdict, reasons: ['The intent check flagged this purchase without giving a reason.'] });

@@ -11,20 +11,45 @@ import { renderReadback } from './readback';
 // whose compile left no open questions. The readback is rendered again here from the validated
 // policy, so the stored and signed readback is the one this code produces, not one sent in.
 
+export type MandateConfirmErrorCode = 'invalid_policy' | 'expired' | 'unknown_buyer';
+
+const MESSAGES: Record<MandateConfirmErrorCode, string> = {
+  invalid_policy: 'the mandate policy is not valid',
+  expired: 'the mandate expiry is not after the time it is confirmed',
+  unknown_buyer: 'the mandate names a buyer that does not exist',
+};
+
+/** Why a mandate was not confirmed. Nothing is stored when one is thrown. */
+export class MandateConfirmError extends Error {
+  readonly code: MandateConfirmErrorCode;
+  constructor(code: MandateConfirmErrorCode, options?: { cause?: unknown }) {
+    super(MESSAGES[code], options);
+    this.name = 'MandateConfirmError';
+    this.code = code;
+  }
+}
+
+/** The policy, validated. */
+function validPolicy(input: MandatePolicy): MandatePolicy {
+  const parsed = MandatePolicy.safeParse(input);
+  if (!parsed.success) throw new MandateConfirmError('invalid_policy', { cause: parsed.error });
+  return parsed.data;
+}
+
 /**
  * Validates and signs the buyer's confirmed policy, then stores it as their one active mandate:
  * in one transaction it locks the buyer, revokes any active mandate they hold and inserts the
- * new one. Throws, storing nothing, for an invalid policy, an expiry that is not after now, or a
- * buyer that does not exist.
+ * new one. Throws a MandateConfirmError, storing nothing, for an invalid policy, an expiry that is
+ * not after now, or a buyer that does not exist.
  */
 export async function confirmMandate(
   deps: { db: Db; signer: Signer; now: () => Date },
   i: { buyerId: string; text: string; policy: MandatePolicy },
 ): Promise<{ mandateId: string; jws: string }> {
-  const policy = MandatePolicy.parse(i.policy);
+  const policy = validPolicy(i.policy);
   const confirmedAt = deps.now();
   if (policy.expiresAt !== null && Date.parse(policy.expiresAt) <= confirmedAt.getTime()) {
-    throw new Error('the mandate expiry is not after the time it is confirmed');
+    throw new MandateConfirmError('expired');
   }
 
   const id = crypto.randomUUID();
@@ -53,7 +78,7 @@ export async function confirmMandate(
       .from(buyers)
       .where(eq(buyers.id, i.buyerId))
       .for('no key update');
-    if (!buyer) throw new Error(`no buyer has the id ${i.buyerId}`);
+    if (!buyer) throw new MandateConfirmError('unknown_buyer');
 
     // The database allows one active mandate per buyer, so the old one is revoked first.
     await tx

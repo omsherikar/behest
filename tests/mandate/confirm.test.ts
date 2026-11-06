@@ -6,7 +6,7 @@ import type { Db } from '@/lib/db/client';
 import { buyers, mandates } from '@/lib/db/schema';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { MandatePayload } from '@/lib/domain/receipt';
-import { confirmMandate } from '@/lib/mandate/confirm';
+import { confirmMandate, MandateConfirmError } from '@/lib/mandate/confirm';
 import { renderReadback } from '@/lib/mandate/readback';
 import { hashOf, sha256Hex } from '@/lib/receipts/canonical';
 import { generateSigningKey, loadSigningKey, publicJwks } from '@/lib/receipts/keys';
@@ -140,11 +140,13 @@ it('leaves other buyers\' active mandates alone', async () => {
 it.each<{ name: string; policy: MandatePolicy }>([
   { name: 'a per-purchase limit above the budget', policy: { ...demoPolicy, perPurchaseMaxCents: 7000 } },
   { name: 'a field the policy does not define', policy: { ...demoPolicy, note: 'extra' } as MandatePolicy },
-])('throws for a policy with $name and changes nothing', async ({ policy }) => {
+])('refuses a policy with $name as invalid_policy and changes nothing', async ({ policy }) => {
   const { db, buyerId, deps } = await setup();
   const existing = await confirmMandate(deps, { buyerId, text: TEXT, policy: demoPolicy });
 
-  await expect(confirmMandate(deps, { buyerId, text: TEXT, policy })).rejects.toThrow(z.ZodError);
+  const attempt = confirmMandate(deps, { buyerId, text: TEXT, policy });
+  await expect(attempt).rejects.toBeInstanceOf(MandateConfirmError);
+  await expect(attempt).rejects.toMatchObject({ code: 'invalid_policy', cause: expect.any(z.ZodError) });
 
   const rows = await allMandates(db);
   expect(rows).toHaveLength(1);
@@ -154,25 +156,27 @@ it.each<{ name: string; policy: MandatePolicy }>([
 it.each([
   { name: 'has already passed', expiresAt: '2026-11-06T09:00:00.000Z' },
   { name: 'is the confirmation time itself', expiresAt: NOW.toISOString() },
-])('throws when the policy expiry $name and changes nothing', async ({ expiresAt }) => {
+])('refuses a policy whose expiry $name as expired and changes nothing', async ({ expiresAt }) => {
   const { db, buyerId, deps } = await setup();
   const existing = await confirmMandate(deps, { buyerId, text: TEXT, policy: demoPolicy });
 
-  await expect(
-    confirmMandate(deps, { buyerId, text: TEXT, policy: { ...demoPolicy, expiresAt } }),
-  ).rejects.toThrow('expiry');
+  const policy: MandatePolicy = { ...demoPolicy, expiresAt };
+  const attempt = confirmMandate(deps, { buyerId, text: TEXT, policy });
+  await expect(attempt).rejects.toBeInstanceOf(MandateConfirmError);
+  await expect(attempt).rejects.toMatchObject({ code: 'expired' });
 
   const rows = await allMandates(db);
   expect(rows).toHaveLength(1);
   expect(rows[0]).toMatchObject({ id: existing.mandateId, status: 'active' });
 });
 
-it('throws for a buyer that does not exist and stores nothing', async () => {
+it('refuses a buyer that does not exist as unknown_buyer, without echoing the id, and stores nothing', async () => {
   const { db, deps } = await setup();
+  const buyerId = crypto.randomUUID();
 
-  await expect(
-    confirmMandate(deps, { buyerId: crypto.randomUUID(), text: TEXT, policy: demoPolicy }),
-  ).rejects.toThrow('buyer');
+  const attempt = confirmMandate(deps, { buyerId, text: TEXT, policy: demoPolicy });
+  await expect(attempt).rejects.toBeInstanceOf(MandateConfirmError);
+  await expect(attempt).rejects.toMatchObject({ code: 'unknown_buyer', message: expect.not.stringContaining(buyerId) });
 
   expect(await allMandates(db)).toHaveLength(0);
 });

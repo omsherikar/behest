@@ -62,14 +62,32 @@ describe('appUrl', () => {
     expect(appUrl()).toBe('https://behest.example.com');
   });
 
-  it.each(['', '   ', 'not a url', 'ftp://behest.example.com', 'javascript:alert(1)', 'mailto:ops@behest.example.com'])(
-    'refuses an APP_URL of %j',
-    async (value) => {
-      const { appUrl } = await freshAppDeps();
-      vi.stubEnv('APP_URL', value);
-      expect(() => appUrl()).toThrow('APP_URL must be the http or https URL Behest is served from');
-    },
-  );
+  it.each([
+    '',
+    '   ',
+    'not a url',
+    'ftp://behest.example.com',
+    'javascript:alert(1)',
+    'mailto:ops@behest.example.com',
+    'https://behest.example.com/app',
+    'https://behest.example.com/app/',
+    'https://behest.example.com/?ref=1',
+    'https://behest.example.com?',
+    'https://behest.example.com/#top',
+    'https://behest.example.com#',
+  ])('refuses an APP_URL of %j', async (value) => {
+    const { appUrl } = await freshAppDeps();
+    vi.stubEnv('APP_URL', value);
+    expect(() => appUrl()).toThrow(
+      'APP_URL must be the http or https origin Behest is served from, with no path, query or fragment',
+    );
+  });
+
+  it('gives the origin in its usual form', async () => {
+    const { appUrl } = await freshAppDeps();
+    vi.stubEnv('APP_URL', 'HTTPS://Behest.Example.com:443/');
+    expect(appUrl()).toBe('https://behest.example.com');
+  });
 
   it('accepts an http URL, for local development', async () => {
     const { appUrl } = await freshAppDeps();

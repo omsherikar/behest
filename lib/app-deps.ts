@@ -79,14 +79,20 @@ export function llmDeps(): LlmDeps {
   return { db: appDb(), claude: createClaude(), now: () => new Date() };
 }
 
-/** Behest's public base URL from APP_URL, without a trailing slash: where PayPal sends buyers back. */
+/**
+ * Behest's public origin from APP_URL, such as `https://behest.example.com`: where PayPal sends
+ * buyers back. Routes append their own paths to it, so APP_URL may carry no path but `/`, and no
+ * query or fragment.
+ */
 export function appUrl(): string {
-  const url = process.env.APP_URL?.trim().replace(/\/+$/, '') ?? '';
-  const protocol = URL.parse(url)?.protocol;
-  if (protocol !== 'http:' && protocol !== 'https:') {
-    throw new Error('APP_URL must be the http or https URL Behest is served from');
+  const raw = process.env.APP_URL?.trim() ?? '';
+  const url = URL.parse(raw);
+  const isWebUrl = url?.protocol === 'http:' || url?.protocol === 'https:';
+  // The raw text is checked for ? and #: an empty query or fragment leaves no trace in the parsed URL.
+  if (!url || !isWebUrl || url.pathname.replace(/\/+$/, '') !== '' || /[?#]/.test(raw)) {
+    throw new Error('APP_URL must be the http or https origin Behest is served from, with no path, query or fragment');
   }
-  return url;
+  return url.origin;
 }
 
 async function oldestDemoBuyerId(db: Db): Promise<string | undefined> {

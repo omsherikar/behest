@@ -4,12 +4,15 @@ import { wallets } from '@/lib/db/schema';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { confirmMandate, MandateConfirmError, type MandateConfirmErrorCode } from '@/lib/mandate/confirm';
 import { isConfirmToken } from '@/lib/mandate/confirm-token';
+import { clientAddress, MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { personaRefusal } from '@/lib/session';
 
 // Signs the buyer's mandate, then starts linking their PayPal wallet: it creates a vault setup token
 // for the buyer to approve at PayPal and keeps it on the buyer's one wallet row, as pending, for the
 // wallet return route to finish. Only a policy from a compile that left no question open is signed,
 // which the confirm token from that compile proves.
+
+const ROUTE = 'mandate_confirm';
 
 const STATUS: Record<MandateConfirmErrorCode, number> = { invalid_policy: 400, expired: 400, unknown_buyer: 404 };
 
@@ -25,6 +28,9 @@ export async function POST(request: NextRequest) {
 
   const refusal = await personaRefusal(request, 'buyer');
   if (refusal) return refusal;
+  if (!rateLimit(`${ROUTE}:${clientAddress(request)}:buyer`, MODEL_ROUTE_LIMIT)) {
+    return error(429, 'Too many requests at once. Try again in a minute.');
+  }
 
   const body: unknown = await request.json().catch(() => undefined);
   if (!isObject(body) || typeof body.text !== 'string' || !isObject(body.policy)) {

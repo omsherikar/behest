@@ -10,6 +10,7 @@ import { MandatePayload } from '@/lib/domain/receipt';
 import { confirmToken } from '@/lib/mandate/confirm-token';
 import { generateSigningKey, loadSigningKey, publicJwks } from '@/lib/receipts/keys';
 import { createSigner, verifyJws } from '@/lib/receipts/sign';
+import { MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
 import { FakePaypal } from '@/tests/helpers/fake-paypal';
 import { demoPolicy } from '@/tests/helpers/fixtures';
@@ -25,6 +26,10 @@ vi.mock('@/lib/app-deps', async (importOriginal) => {
   // demoBuyerId finds or creates the demo buyer for real unless a test says otherwise.
   return { ...actual, appDb: vi.fn(), appPaypal: vi.fn(), appSigner: vi.fn(), demoBuyerId: vi.fn(actual.demoBuyerId) };
 });
+vi.mock('@/lib/ratelimit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ratelimit')>()),
+  rateLimit: vi.fn(() => true),
+}));
 
 const SECRET = 'test-session-secret-at-least-32-characters';
 const APP_URL = 'https://behest.test';
@@ -34,7 +39,7 @@ const APPROVE_URL = 'https://www.sandbox.paypal.com/agreements/approve?approval_
 const key = await loadSigningKey({ RECEIPT_SIGNING_KEY: (await generateSigningKey()).pem });
 
 async function request(body: unknown, { persona = 'buyer' }: { persona?: Persona | 'forged' | null } = {}) {
-  const headers = new Headers({ 'content-type': 'application/json' });
+  const headers = new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7, 10.0.0.1' });
   if (persona === 'forged') headers.set('cookie', `${SESSION_COOKIE}=not-a-signed-cookie`);
   else if (persona) headers.set('cookie', `${SESSION_COOKIE}=${await sessionCookie(persona)}`);
   return new NextRequest('http://localhost/api/mandates/confirm', {
@@ -218,6 +223,19 @@ describe('POST /api/mandates/confirm', () => {
     expect(await db.select().from(wallets)).toEqual([]);
   });
 
+  it('counts confirms per address and persona against the model route limit, and answers 429 past it', async () => {
+    await addDemoBuyer();
+    vi.mocked(rateLimit).mockReturnValueOnce(false);
+
+    expect(await answer(await POST(await request(confirmed())))).toEqual({
+      status: 429,
+      body: { error: { message: 'Too many requests at once. Try again in a minute.' } },
+    });
+    expect(rateLimit).toHaveBeenCalledWith('mandate_confirm:203.0.113.7:buyer', MODEL_ROUTE_LIMIT);
+    expect(await db.select().from(mandates)).toEqual([]);
+    expect(paypal.calls).toEqual([]);
+  });
+
   it.each([
     [undefined, 401],
     ['forged', 401],
@@ -229,5 +247,6 @@ describe('POST /api/mandates/confirm', () => {
     expect((await POST(await request(confirmed(), { persona: persona ?? null }))).status).toBe(status);
     expect(await db.select().from(mandates)).toEqual([]);
     expect(paypal.calls).toEqual([]);
+    expect(rateLimit).not.toHaveBeenCalled();
   });
 });

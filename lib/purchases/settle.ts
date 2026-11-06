@@ -1,11 +1,11 @@
 import { and, eq, ne } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
-import { payouts, purchases, sellers, type PurchaseStatus } from '@/lib/db/schema';
+import { payouts, purchases, sellers } from '@/lib/db/schema';
 import { enqueue } from '@/lib/jobs/queue';
 import { PayPalApiError } from '@/lib/paypal/http';
 import { PayoutAlreadyExists } from '@/lib/paypal/payouts';
 import type { PurchaseDeps } from './deps';
-import { appendEvent, StaleTransition, transition } from './events';
+import { appendEvent, transition } from './events';
 
 // Paying sellers. Behest is the merchant of record, so the buyer's payment lands in Behest's
 // account; once the seller has verified the receipt and accepted the order, Behest pays the seller
@@ -29,9 +29,6 @@ const FAILED_ITEM_STATUSES = ['FAILED', 'RETURNED', 'BLOCKED', 'REFUNDED', 'REVE
 const FAILED_BATCH_STATUSES: ReadonlySet<string> = new Set(['DENIED', 'CANCELED']);
 /** Statuses, of the item or of a batch with no item, that leave the seller unpaid. Settling then needs an operator. */
 const FAILED_STATUSES: ReadonlySet<string> = new Set([...FAILED_ITEM_STATUSES, ...FAILED_BATCH_STATUSES]);
-
-/** Statuses a purchase reaches only by settling. */
-const SETTLED_OR_LATER: ReadonlySet<PurchaseStatus> = new Set(['settled', 'disputed', 'resolved']);
 
 /** The oldest payout the poll resends: a day inside the 30 days PayPal remembers a sender batch id. */
 const RESEND_WINDOW_MS = 29 * 24 * 60 * 60 * 1000;
@@ -119,26 +116,12 @@ export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<
   // The item decides. A batch PayPal ended before reporting an item failed as a whole.
   const status = itemStatus ?? (FAILED_BATCH_STATUSES.has(batchStatus) ? batchStatus : null);
   if (status === null) return 'retry';
-  const firstToRecord = await recordStatus(db, purchaseId, status, { payoutBatchId, batchStatus, itemStatus });
-  if (FAILED_STATUSES.has(status)) return 'done';
-  if (status !== 'SUCCESS') return 'retry';
-
-  try {
-    await transition(db, purchaseId, 'accepted', 'settled');
-  } catch (error) {
-    if (!(error instanceof StaleTransition)) throw error;
-    // The purchase moved on while PayPal was asked. Unless an overlapping poll settled it, it was
-    // refunded, and the seller has been paid for an order whose buyer got the money back. The poll
-    // that first recorded the payout's success logs that, once.
-    const [{ status: current }] = await db
-      .select({ status: purchases.status })
-      .from(purchases)
-      .where(eq(purchases.id, purchaseId));
-    if (firstToRecord && !SETTLED_OR_LATER.has(current)) {
-      await appendEvent(db, purchaseId, 'payout_after_refund', { status: current });
-    }
+  if (status === 'SUCCESS') {
+    await recordSuccess(db, purchaseId);
+    return 'done';
   }
-  return 'done';
+  await recordStatus(db, purchaseId, status, { payoutBatchId, batchStatus, itemStatus });
+  return FAILED_STATUSES.has(status) ? 'done' : 'retry';
 }
 
 async function hasPayout(db: Db, purchaseId: string): Promise<boolean> {
@@ -180,26 +163,46 @@ function describeFailure(error: unknown): Record<string, unknown> {
   return { error: error.message, errorClass: error.name, ...(answer ? { httpStatus: answer.status } : {}) };
 }
 
+/** What PayPal reported about a payout's batch and its one item. */
+type Reported = { payoutBatchId: string; batchStatus: string; itemStatus: string | null };
+
+/** Stores the payout's latest status, and returns whether this call changed it. */
+async function setPayoutStatus(db: Db, purchaseId: string, status: string): Promise<boolean> {
+  const changed = await db
+    .update(payouts)
+    .set({ status })
+    .where(and(eq(payouts.purchaseId, purchaseId), ne(payouts.status, status)))
+    .returning({ id: payouts.id });
+  return changed.length > 0;
+}
+
 /**
- * Stores the payout's latest status, and returns whether this call changed it. The first time that
- * status is a failure, logs a `payout_failed` event with what PayPal reported, in the same
- * transaction, so overlapping polls log it once.
+ * Stores a status other than SUCCESS. The first time it is a failure, logs a `payout_failed` event
+ * with what PayPal reported, in the same transaction, so overlapping polls log it once.
  */
-async function recordStatus(
-  db: Db,
-  purchaseId: string,
-  status: string,
-  reported: { payoutBatchId: string; batchStatus: string; itemStatus: string | null },
-): Promise<boolean> {
-  return db.transaction(async (tx) => {
-    const changed = await tx
-      .update(payouts)
-      .set({ status })
-      .where(and(eq(payouts.purchaseId, purchaseId), ne(payouts.status, status)))
-      .returning({ id: payouts.id });
-    if (changed.length > 0 && FAILED_STATUSES.has(status)) {
+async function recordStatus(db: Db, purchaseId: string, status: string, reported: Reported): Promise<void> {
+  await db.transaction(async (tx) => {
+    if ((await setPayoutStatus(tx, purchaseId, status)) && FAILED_STATUSES.has(status)) {
       await appendEvent(tx, purchaseId, 'payout_failed', reported);
     }
-    return changed.length > 0;
+  });
+}
+
+/**
+ * Stores a paid payout and, in the same transaction with the purchase locked, settles the purchase if
+ * it is still accepted. If it was refunded, the seller has been paid for an order whose buyer got the
+ * money back: the purchase stays refunded and, the first time the payout is seen paid, a
+ * `payout_after_refund` event is logged, so overlapping polls log it once.
+ */
+async function recordSuccess(db: Db, purchaseId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [{ status }] = await tx
+      .select({ status: purchases.status })
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId))
+      .for('update');
+    const firstSeen = await setPayoutStatus(tx, purchaseId, 'SUCCESS');
+    if (status === 'accepted') await transition(tx, purchaseId, 'accepted', 'settled');
+    else if (status === 'refunded' && firstSeen) await appendEvent(tx, purchaseId, 'payout_after_refund', { status });
   });
 }

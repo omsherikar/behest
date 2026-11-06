@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { decodeProtectedHeader } from 'jose';
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { Db } from '@/lib/db/client';
 import { buyers, mandates } from '@/lib/db/schema';
@@ -18,8 +18,15 @@ const key = await loadSigningKey({ RECEIPT_SIGNING_KEY: (await generateSigningKe
 const signer = createSigner(key);
 const jwks = publicJwks([key]);
 
-const NOW = new Date('2026-11-06T10:00:00.000Z');
+/** The confirmation time, with milliseconds so that the signed whole-second `iat` differs from it. */
+const NOW = new Date('2026-11-06T10:00:00.250Z');
+/** NOW in whole seconds since the epoch. */
+const NOW_SECONDS = 1793959200;
 const TEXT = '$60 a month on groceries and spices, ask me above $25, never electronics';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 async function addBuyer(db: Db): Promise<string> {
   const [buyer] = await db.insert(buyers).values({ name: 'Priya' }).returning();
@@ -87,11 +94,11 @@ it('signs a mandate payload that names the buyer only by the hash of their id', 
     v: 1,
     id: mandateId,
     iss: 'behest',
-    iat: NOW.getTime() / 1000,
+    iat: NOW_SECONDS,
     buyer: { ref: sha256Hex(buyerId) },
     policyHash: row.policyHash,
     readbackHash: row.readbackHash,
-    confirmedAt: NOW.toISOString(),
+    confirmedAt: '2026-11-06T10:00:00.250Z',
     confirmation: 'session',
     expiresAt: null,
   });
@@ -156,6 +163,21 @@ it('leaves other buyers\' active mandates alone', async () => {
   expect(row.status).toBe('active');
 });
 
+it('undoes the revoke when the new mandate cannot be inserted', async () => {
+  const { db, buyerId, deps } = await setup();
+  const existing = await confirmMandate(deps, { buyerId, text: TEXT, policy: demoPolicy });
+  // Reusing the existing mandate's id makes the insert, which runs after the revoke, fail.
+  vi.spyOn(crypto, 'randomUUID').mockReturnValueOnce(existing.mandateId as ReturnType<typeof crypto.randomUUID>);
+
+  await expect(confirmMandate(deps, { buyerId, text: TEXT, policy: demoPolicy })).rejects.toMatchObject({
+    cause: { code: '23505' },
+  });
+
+  const rows = await allMandates(db);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ id: existing.mandateId, status: 'active' });
+});
+
 it.each<{ name: string; policy: MandatePolicy }>([
   { name: 'a per-purchase limit above the budget', policy: { ...demoPolicy, perPurchaseMaxCents: 7000 } },
   { name: 'a field the policy does not define', policy: { ...demoPolicy, note: 'extra' } as MandatePolicy },
@@ -173,14 +195,18 @@ it.each<{ name: string; policy: MandatePolicy }>([
 });
 
 it.each([
-  { name: 'has already passed', expiresAt: '2026-11-06T09:00:00.000Z' },
-  { name: 'is the confirmation time itself', expiresAt: NOW.toISOString() },
-])('refuses a policy whose expiry $name as expired and changes nothing', async ({ expiresAt }) => {
+  { name: 'has already passed', expiresAt: '2026-11-06T10:00:00.000Z', now: NOW },
+  {
+    name: 'is the confirmation time itself',
+    expiresAt: '2026-11-06T10:00:00.000Z',
+    now: new Date('2026-11-06T10:00:00.000Z'),
+  },
+])('refuses a policy whose expiry $name as expired and changes nothing', async ({ expiresAt, now }) => {
   const { db, buyerId, deps } = await setup();
   const existing = await confirmMandate(deps, { buyerId, text: TEXT, policy: demoPolicy });
 
   const policy: MandatePolicy = { ...demoPolicy, expiresAt };
-  const attempt = confirmMandate(deps, { buyerId, text: TEXT, policy });
+  const attempt = confirmMandate({ ...deps, now: () => now }, { buyerId, text: TEXT, policy });
   await expect(attempt).rejects.toBeInstanceOf(MandateConfirmError);
   await expect(attempt).rejects.toMatchObject({ code: 'expired' });
 

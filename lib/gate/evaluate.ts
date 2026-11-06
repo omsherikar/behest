@@ -62,14 +62,26 @@ const atOrBelow = (value: number, limit: number) => value <= limit;
 
 /** Evaluates every rule in order and returns the most severe result with all the reasons. */
 export function evaluateGate(input: GateInput): GateResult {
+  const { policy } = input;
   const built = buildCart(input);
-  const outcomes: RuleOutcome[] = [{ rule: 'cart_valid', ...built.check }];
+  const outcomes: RuleOutcome[] = [
+    { rule: 'mandate_active', ...mandateActive(input, policy) },
+    { rule: 'cart_valid', ...built.check },
+  ];
   return {
     verdict: maxVerdict(...outcomes.map((o) => VERDICT_OF[o.result])),
     outcomes,
     cart: built.cart,
     rulesetVersion: RULESET_VERSION,
   };
+}
+
+function mandateActive({ mandate, now }: GateInput, policy: MandatePolicy): Check {
+  if (mandate.status === 'revoked') return block('This mandate was revoked');
+  if (mandate.status !== 'active') return block('This mandate has expired');
+  const expiries = [mandate.expiresAt, policy.expiresAt === null ? null : new Date(policy.expiresAt)];
+  if (expiries.some((at) => at !== null && at.getTime() <= now.getTime())) return block('This mandate has expired');
+  return pass('The mandate is active and has not expired');
 }
 
 type BuiltCart = { check: Check; cart: Cart; entries: CatalogEntry[] } | { check: Check; cart: null };

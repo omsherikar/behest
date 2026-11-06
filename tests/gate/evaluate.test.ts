@@ -152,3 +152,33 @@ it.each<[string, unknown, RegExp]>([
   expect(result.cart).toBeNull();
   expect(outcome(result, 'cart_valid')).toMatchObject({ result: 'block', detail: expect.stringMatching(detail) });
 });
+
+it.each<[string, Partial<GateInput>, string]>([
+  ['an expired mandate', { mandate: { status: 'expired', expiresAt: null } }, 'This mandate has expired'],
+  ['a revoked mandate', { mandate: { status: 'revoked', expiresAt: null } }, 'This mandate was revoked'],
+  ['a mandate expiring right now', { mandate: { status: 'active', expiresAt: NOW } }, 'This mandate has expired'],
+  [
+    'a policy that expired',
+    { policy: { ...demoPolicy, expiresAt: '2026-11-06T11:59:59Z' } },
+    'This mandate has expired',
+  ],
+])('blocks %s', (_, overrides, detail) => {
+  const result = evaluateGate(input(overrides));
+  expect(result.verdict).toBe('BLOCK');
+  expect(outcome(result, 'mandate_active')).toEqual({ rule: 'mandate_active', result: 'block', detail });
+  // The other rules are still evaluated, so the record shows everything that was wrong.
+  expect(outcome(result, 'cart_valid')?.result).toBe('pass');
+});
+
+it('allows a mandate and policy that expire later', () => {
+  const later = new Date(NOW.getTime() + 1);
+  const result = evaluateGate(
+    input({ mandate: { status: 'active', expiresAt: later }, policy: { ...demoPolicy, expiresAt: later.toISOString() } }),
+  );
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'mandate_active')).toEqual({
+    rule: 'mandate_active',
+    result: 'pass',
+    detail: 'The mandate is active and has not expired',
+  });
+});

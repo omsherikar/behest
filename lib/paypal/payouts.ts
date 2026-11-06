@@ -1,9 +1,11 @@
 // Paying sellers with PayPal Payouts. Behest is the merchant of record, so a buyer's payment lands in
 // Behest's account and each accepted order is paid on to its seller as a one-item payout batch.
 //
-// The sender batch id is the payout's idempotency key: it is sent as PayPal-Request-Id too, so a call
-// repeated after a lost response returns the original batch. A sender batch id PayPal has already
-// used surfaces as PayoutAlreadyExists, never as a second payout. Statuses are PayPal's own strings.
+// The sender batch id is the payout's idempotency key, and it is sent as PayPal-Request-Id too. The
+// sandbox does not replay the first answer to a repeated request id: it refuses the repeat as a
+// duplicate sender batch. So a sender batch id PayPal has already used, including one repeated after
+// a lost response, surfaces as PayoutAlreadyExists naming the original batch, never as a second
+// payout. Statuses are PayPal's own strings.
 
 import { PayPalApiError, paypalRequest } from './http';
 import { toValue } from './money';

@@ -206,7 +206,7 @@ it('marks a job dead when no handler is registered for its kind, and still runs 
     .returning({ id: jobs.id });
   const handled = await enqueue(db, 'webhook', { eventId: 'WH-1' }, T);
   const webhook = vi.fn<JobHandler<Deps>>(async () => 'done');
-  const handlers = { webhook } as Partial<JobHandlers<Deps>> as JobHandlers<Deps>;
+  const handlers: Partial<JobHandlers<Deps>> = { webhook };
 
   expect(await runDueJobs(db, handlers, deps, T)).toBe(3);
   expect(await jobRow(db, unhandled)).toMatchObject({

@@ -44,10 +44,15 @@ export async function enqueue(db: Db, kind: JobKind, payload: JobPayload, runAt?
 
 /**
  * Claims up to CLAIM_LIMIT due jobs, longest overdue first, runs each in turn with its kind's
- * handler and records the outcome. `now` is the current time for every decision in the call.
+ * handler and records the outcome. A kind missing from `handlers` marks its jobs dead. `now` is the current time for every decision in the call.
  * Returns the number of jobs claimed.
  */
-export async function runDueJobs<D>(db: Db, handlers: JobHandlers<D>, deps: D, now: Date): Promise<number> {
+export async function runDueJobs<D>(
+  db: Db,
+  handlers: Partial<JobHandlers<D>>,
+  deps: D,
+  now: Date,
+): Promise<number> {
   const claimed = await claimDueJobs(db, now);
   for (const job of claimed) await runJob(db, job, handlers, deps, now);
   return claimed.length;
@@ -81,7 +86,13 @@ function claimDueJobs(db: Db, now: Date): Promise<ClaimedJob[]> {
     .returning({ id: jobs.id, kind: jobs.kind, payload: jobs.payload, attempts: jobs.attempts });
 }
 
-async function runJob<D>(db: Db, job: ClaimedJob, handlers: JobHandlers<D>, deps: D, now: Date): Promise<void> {
+async function runJob<D>(
+  db: Db,
+  job: ClaimedJob,
+  handlers: Partial<JobHandlers<D>>,
+  deps: D,
+  now: Date,
+): Promise<void> {
   // Writes apply only while the job still holds this run's claim. If it was reclaimed as
   // abandoned in the meantime, the later run's outcome stands.
   const stillClaimed = and(eq(jobs.id, job.id), eq(jobs.status, 'running'), eq(jobs.runAt, now));

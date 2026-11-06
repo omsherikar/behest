@@ -1,8 +1,8 @@
 import { getDb } from '@/lib/db/client';
 import { type JobHandlers, runDueJobs } from './queue';
 
-/** What the worker runs jobs with: a handler for each kind and the dependencies passed to every handler. */
-export type JobRuntime<D> = { handlers: JobHandlers<D>; deps: D };
+/** What the worker runs jobs with: the handlers by kind and the dependencies passed to every handler. */
+export type JobRuntime<D> = { handlers: Partial<JobHandlers<D>>; deps: D };
 
 /**
  * Runs due jobs from the app database every `intervalMs`, reading the clock once per tick. A tick

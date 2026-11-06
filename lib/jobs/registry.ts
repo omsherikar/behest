@@ -1,4 +1,3 @@
-import type { JobHandlers } from './queue';
 import type { JobRuntime } from './worker';
 
 /**
@@ -7,7 +6,5 @@ import type { JobRuntime } from './worker';
  * jobs dead with the kind named in `last_error`.
  */
 export async function loadJobHandlers(): Promise<JobRuntime<undefined>> {
-  // runDueJobs looks up each job's kind before dispatching, so a map missing kinds is safe.
-  const handlers: Partial<JobHandlers<undefined>> = {};
-  return { handlers: handlers as JobHandlers<undefined>, deps: undefined };
+  return { handlers: {}, deps: undefined };
 }

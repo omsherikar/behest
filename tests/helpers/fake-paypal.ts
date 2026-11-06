@@ -7,8 +7,8 @@ import type { DisputeDetail, PaypalPort } from '@/lib/paypal/port';
 // the first answer and nothing happens twice, while a payout repeated with the same sender batch
 // id is refused with PayoutAlreadyExists naming the batch already sent. An approval order can be
 // captured only once the test has approved it, as the buyer would at PayPal, and a capture is never
-// refunded beyond its amount. A test can make the
-// next call of a method fail, and can read back every call and every capture, payout and refund made.
+// refunded beyond its amount. A test can make the next call of a method fail, and can read back
+// every call and every capture, payout and refund made.
 
 type Method = keyof PaypalPort;
 type Answer<M extends Method> = Awaited<ReturnType<PaypalPort[M]>>;

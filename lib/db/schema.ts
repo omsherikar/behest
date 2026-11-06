@@ -1,11 +1,14 @@
 import {
+  integer,
   jsonb,
   pgEnum,
   pgTable,
   text,
   timestamp,
+  unique,
   uuid,
 } from 'drizzle-orm/pg-core';
+import type { Category } from '../domain/categories';
 import type { MandatePolicy } from '../domain/policy';
 
 // The database schema. Money is integer cents with an ISO currency code (USD only), and every
@@ -18,6 +21,7 @@ const updatedAt = () =>
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date());
+const currency = () => text('currency').$type<'USD'>().notNull().default('USD');
 
 // Buyers, wallets and mandates
 
@@ -69,3 +73,40 @@ export const mandates = pgTable('mandates', {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+// Sellers and products
+
+export const sellers = pgTable('sellers', {
+  id: id(),
+  slug: text('slug').notNull().unique(),
+  name: text('name').notNull(),
+  payoutEmail: text('payout_email').notNull(),
+  createdAt: createdAt(),
+});
+
+export const products = pgTable(
+  'products',
+  {
+    id: id(),
+    sellerId: uuid('seller_id')
+      .notNull()
+      .references(() => sellers.id),
+    sku: text('sku').notNull(),
+    title: text('title').notNull(),
+    description: text('description').notNull().default(''),
+    category: text('category').$type<Category>().notNull(),
+    priceCents: integer('price_cents').notNull(),
+    currency: currency(),
+    /** Units on hand. Null means the seller does not track stock. */
+    stock: integer('stock'),
+    /** Listing screening results, such as `agent_instructions`. The gate blocks any flagged item. */
+    flags: text('flags').array().notNull().default([]),
+    /** The matched Channel3 product, when enrichment found one. */
+    channel3Id: text('channel3_id'),
+    /** Market median unit price from Channel3, the gate's price benchmark. */
+    marketMedianCents: integer('market_median_cents'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [unique('products_seller_sku_unique').on(t.sellerId, t.sku)],
+);

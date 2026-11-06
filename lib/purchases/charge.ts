@@ -67,9 +67,9 @@ const REPLAY_WINDOW_MS = 5 * 60 * 60 * 1000;
  * - DECLINED: a `charge_declined` event, and the purchase ends `failed`;
  * - a second thrown error: a `charge_unknown` event, with the purchase left `charging` for the
  *   queued job to replay.
- * A purchase that could not be given its receipt once captured fails with a `charge_refused` event,
- * and one whose buyer has no linked wallet with a `charge_failed` event, each saying why; PayPal is
- * never asked. A purchase another call has already moved on from `proposed` is returned
+ * A purchase that could not be given its receipt once captured fails with a `charge_refused`
+ * event, and one whose buyer has no linked wallet with a `charge_failed` event, each saying why;
+ * PayPal is never asked. A purchase another call has already moved on from `proposed` is returned
  * as it stands. Throws, changing nothing, for a purchase whose final verdict is not ALLOW.
  */
 export async function chargeAllowed(deps: ChargeDeps, purchaseId: string): Promise<ProposalOutcome> {
@@ -104,13 +104,13 @@ export async function chargeAllowed(deps: ChargeDeps, purchaseId: string): Promi
  * Replays the charge of a purchase whose charge was never recorded: the handler of the
  * `charge_retry` job queued with every charge. It sends exactly the request its `charge` event
  * recorded, payment token and request id included, so PayPal either reports the charge it already
- * made or makes it now, and goes on as chargeAllowed does with the
- * answer; that is safe even while another call acts on the same answer. `done` once PayPal has
- * answered, and also, without asking PayPal, for a purchase no longer `charging` or one whose
- * capture is pending, which only PayPal's webhook can move on. Throws, so the job is retried with
- * backoff, while PayPal still cannot answer. Also throws, without asking PayPal, for a purchase
- * with no saved-wallet charge to replay, one charged too long ago to replay safely, or one whose
- * buyer has no linked wallet any more: money may have moved, so an operator checks PayPal.
+ * made or makes it now, and goes on as chargeAllowed does with the answer; that is safe even while
+ * another call acts on the same answer. `done` once PayPal has answered, and also, without asking
+ * PayPal, for a purchase no longer `charging` or one whose capture is pending, which only PayPal's
+ * webhook can move on. Throws, so the job is retried with backoff, while PayPal still cannot
+ * answer. Also throws, without asking PayPal, for a purchase with no saved-wallet charge to replay,
+ * one charged too long ago to replay safely, or one whose buyer has no linked wallet any more:
+ * money may have moved, so an operator checks PayPal.
  */
 export async function retryCharge(deps: ChargeDeps, purchaseId: string): Promise<JobOutcome> {
   const { db } = deps;

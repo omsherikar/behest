@@ -21,7 +21,7 @@ type PayoutErrorBody = { name?: unknown; details?: unknown; links?: unknown };
 export class PayoutAlreadyExists extends Error {
   constructor(
     readonly senderBatchId: string,
-    /** The batch PayPal links from its error, or null when it links none. */
+    /** The batch PayPal links from its error, or null when no batch link was found on the detail or at the top level. */
     readonly payoutBatchId: string | null,
     options?: ErrorOptions,
   ) {
@@ -43,14 +43,28 @@ function duplicateBatchBody(error: unknown): PayoutErrorBody | null {
     return null;
   }
   if (body?.name !== 'USER_BUSINESS_ERROR' || !Array.isArray(body.details)) return null;
-  const namesBatch = body.details.some((detail) => typeof detail?.field === 'string' && /(^|\.)sender_batch_id$/i.test(detail.field));
-  return namesBatch ? body : null;
+  return body.details.some(namesSenderBatch) ? body : null;
 }
 
-/** PayPal links its duplicate error to the batch that already has the sender batch id. */
+function namesSenderBatch(detail: { field?: unknown } | null | undefined): boolean {
+  return typeof detail?.field === 'string' && /(^|\.)sender_batch_id$/i.test(detail.field);
+}
+
+/** A link field holds an array of links or a single link. */
+function asLinks(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  return value ? [value] : [];
+}
+
+/**
+ * The batch that already has the sender batch id. PayPal links it from the error detail naming the
+ * sender batch id (seen in the sandbox: `details[].link`, an array); top-level `links` is the fallback.
+ */
 function linkedBatchId(body: PayoutErrorBody): string | null {
-  for (const link of Array.isArray(body.links) ? body.links : []) {
-    const match = typeof link?.href === 'string' ? /\/v1\/payments\/payouts\/([^/?#]+)/.exec(link.href) : null;
+  const details: { link?: unknown }[] = Array.isArray(body.details) ? body.details.filter(namesSenderBatch) : [];
+  for (const link of [...details.flatMap((detail) => asLinks(detail.link)), ...asLinks(body.links)]) {
+    const href = (link as { href?: unknown } | null)?.href;
+    const match = typeof href === 'string' ? /\/v1\/payments\/payouts\/([^/?#]+)/.exec(href) : null;
     if (match) return match[1];
   }
   return null;

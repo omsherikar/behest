@@ -3,6 +3,7 @@ import { fakeFetch, type FakeRoute, type RecordedCall } from '@/tests/helpers/fa
 import payoutBatchPending from '@/tests/fixtures/paypal/payout-batch-pending.json';
 import payoutBatchSuccess from '@/tests/fixtures/paypal/payout-batch-success.json';
 import payoutCreated from '@/tests/fixtures/paypal/payout-created.json';
+import duplicateSenderBatch from '@/tests/fixtures/paypal/payout-duplicate-sender-batch.json';
 import { PayPalApiError, resetPaypalTokenCacheForTests, setPaypalRetrySleepForTests } from '@/lib/paypal/http';
 import { PayoutAlreadyExists, createPayout, getPayoutBatch } from '@/lib/paypal/payouts';
 
@@ -26,15 +27,15 @@ const payoutInput = {
   senderBatchId: SENDER_BATCH_ID,
 };
 
-/** PayPal's answer to a sender batch id used in the last 30 days, linking the batch that already has it. */
-const batchAlreadyExists = {
-  name: 'USER_BUSINESS_ERROR',
-  message: 'User business error.',
-  debug_id: 'c81f3b6e2d4a7',
-  information_link: 'https://developer.paypal.com/docs/api/payments.payouts-batch/#errors',
-  details: [{ field: 'SENDER_BATCH_ID', location: 'body', issue: 'Batch with given sender_batch_id already exists' }],
-  links: [{ href: `https://api-m.sandbox.paypal.com/v1/payments/payouts/${BATCH_ID}`, rel: 'self', method: 'GET', encType: 'application/json' }],
-};
+/** The batch that the recorded duplicate error links, on its SENDER_BATCH_ID detail. */
+const EXISTING_BATCH_ID = '3VMB5TF975CZS';
+const [duplicateDetail] = duplicateSenderBatch.details;
+const [existingBatchLink] = duplicateDetail.link;
+
+/** PayPal's recorded duplicate error with the batch link placed as given; `undefined` leaves the detail with none. */
+function duplicateWithLinks(detailLink: unknown, links: unknown[]) {
+  return { ...duplicateSenderBatch, details: [{ ...duplicateDetail, link: detailLink }], links };
+}
 
 function stubFetch(routes: FakeRoute[]): RecordedCall[] {
   const f = fakeFetch([oauth, ...routes]);
@@ -120,25 +121,48 @@ describe('createPayout', () => {
     expect(posts[1].body).toBe(posts[0].body);
   });
 
-  it('reports a sender batch id PayPal already used as an existing payout, with its batch id', async () => {
-    stubFetch([{ method: 'POST', path: PAYOUTS, status: 400, body: batchAlreadyExists }]);
+  it('reports a sender batch id PayPal already used as an existing payout, with the batch linked from its detail', async () => {
+    stubFetch([{ method: 'POST', path: PAYOUTS, status: 400, body: duplicateSenderBatch }]);
 
     const error = await createPayout(payoutInput).catch((e) => e);
 
     expect(error).toBeInstanceOf(PayoutAlreadyExists);
-    expect(error).toMatchObject({ senderBatchId: SENDER_BATCH_ID, payoutBatchId: BATCH_ID });
+    expect(error).toMatchObject({ senderBatchId: SENDER_BATCH_ID, payoutBatchId: EXISTING_BATCH_ID });
     expect(error.message).toContain(SENDER_BATCH_ID);
     expect(error.cause).toBeInstanceOf(PayPalApiError);
-    expect(error.cause).toMatchObject({ status: 400, body: JSON.stringify(batchAlreadyExists) });
+    expect(error.cause).toMatchObject({ status: 400, body: JSON.stringify(duplicateSenderBatch) });
   });
 
-  it('reports an existing payout with no batch id when PayPal links no batch', async () => {
-    stubFetch([{ method: 'POST', path: PAYOUTS, status: 400, body: { ...batchAlreadyExists, links: [] } }]);
+  it.each([
+    { name: 'a single link object on the detail', body: duplicateWithLinks(existingBatchLink, []) },
+    { name: 'only a top-level link', body: duplicateWithLinks(undefined, [existingBatchLink]) },
+  ])('reads the existing batch from $name', async ({ body }) => {
+    stubFetch([{ method: 'POST', path: PAYOUTS, status: 400, body }]);
+
+    const error = await createPayout(payoutInput).catch((e) => e);
+
+    expect(error).toBeInstanceOf(PayoutAlreadyExists);
+    expect(error).toMatchObject({ payoutBatchId: EXISTING_BATCH_ID });
+  });
+
+  it('reports an existing payout with no batch id when PayPal links no batch in either place', async () => {
+    stubFetch([{ method: 'POST', path: PAYOUTS, status: 400, body: duplicateWithLinks(undefined, []) }]);
 
     const error = await createPayout(payoutInput).catch((e) => e);
 
     expect(error).toBeInstanceOf(PayoutAlreadyExists);
     expect(error).toMatchObject({ senderBatchId: SENDER_BATCH_ID, payoutBatchId: null });
+  });
+
+  it('ignores a batch link on a detail about another field', async () => {
+    const otherDetail = { field: 'items[0].receiver', location: 'body', issue: 'Receiver is unconfirmed', link: [existingBatchLink] };
+    const body = { ...duplicateWithLinks(undefined, []), details: [{ ...duplicateDetail, link: undefined }, otherDetail] };
+    stubFetch([{ method: 'POST', path: PAYOUTS, status: 400, body }]);
+
+    const error = await createPayout(payoutInput).catch((e) => e);
+
+    expect(error).toBeInstanceOf(PayoutAlreadyExists);
+    expect(error).toMatchObject({ payoutBatchId: null });
   });
 
   it.each([
@@ -165,7 +189,7 @@ describe('createPayout', () => {
       status: 422,
       body: { name: 'INSUFFICIENT_FUNDS', message: 'Sender does not have sufficient funds. Please add funds and retry.' },
     },
-    { name: 'a server error, even one naming the sender batch id', status: 500, body: batchAlreadyExists },
+    { name: 'a server error, even one naming the sender batch id', status: 500, body: duplicateSenderBatch },
   ])('rethrows $name untouched', async ({ status, body }) => {
     stubFetch([{ method: 'POST', path: PAYOUTS, status, body }]);
 

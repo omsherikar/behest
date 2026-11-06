@@ -101,7 +101,7 @@ describe.skipIf(process.env.PAYPAL_LIVE !== '1')('the PayPal client against the 
       expect(error).toMatchObject({ senderBatchId, payoutBatchId });
     });
 
-    it('is refused when sent again from a new process with a fresh OAuth token, naming the existing batch', async () => {
+    it('is refused when sent again with a fresh OAuth token, naming the existing batch', async () => {
       if (!payoutBatchId) throw new Error('the payout was not created, so there is nothing to send again');
       resetPaypalTokenCacheForTests();
 

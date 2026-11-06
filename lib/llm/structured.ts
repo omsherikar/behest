@@ -1,6 +1,11 @@
-import Anthropic, { type Middleware } from '@anthropic-ai/sdk';
+import type { Middleware } from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
-import type { BetaMessageParam, BetaRefusalStopDetails } from '@anthropic-ai/sdk/resources/beta/messages';
+import type {
+  BetaMessage,
+  BetaMessageParam,
+  BetaRefusalStopDetails,
+  BetaUsage,
+} from '@anthropic-ai/sdk/resources/beta/messages';
 import { z } from 'zod';
 import { dailyCapUsd, type LlmDeps, type LlmFailure, type LlmResult, recordCall, spentTodayUsd } from './client';
 import { estimateCostUsd } from './prices';
@@ -37,6 +42,16 @@ function outputFormat<T>(schema: z.ZodType<T>) {
 
 type Outcome<T> = { ok: true; value: T } | { ok: false; error: LlmFailure; detail?: string };
 
+/** Whether a successful response has the fields of a message that the checks and the log read. */
+function isMessage(message: Pick<BetaMessage, 'model' | 'usage'>): boolean {
+  const usage: Partial<BetaUsage> | null | undefined = message.usage;
+  return (
+    typeof message.model === 'string' &&
+    typeof usage?.input_tokens === 'number' &&
+    typeof usage.output_tokens === 'number'
+  );
+}
+
 function refusalDetail(details: BetaRefusalStopDetails | null): string | undefined {
   return details?.explanation ?? details?.category ?? undefined;
 }
@@ -44,7 +59,7 @@ function refusalDetail(details: BetaRefusalStopDetails | null): string | undefin
 /**
  * Asks the route's model for a reply matching `req.schema`, unless today's spend has reached the
  * cap, and logs the call. Every failure of the call itself is returned; only misconfiguration
- * (an override or cap it cannot honour) and database errors throw.
+ * (an override, cap or schema it cannot use) and database errors throw.
  */
 export async function callStructured<T>(
   deps: LlmDeps,
@@ -54,6 +69,8 @@ export async function callStructured<T>(
   const env = deps.env ?? process.env;
   const { model, effort, maxTokens } = routeConfig(route, env);
   const cap = dailyCapUsd(env);
+  // Built before the request, so a schema that cannot become a JSON schema throws as the bug it is.
+  const format = outputFormat(req.schema);
   const spent = await spentTodayUsd(deps.db, deps.now());
   if (spent >= cap) {
     return { ok: false, error: 'spend_cap', callId: null, detail: `Spent $${spent} of the $${cap} daily model budget` };
@@ -84,15 +101,17 @@ export async function callStructured<T>(
         max_tokens: maxTokens,
         system: req.system,
         messages: req.messages,
-        output_config: { effort, format: outputFormat(req.schema) },
+        output_config: { effort, format },
         betas: [FALLBACK_BETA],
         fallbacks: 'default',
       },
       { headers: { [ROUTE_HEADER]: route }, middleware: [captureRequestId] },
     );
+    if (!isMessage(message)) throw new Error('The response was not a message');
   } catch (error) {
-    if (!(error instanceof Anthropic.AnthropicError)) throw error;
-    const detail = error.message;
+    // The SDK's errors, and anything a malformed response breaks while it is read, such as a 200
+    // carrying an HTML page.
+    const detail = error instanceof Error ? error.message : String(error);
     const callId = await recordCall(deps.db, { ...logged(deps.now()), ok: false, error: `api_error: ${detail}` });
     return { ok: false, error: 'api_error', callId, detail };
   }

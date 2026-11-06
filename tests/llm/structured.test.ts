@@ -211,6 +211,26 @@ it('maps an HTTP 500 after retries to api_error', async () => {
   ]);
 });
 
+it('maps a successful response that is not a message to api_error and logs it', async () => {
+  const { db, call } = await setup([
+    { status: 200, text: '<!doctype html><title>Gateway</title>', headers: { 'content-type': 'text/html' } },
+    {},
+    { content: [] },
+  ]);
+
+  const results = [await call(), await call(), await call()];
+
+  for (const result of results) {
+    expect(result).toEqual({ ok: false, error: 'api_error', callId: expect.any(String), detail: expect.any(String) });
+  }
+  const rows = await db.select().from(llmCalls);
+  expect(rows.map((row) => [row.ok, row.requestId, row.error?.split(':')[0]])).toEqual([
+    [false, 'req_fake_1', 'api_error'],
+    [false, 'req_fake_2', 'api_error'],
+    [false, 'req_fake_3', 'api_error'],
+  ]);
+});
+
 it('honours CLAUDE_MODEL_ and CLAUDE_EFFORT_ overrides', async () => {
   const { db, fake, call } = await setup(
     [messageJson({ json: { answer: 'yes' }, usage: { input_tokens: 1000, output_tokens: 500 } })],

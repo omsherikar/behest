@@ -1,0 +1,22 @@
+{
+  "id": "msg_mandate_only_coffee",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"policy\":{\"version\":1,\"currency\":\"USD\",\"budget\":{\"amountCents\":3000,\"period\":\"month\"},\"perPurchaseMaxCents\":3000,\"askAboveCents\":null,\"categories\":{\"allow\":[],\"deny\":[]},\"merchants\":{\"allow\":null,\"deny\":[]},\"velocity\":null,\"expiresAt\":null},\"assumptions\":[\"No limit was given for a single purchase, so one purchase can use the whole $30 monthly budget.\",\"not enforced: only coffee; allowing it means allowing all beverages\"],\"questions\":[{\"id\":\"allow_all_beverages\",\"question\":\"Behest can only allow whole categories, so allowing coffee means allowing all beverages. Should your agent be able to buy any beverage?\",\"options\":[\"Allow all beverages\",\"Don't set up this mandate\"]}]}",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 1885,
+    "output_tokens": 500,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

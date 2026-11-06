@@ -196,7 +196,7 @@ it.each<[string, Partial<GateInput>, string]>([
   ['a mandate expiring right now', { mandate: { status: 'active', expiresAt: NOW } }, 'This mandate has expired'],
   [
     'a policy that expired',
-    { policy: { ...demoPolicy, expiresAt: '2026-11-06T11:59:59Z' } },
+    { policy: { ...demoPolicy, expiresAt: '2026-11-06T11:59:00Z' } },
     'This mandate has expired',
   ],
 ])('blocks %s', (_, overrides, detail) => {
@@ -209,8 +209,9 @@ it.each<[string, Partial<GateInput>, string]>([
 
 it('allows a mandate and policy that expire later', () => {
   const later = new Date(NOW.getTime() + 1);
+  // A policy expiry is a whole minute, so the closest later one is a minute away.
   const result = evaluateGate(
-    input({ mandate: { status: 'active', expiresAt: later }, policy: { ...demoPolicy, expiresAt: later.toISOString() } }),
+    input({ mandate: { status: 'active', expiresAt: later }, policy: { ...demoPolicy, expiresAt: '2026-11-06T12:01:00Z' } }),
   );
   expect(result.verdict).toBe('ALLOW');
   expect(outcome(result, 'mandate_active')).toEqual({

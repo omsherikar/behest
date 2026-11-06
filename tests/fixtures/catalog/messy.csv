@@ -1,0 +1,11 @@
+﻿sku,name,description,price,stock,category
+TUR-100,Turmeric powder 100g,Single-origin Lakadong turmeric,$4.50,40,spices
+CUM-100,Cumin seeds 100g,Whole cumin seeds,"4,50",40,spices
+,Turmeric powder 250g,Loose turmeric in a paper bag,9.00,,spices
+TUR-100,Turmeric powder 1kg,Bulk bag of turmeric,30.00,5,spices
+GAR-200,Garam masala 200g,House blend of eleven spices,0,25,spices
+
+BAS-1KG,Basmati rice 1kg,"Aged basmati.
+Cooks in twelve minutes.",9.00,30,groceries
+,,,,,
+CHAI-50,Masala chai 50g,Loose leaf black tea,3.25,lots,beverages

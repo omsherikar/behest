@@ -1,3 +1,4 @@
+import { categoryLabel } from '@/lib/domain/categories';
 import { block, pass, type CartContext, type Check } from './check';
 
 // What the agent may buy and from whom.
@@ -5,7 +6,7 @@ import { block, pass, type CartContext, type Check } from './check';
 export function categoryAllowed({ cart, policy }: CartContext): Check {
   const { allow, deny } = policy.categories;
   const refused = cart.items.find((i) => deny.includes(i.category) || (allow !== null && !allow.includes(i.category)));
-  if (refused) return block(`${refused.category.replaceAll('_', ' ')} is not allowed by your mandate`);
+  if (refused) return block(`${categoryLabel(refused.category)} is not allowed by your mandate`);
   return pass('Every item is in a category your mandate allows');
 }
 

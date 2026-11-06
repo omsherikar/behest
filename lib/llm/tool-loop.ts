@@ -94,6 +94,9 @@ export async function runToolLoop(
       messages: req.messages,
       tools: req.tools,
       output_config: { effort },
+      // Automatic prompt caching: the marker moves to the end of the conversation each turn, so the
+      // next turn reads everything before its new tool results from the cache.
+      cache_control: { type: 'ephemeral' },
       betas: [FALLBACK_BETA],
       fallbacks: 'default',
       max_iterations: req.maxTurns,

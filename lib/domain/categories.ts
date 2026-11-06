@@ -29,3 +29,8 @@ export type Category = (typeof CATEGORIES)[number];
 export function isCategory(value: string): value is Category {
   return (CATEGORIES as readonly string[]).includes(value);
 }
+
+/** A category as a buyer reads it: `personal_care` becomes "personal care". */
+export function categoryLabel(category: Category): string {
+  return category.replaceAll('_', ' ');
+}

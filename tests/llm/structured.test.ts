@@ -76,13 +76,24 @@ it('sends model, effort, fallbacks and the fallback beta', async () => {
   expect(sent.body).toMatchObject({
     model: 'claude-opus-5-5',
     max_tokens: 8000,
-    system: 'Answer in one word.',
+    system: [{ type: 'text', text: 'Answer in one word.' }],
     messages,
     output_config: { effort: 'medium', format: { type: 'json_schema', schema: expect.any(Object) } },
     fallbacks: 'default',
   });
   expect(sent.headers['anthropic-beta'].split(',')).toContain('server-side-fallback-2026-07-01');
   expect(sent.headers['x-behest-route']).toBe('mandate_compile');
+});
+
+it('marks the system prompt for caching, so the prefix every request shares is read back', async () => {
+  const { fake, call } = await setup([messageJson({ json: { answer: 'yes' } })]);
+
+  await call();
+
+  const [{ body }] = fake.requests;
+  expect(body.system).toEqual([{ type: 'text', text: 'Answer in one word.', cache_control: { type: 'ephemeral' } }]);
+  // A top-level marker would land on the user message, which differs every time and is never read back.
+  expect(body).not.toHaveProperty('cache_control');
 });
 
 it('never sends tool_choice, temperature or disabled thinking', async () => {

@@ -7,6 +7,26 @@ import { CATEGORIES } from './categories';
 
 const cents = z.number().int().nonnegative();
 const category = z.enum(CATEGORIES);
+/**
+ * A seller slug: lower-case letters, digits and hyphens, starting with a letter or digit, at most
+ * 63 characters. With no commas, spaces or upper case, a list of slugs reads back unambiguously.
+ */
+const merchantSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
+/**
+ * When a mandate ends: a whole minute, which the readback shows as a date and time, or the last
+ * millisecond of a UTC day, which it shows as that date. Either way the buyer reads the exact
+ * instant the gate enforces.
+ */
+const expiry = z.iso.datetime().refine(
+  (at) => {
+    const time = new Date(at);
+    // Zod runs this even when the datetime check failed; that check already rejects the value.
+    if (Number.isNaN(time.getTime())) return true;
+    const iso = time.toISOString();
+    return iso.endsWith(':00.000Z') || iso.endsWith('T23:59:59.999Z');
+  },
+  { message: 'expiresAt must be a whole minute or the end of a day' },
+);
 
 export const BudgetPeriod = z.enum(['day', 'week', 'month', 'once']);
 export type BudgetPeriod = z.infer<typeof BudgetPeriod>;
@@ -31,8 +51,8 @@ export const MandatePolicy = z
     merchants: z
       .object({
         /** Merchant slugs. Null means any merchant not denied. */
-        allow: z.array(z.string().min(1)).nullable(),
-        deny: z.array(z.string().min(1)),
+        allow: z.array(merchantSlug).nullable(),
+        deny: z.array(merchantSlug),
       })
       .strict(),
     /** At most this many purchases in a rolling window. Null means no limit. */
@@ -41,7 +61,7 @@ export const MandatePolicy = z
       .strict()
       .nullable(),
     /** ISO timestamp after which the mandate no longer authorizes anything. */
-    expiresAt: z.iso.datetime().nullable(),
+    expiresAt: expiry.nullable(),
   })
   .strict()
   .refine((p) => p.perPurchaseMaxCents <= p.budget.amountCents, {
@@ -55,6 +75,10 @@ export const MandatePolicy = z
   .refine((p) => !p.categories.allow || p.categories.allow.every((c) => !p.categories.deny.includes(c)), {
     message: 'a category cannot be both allowed and denied',
     path: ['categories'],
+  })
+  .refine((p) => !p.merchants.allow || p.merchants.allow.every((m) => !p.merchants.deny.includes(m)), {
+    message: 'a seller cannot be both allowed and denied',
+    path: ['merchants'],
   });
 
 export type MandatePolicy = z.infer<typeof MandatePolicy>;

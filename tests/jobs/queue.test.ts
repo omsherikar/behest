@@ -24,6 +24,13 @@ const HOUR = 60 * MINUTE;
 
 const T = new Date('2026-11-06T12:00:00Z');
 const after = (ms: number, from: Date = T) => new Date(from.getTime() + ms);
+/** A clock that always reads `date`. */
+const at = (date: Date) => () => date;
+/** A clock that reads each of `times` in turn and then keeps reading the last. */
+function clockReading(...times: Date[]) {
+  let reads = 0;
+  return () => times[Math.min(reads++, times.length - 1)];
+}
 
 type Deps = { label: string };
 const deps: Deps = { label: 'deps' };
@@ -85,11 +92,11 @@ it('runs a due job with its payload and deps, marks it done and never runs it ag
   const payoutPoll = vi.fn<JobHandler<Deps>>(async () => 'done');
   const handlers = handlersWith({ payout_poll: payoutPoll });
 
-  expect(await runDueJobs(db, handlers, deps, T)).toBe(1);
+  expect(await runDueJobs(db, handlers, deps, at(T))).toBe(1);
   expect(payoutPoll).toHaveBeenCalledExactlyOnceWith({ purchaseId: 'pur-1' }, deps);
   expect(await jobRow(db, id)).toMatchObject({ status: 'done', attempts: 0, lastError: null });
 
-  expect(await runDueJobs(db, handlers, deps, after(HOUR))).toBe(0);
+  expect(await runDueJobs(db, handlers, deps, at(after(HOUR)))).toBe(0);
   expect(payoutPoll).toHaveBeenCalledOnce();
 });
 
@@ -100,7 +107,7 @@ it('sends each job to the handler for its kind', async () => {
   const webhook = vi.fn<JobHandler<Deps>>(async () => 'done');
   const disputeSync = vi.fn<JobHandler<Deps>>(async () => 'done');
 
-  expect(await runDueJobs(db, handlersWith({ webhook, dispute_sync: disputeSync }), deps, T)).toBe(2);
+  expect(await runDueJobs(db, handlersWith({ webhook, dispute_sync: disputeSync }), deps, at(T))).toBe(2);
   expect(webhook).toHaveBeenCalledExactlyOnceWith({ eventId: 'WH-1' }, deps);
   expect(disputeSync).toHaveBeenCalledExactlyOnceWith({ disputeId: 'PP-D-1' }, deps);
 });
@@ -111,11 +118,11 @@ it('does not run a job before its run time', async () => {
   const expire = vi.fn<JobHandler<Deps>>(async () => 'done');
   const handlers = handlersWith({ approval_expiry: expire });
 
-  expect(await runDueJobs(db, handlers, deps, after(MINUTE - 1))).toBe(0);
+  expect(await runDueJobs(db, handlers, deps, at(after(MINUTE - 1)))).toBe(0);
   expect(expire).not.toHaveBeenCalled();
   expect(await jobRow(db, id)).toMatchObject({ status: 'queued', attempts: 0 });
 
-  expect(await runDueJobs(db, handlers, deps, after(MINUTE))).toBe(1);
+  expect(await runDueJobs(db, handlers, deps, at(after(MINUTE)))).toBe(1);
   expect(expire).toHaveBeenCalledOnce();
 });
 
@@ -125,12 +132,12 @@ it('reschedules a job that asks to retry with backoff and counts the attempt', a
   const payoutPoll = vi.fn<JobHandler<Deps>>(async () => 'retry');
   const handlers = handlersWith({ payout_poll: payoutPoll });
 
-  expect(await runDueJobs(db, handlers, deps, T)).toBe(1);
+  expect(await runDueJobs(db, handlers, deps, at(T))).toBe(1);
   expect(await jobRow(db, id)).toMatchObject({ status: 'queued', attempts: 1, runAt: after(15 * SECOND), lastError: null });
 
-  expect(await runDueJobs(db, handlers, deps, after(15 * SECOND - 1))).toBe(0);
+  expect(await runDueJobs(db, handlers, deps, at(after(15 * SECOND - 1)))).toBe(0);
   const second = after(15 * SECOND);
-  expect(await runDueJobs(db, handlers, deps, second)).toBe(1);
+  expect(await runDueJobs(db, handlers, deps, at(second))).toBe(1);
   expect(await jobRow(db, id)).toMatchObject({ status: 'queued', attempts: 2, runAt: after(30 * SECOND, second) });
   expect(payoutPoll).toHaveBeenCalledTimes(2);
 });
@@ -148,17 +155,17 @@ it('marks a job dead on its eighth failure', async () => {
 
   let now = T;
   for (let failures = 1; failures <= 7; failures++) {
-    expect(await runDueJobs(db, handlers, deps, now)).toBe(1);
+    expect(await runDueJobs(db, handlers, deps, at(now))).toBe(1);
     const row = await jobRow(db, id);
     expect(row).toMatchObject({ status: 'queued', attempts: failures });
     now = row.runAt;
   }
 
-  expect(await runDueJobs(db, handlers, deps, now)).toBe(1);
+  expect(await runDueJobs(db, handlers, deps, at(now))).toBe(1);
   expect(await jobRow(db, id)).toMatchObject({ status: 'dead', attempts: 8 });
   expect(disputeSync).toHaveBeenCalledTimes(8);
 
-  expect(await runDueJobs(db, handlers, deps, after(24 * HOUR, now))).toBe(0);
+  expect(await runDueJobs(db, handlers, deps, at(after(24 * HOUR, now)))).toBe(0);
   expect(disputeSync).toHaveBeenCalledTimes(8);
 });
 
@@ -169,7 +176,7 @@ it('counts a throwing handler as a retry and stores its message', async () => {
     throw new Error('PayPal returned 503 Service Unavailable');
   });
 
-  expect(await runDueJobs(db, handlersWith({ webhook }), deps, T)).toBe(1);
+  expect(await runDueJobs(db, handlersWith({ webhook }), deps, at(T))).toBe(1);
   expect(await jobRow(db, id)).toMatchObject({
     status: 'queued',
     attempts: 1,
@@ -191,7 +198,7 @@ it('stores only the first 500 characters of an error message and never the stack
     },
   });
 
-  expect(await runDueJobs(db, handlers, deps, T)).toBe(2);
+  expect(await runDueJobs(db, handlers, deps, at(T))).toBe(2);
   expect((await jobRow(db, long)).lastError).toBe('x'.repeat(500));
   expect((await jobRow(db, thrownString)).lastError).toBe('socket hang up');
 });
@@ -204,7 +211,7 @@ it('stores a fixed message when the thrown value cannot be turned into text', as
     throw Object.create(null);
   };
 
-  expect(await runDueJobs(db, handlersWith({ webhook }), deps, T)).toBe(1);
+  expect(await runDueJobs(db, handlersWith({ webhook }), deps, at(T))).toBe(1);
   expect(await jobRow(db, id)).toMatchObject({
     status: 'queued',
     attempts: 1,
@@ -224,7 +231,7 @@ it('marks a job dead when no handler is registered for its kind, and still runs 
   const webhook = vi.fn<JobHandler<Deps>>(async () => 'done');
   const handlers: Partial<JobHandlers<Deps>> = { webhook };
 
-  expect(await runDueJobs(db, handlers, deps, T)).toBe(3);
+  expect(await runDueJobs(db, handlers, deps, at(T))).toBe(3);
   expect(await jobRow(db, unhandled)).toMatchObject({
     status: 'dead',
     attempts: 0,
@@ -245,8 +252,8 @@ it('does not claim a job that another run has already claimed', async () => {
   const handlers = handlersWith({ webhook });
 
   const [first, second] = await Promise.all([
-    runDueJobs(db, handlers, deps, T),
-    runDueJobs(db, handlers, deps, T),
+    runDueJobs(db, handlers, deps, at(T)),
+    runDueJobs(db, handlers, deps, at(T)),
   ]);
 
   expect(first + second).toBe(3);
@@ -260,15 +267,15 @@ it('runs a job again once a stopped worker has left it running for over 10 minut
   const id = await enqueue(db, 'charge_retry', { purchaseId: 'pur-1' }, after(-HOUR));
   // This run claims the job at T and never finishes, like a worker whose process died.
   const stuck = heldHandler();
-  void runDueJobs(db, handlersWith({ charge_retry: stuck.handler }), deps, T);
+  void runDueJobs(db, handlersWith({ charge_retry: stuck.handler }), deps, at(T));
   await stuck.started;
 
   const chargeRetry = vi.fn<JobHandler<Deps>>(async () => 'done');
   const handlers = handlersWith({ charge_retry: chargeRetry });
-  expect(await runDueJobs(db, handlers, deps, after(10 * MINUTE))).toBe(0);
+  expect(await runDueJobs(db, handlers, deps, at(after(10 * MINUTE)))).toBe(0);
   expect(chargeRetry).not.toHaveBeenCalled();
 
-  expect(await runDueJobs(db, handlers, deps, after(10 * MINUTE + 1))).toBe(1);
+  expect(await runDueJobs(db, handlers, deps, at(after(10 * MINUTE + 1)))).toBe(1);
   expect(chargeRetry).toHaveBeenCalledExactlyOnceWith({ purchaseId: 'pur-1' }, deps);
   expect(await jobRow(db, id)).toMatchObject({ status: 'done', attempts: 0 });
 });
@@ -277,11 +284,11 @@ it('records only the outcome of the run that reclaimed a job, not of the abandon
   const db = await createTestDb();
   const id = await enqueue(db, 'payout_poll', { purchaseId: 'pur-1' }, T);
   const abandoned = heldHandler();
-  const abandonedRun = runDueJobs(db, handlersWith({ payout_poll: abandoned.handler }), deps, T);
+  const abandonedRun = runDueJobs(db, handlersWith({ payout_poll: abandoned.handler }), deps, at(T));
   await abandoned.started;
 
   const reclaimed = heldHandler();
-  const reclaimedRun = runDueJobs(db, handlersWith({ payout_poll: reclaimed.handler }), deps, after(11 * MINUTE));
+  const reclaimedRun = runDueJobs(db, handlersWith({ payout_poll: reclaimed.handler }), deps, at(after(11 * MINUTE)));
   await reclaimed.started;
 
   abandoned.finish('retry');
@@ -298,9 +305,61 @@ it('claims at most 25 jobs per run, oldest first', async () => {
   const newest = await enqueue(db, 'webhook', { eventId: 'WH-new' }, T);
   for (let n = 0; n < 25; n++) await enqueue(db, 'webhook', { eventId: `WH-${n}` }, after(-MINUTE));
 
-  expect(await runDueJobs(db, handlersWith(), deps, T)).toBe(25);
+  expect(await runDueJobs(db, handlersWith(), deps, at(T))).toBe(25);
   expect(await jobRow(db, newest)).toMatchObject({ status: 'queued' });
 
-  expect(await runDueJobs(db, handlersWith(), deps, T)).toBe(1);
+  expect(await runDueJobs(db, handlersWith(), deps, at(T))).toBe(1);
   expect(await jobRow(db, newest)).toMatchObject({ status: 'done' });
+});
+
+it('skips a job whose claim another run took over while it waited for its turn', async () => {
+  const db = await createTestDb();
+  await enqueue(db, 'webhook', { eventId: 'WH-1' }, T);
+  await enqueue(db, 'webhook', { eventId: 'WH-2' }, T);
+  // This run claims both jobs at T and starts the first of them at T+5min, where it stays.
+  const held = heldHandler();
+  const ranByFirstRun: unknown[] = [];
+  const firstRunWebhook: JobHandler<Deps> = (payload, handlerDeps) => {
+    ranByFirstRun.push(payload.eventId);
+    return ranByFirstRun.length === 1 ? held.handler(payload, handlerDeps) : Promise.resolve('done');
+  };
+  const firstRun = runDueJobs(
+    db,
+    handlersWith({ webhook: firstRunWebhook }),
+    deps,
+    clockReading(T, after(5 * MINUTE), after(12 * MINUTE)),
+  );
+  await held.started;
+
+  // At T+11min the waiting job's claim from T looks abandoned, but the job in progress, which
+  // renewed its claim when it started, does not.
+  const webhook = vi.fn<JobHandler<Deps>>(async () => 'done');
+  expect(await runDueJobs(db, handlersWith({ webhook }), deps, at(after(11 * MINUTE)))).toBe(1);
+  held.finish('done');
+  expect(await firstRun).toBe(1);
+
+  expect(ranByFirstRun).toHaveLength(1);
+  expect(webhook).toHaveBeenCalledOnce();
+  expect([ranByFirstRun[0], webhook.mock.calls[0][0].eventId].sort()).toEqual(['WH-1', 'WH-2']);
+  const rows = await db.select({ status: jobs.status }).from(jobs);
+  expect(rows).toEqual([{ status: 'done' }, { status: 'done' }]);
+});
+
+it('measures the backoff from when the job started, not from when its batch was claimed', async () => {
+  const db = await createTestDb();
+  const id = await enqueue(db, 'payout_poll', { purchaseId: 'pur-1' }, T);
+  const startedAt = after(40 * SECOND);
+  let runAtWhileRunning: Date | undefined;
+  const payoutPoll: JobHandler<Deps> = async () => {
+    runAtWhileRunning = (await jobRow(db, id)).runAt;
+    return 'retry';
+  };
+
+  expect(await runDueJobs(db, handlersWith({ payout_poll: payoutPoll }), deps, clockReading(T, startedAt))).toBe(1);
+  expect(runAtWhileRunning).toEqual(startedAt);
+  expect(await jobRow(db, id)).toMatchObject({
+    status: 'queued',
+    attempts: 1,
+    runAt: after(15 * SECOND, startedAt),
+  });
 });

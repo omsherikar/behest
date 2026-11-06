@@ -35,7 +35,7 @@ const handlers: JobHandlers<string> = {
 };
 const runtime: JobRuntime<string> = { handlers, deps: 'deps' };
 
-it('runs due jobs from the app database every interval, reading the clock at each tick', async () => {
+it('runs due jobs from the app database every interval with a clock that reads the current time', async () => {
   const getHandlers = vi.fn(async () => runtime);
   const stop = startWorker(getHandlers, 1000);
 
@@ -47,10 +47,15 @@ it('runs due jobs from the app database every interval, reading the clock at eac
   vi.advanceTimersByTime(1000);
   await stop();
 
-  expect(vi.mocked(runDueJobs).mock.calls).toEqual([
-    [appDb, handlers, 'deps', after(1000)],
-    [appDb, handlers, 'deps', after(2000)],
+  const calls = vi.mocked(runDueJobs).mock.calls;
+  expect(calls).toEqual([
+    [appDb, handlers, 'deps', expect.any(Function)],
+    [appDb, handlers, 'deps', expect.any(Function)],
   ]);
+  const [, , , clock] = calls[0];
+  expect(clock()).toEqual(after(2000));
+  vi.setSystemTime(after(7000));
+  expect(clock()).toEqual(after(7000));
   expect(getHandlers).toHaveBeenCalledOnce();
 });
 
@@ -63,7 +68,7 @@ it('polls every 5 seconds by default', async () => {
 
   vi.advanceTimersByTime(1);
   await stop();
-  expect(runDueJobs).toHaveBeenCalledExactlyOnceWith(appDb, handlers, 'deps', after(5000));
+  expect(runDueJobs).toHaveBeenCalledExactlyOnceWith(appDb, handlers, 'deps', expect.any(Function));
 });
 
 it('skips a tick that comes round while the previous one is still running', async () => {
@@ -83,7 +88,7 @@ it('skips a tick that comes round while the previous one is still running', asyn
   await settle();
   vi.advanceTimersByTime(1000);
   await stop();
-  expect(vi.mocked(runDueJobs).mock.calls.map(([, , , now]) => now)).toEqual([after(1000), after(3000)]);
+  expect(runDueJobs).toHaveBeenCalledTimes(2);
 });
 
 it('stops polling when told and waits for the tick in progress', async () => {
@@ -123,7 +128,7 @@ it('logs a failed tick instead of throwing and loads the handlers again on the n
   vi.advanceTimersByTime(1000);
   await stop();
   expect(getHandlers).toHaveBeenCalledTimes(2);
-  expect(runDueJobs).toHaveBeenCalledExactlyOnceWith(appDb, handlers, 'deps', after(2000));
+  expect(runDueJobs).toHaveBeenCalledExactlyOnceWith(appDb, handlers, 'deps', expect.any(Function));
 });
 
 it('keeps polling after running the jobs fails', async () => {

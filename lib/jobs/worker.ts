@@ -5,9 +5,9 @@ import { type JobHandlers, runDueJobs } from './queue';
 export type JobRuntime<D> = { handlers: Partial<JobHandlers<D>>; deps: D };
 
 /**
- * Runs due jobs from the app database every `intervalMs`, reading the clock once per tick. A tick
- * that comes round while the previous one is still running is skipped, so ticks never overlap. A
- * failed tick is logged rather than thrown, so it cannot take the server down.
+ * Runs due jobs from the app database every `intervalMs`, with the real clock. A tick that comes
+ * round while the previous one is still running is skipped, so ticks never overlap. A failed tick
+ * is logged rather than thrown, so it cannot take the server down.
  *
  * `getHandlers` is called on the first tick and its result reused; if it fails, the next tick
  * calls it again. Returns a function that stops the worker and resolves once any tick in
@@ -24,7 +24,7 @@ export function startWorker<D>(getHandlers: () => Promise<JobRuntime<D>>, interv
         throw error;
       });
       const { handlers, deps } = await runtime;
-      await runDueJobs(getDb(), handlers, deps, new Date());
+      await runDueJobs(getDb(), handlers, deps, () => new Date());
     } catch (error) {
       console.error(`Job worker tick failed: ${error instanceof Error ? error.message : String(error)}`);
     }

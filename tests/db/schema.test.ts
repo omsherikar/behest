@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { expect, expectTypeOf, it } from 'vitest';
+import { beforeAll, expect, expectTypeOf, it } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import {
   buyers,
@@ -22,6 +22,12 @@ import type { Cart } from '@/lib/domain/cart';
 import type { PurchaseProposal } from '@/lib/domain/proposal';
 import { demoPolicy } from '@/tests/helpers/fixtures';
 import { createTestDb } from '@/tests/helpers/test-db';
+
+// The first createTestDb() call in a file migrates a template database, which can take several
+// seconds while other test files do the same. Do it before the tests so none is timed against it.
+beforeAll(async () => {
+  await createTestDb();
+}, 30_000);
 
 // Postgres reports a unique constraint violation as SQLSTATE 23505; Drizzle keeps the driver error as `cause`.
 const UNIQUE_VIOLATION = { cause: { code: '23505' } };

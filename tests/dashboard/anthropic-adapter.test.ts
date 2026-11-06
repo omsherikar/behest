@@ -570,6 +570,35 @@ describe('anthropicAdapter', () => {
     await expect(complete).rejects.toThrow('Too many questions at once. Try again in a minute.');
   });
 
+  it('fails the turn when Studio aborts it part way, closing what was open', async () => {
+    const studio = new AbortController();
+    // The route's first three frames (message_start and the start of a text block), then nothing
+    // until the turn is aborted, which ends the response body with the abort.
+    const firstFrames = `${recordedStream('tool-turn').split('\n\n').slice(0, 3).join('\n\n')}\n\n`;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const sent = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(firstFrames));
+            init.signal?.addEventListener('abort', () => controller.error(init.signal?.reason));
+          },
+        });
+        return new Response(sent, { headers: { 'content-type': 'text/event-stream' } });
+      }),
+    );
+
+    const handler = anthropicAdapter({ endpoint: '/api/ai/studio' }).executeTurn(turn, { signal: studio.signal });
+    const events = [];
+    for await (const event of handler.stream) {
+      events.push(event);
+      if (event.type === 'TEXT_MESSAGE_CONTENT') studio.abort();
+    }
+
+    expect(events.map((event) => event.type)).toEqual(['TEXT_MESSAGE_START', 'TEXT_MESSAGE_CONTENT', 'TEXT_MESSAGE_END']);
+    await expect(handler.complete).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('fails the turn with the error event that ends the stream', async () => {
     const { complete } = await run(
       streamed(sseBody([{ type: 'error', error: { type: 'spend_cap', message: 'Spent $5 of the $5 daily model budget' } }])),

@@ -5,6 +5,7 @@
 // Names and descriptions are seller text that buyers see and models read, so they are cleaned and capped.
 
 import Papa from 'papaparse';
+import { removeHiddenCharacters } from '@/lib/llm/untrusted';
 
 export type CatalogRow = {
   /** The line in the seller's file where the row starts, counting the header as line 1. */
@@ -205,17 +206,14 @@ function skuFromName(name: string): string {
     .toUpperCase();
 }
 
-/** Control characters except newline and tab. */
-const CONTROL = /[^\P{Cc}\n\t]/gu;
-
-/** Seller text on one line: control characters dropped, runs of whitespace made one space, at most `max` code points. */
+/** Seller text on one line: hidden characters dropped, runs of whitespace made one space, at most `max` code points. */
 function oneLine(text: string, max: number): string {
-  return firstCodePoints(text.toWellFormed().replace(CONTROL, '').replace(/\s+/g, ' ').trim(), max);
+  return firstCodePoints(removeHiddenCharacters(text).replace(/\s+/g, ' ').trim(), max);
 }
 
-/** Seller text that keeps its line breaks and tabs: other control characters dropped, at most `max` code points. */
+/** Seller text that keeps its line breaks and tabs: hidden characters dropped, at most `max` code points. */
 function multiLine(text: string, max: number): string {
-  return firstCodePoints(text.toWellFormed().replace(CONTROL, '').trim(), max);
+  return firstCodePoints(removeHiddenCharacters(text).trim(), max);
 }
 
 /** The first `max` code points of well-formed `text`, so a cut never splits a surrogate pair. */

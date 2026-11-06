@@ -41,15 +41,28 @@ function readCapture(orderId: string, order: Order): CaptureResult {
   return { captureId: capture.id, status: captureStatus(orderId, capture.status) };
 }
 
-/** A 422 with INSTRUMENT_DECLINED: PayPal refused the buyer's funding, so no money moved. */
-function isInstrumentDeclined(error: unknown): boolean {
+/** A 422 whose details name `issue`: PayPal refused the request on a business rule. */
+function isUnprocessable(error: unknown, issue: string): boolean {
   if (!(error instanceof PayPalApiError) || error.status !== 422) return false;
   try {
     const { details } = JSON.parse(error.body) as { details?: { issue?: string }[] };
-    return Array.isArray(details) && details.some((detail) => detail?.issue === 'INSTRUMENT_DECLINED');
+    return Array.isArray(details) && details.some((detail) => detail?.issue === issue);
   } catch {
     return false;
   }
+}
+
+/** A 422 with INSTRUMENT_DECLINED: PayPal refused the buyer's funding, so no money moved. */
+function isInstrumentDeclined(error: unknown): boolean {
+  return isUnprocessable(error, 'INSTRUMENT_DECLINED');
+}
+
+/**
+ * A 422 with ORDER_NOT_APPROVED, which captureOrder rethrows: the buyer has not approved the order
+ * on PayPal yet, so nothing was captured and the order can still be approved and captured later.
+ */
+export function isOrderNotApproved(error: unknown): boolean {
+  return isUnprocessable(error, 'ORDER_NOT_APPROVED');
 }
 
 function purchaseUnit(amountCents: number, description: string, invoiceId: string) {

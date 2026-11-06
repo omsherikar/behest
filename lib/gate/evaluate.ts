@@ -90,3 +90,19 @@ export function evaluateGate(input: GateInput): GateResult {
     rulesetVersion: RULESET_VERSION,
   };
 }
+
+const FAILED_CLOSED: RuleOutcome = {
+  rule: 'internal_error',
+  result: 'block',
+  detail: 'The policy check failed, so nothing was bought.',
+};
+
+/** The gate as callers should run it: any exception becomes a BLOCK, so an error can never pay. */
+export function evaluateGateSafely(input: GateInput): GateResult {
+  try {
+    return evaluateGate(input);
+  } catch (error) {
+    console.error('Policy gate failed, so the purchase was blocked:', error);
+    return { verdict: 'BLOCK', outcomes: [{ ...FAILED_CLOSED }], cart: null, rulesetVersion: RULESET_VERSION };
+  }
+}

@@ -1,7 +1,13 @@
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import type { BudgetPeriod, MandatePolicy } from '@/lib/domain/policy';
 import type { PurchaseProposal } from '@/lib/domain/proposal';
-import { evaluateGate, type CatalogEntry, type GateInput, type GateResult } from '@/lib/gate/evaluate';
+import {
+  evaluateGate,
+  evaluateGateSafely,
+  type CatalogEntry,
+  type GateInput,
+  type GateResult,
+} from '@/lib/gate/evaluate';
 import type { RuleId } from '@/lib/gate/rules';
 
 const NOW = new Date('2026-11-06T12:00:00Z');
@@ -61,6 +67,20 @@ const input = (overrides: Partial<GateInput> = {}): GateInput => ({
 });
 
 const outcome = (result: GateResult, rule: RuleId) => result.outcomes.find((o) => o.rule === rule);
+
+const FAILED_CLOSED: GateResult = {
+  verdict: 'BLOCK',
+  outcomes: [{ rule: 'internal_error', result: 'block', detail: 'The policy check failed, so nothing was bought.' }],
+  cart: null,
+  rulesetVersion: 'gate-v1',
+};
+
+/** Silences and records the error the safe gate logs when it fails closed. */
+const captureErrors = () => vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 it('allows $18.75 of spices', () => {
   const result = evaluateGate(input());
@@ -502,4 +522,30 @@ it('always reports all 12 rules in order', () => {
     expect(detail).toMatch(/^\S.*\S$/);
     expect(detail).not.toContain('\u2014');
   }
+});
+
+it('fails closed on an exception', () => {
+  const errors = captureErrors();
+  const broken = new Map<string, CatalogEntry>();
+  broken.get = () => {
+    throw new Error('catalog unavailable');
+  };
+  const failing = input({ catalog: broken });
+
+  expect(() => evaluateGate(failing)).toThrow('catalog unavailable');
+  expect(evaluateGateSafely(failing)).toEqual(FAILED_CLOSED);
+  expect(errors).toHaveBeenCalledWith('Policy gate failed, so the purchase was blocked:', expect.any(Error));
+});
+
+it('fails closed on a catalog entry that cannot make a valid cart', () => {
+  captureErrors();
+  const failing = input({ catalog: catalog('TUR-100', { priceCents: 0 }) });
+  expect(() => evaluateGate(failing)).toThrow();
+  expect(evaluateGateSafely(failing)).toEqual(FAILED_CLOSED);
+});
+
+it('returns the full decision when nothing throws', () => {
+  const errors = captureErrors();
+  expect(evaluateGateSafely(input({ walletLinked: false }))).toEqual(evaluateGate(input({ walletLinked: false })));
+  expect(errors).not.toHaveBeenCalled();
 });

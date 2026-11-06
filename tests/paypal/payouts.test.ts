@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fakeFetch, type FakeRoute, type RecordedCall } from '@/tests/helpers/fake-fetch';
+import { fakeFetch } from '@/tests/helpers/fake-fetch';
+import { apiCalls, oauth, stubFetch, stubFetchLosingFirstResponse } from '@/tests/helpers/paypal-fetch';
 import payoutBatchPending from '@/tests/fixtures/paypal/payout-batch-pending.json';
 import payoutBatchSuccess from '@/tests/fixtures/paypal/payout-batch-success.json';
 import payoutCreated from '@/tests/fixtures/paypal/payout-created.json';
@@ -7,18 +8,11 @@ import duplicateSenderBatch from '@/tests/fixtures/paypal/payout-duplicate-sende
 import { PayPalApiError, resetPaypalTokenCacheForTests, setPaypalRetrySleepForTests } from '@/lib/paypal/http';
 import { PayoutAlreadyExists, createPayout, getPayoutBatch } from '@/lib/paypal/payouts';
 
-const TOKEN_PATH = '/v1/oauth2/token';
 const PAYOUTS = '/v1/payments/payouts';
 
 const PURCHASE = '5d0c7a1e-3b84-4f2a-9e61-c8a24f7b3d90';
 const SENDER_BATCH_ID = `${PURCHASE}:payout`;
 const BATCH_ID = '7KQ2XWB9MNZ4E';
-
-const oauth: FakeRoute = {
-  method: 'POST',
-  path: TOKEN_PATH,
-  body: { access_token: 'T1', token_type: 'Bearer', expires_in: 32_400 },
-};
 
 const payoutInput = {
   receiverEmail: 'payouts@northfork.example.com',
@@ -36,31 +30,6 @@ const [existingBatchLink] = duplicateDetail.link;
 function duplicateWithLinks(detailLink: unknown, links: unknown[]) {
   return { ...duplicateSenderBatch, details: [{ ...duplicateDetail, link: detailLink }], links };
 }
-
-function stubFetch(routes: FakeRoute[]): RecordedCall[] {
-  const f = fakeFetch([oauth, ...routes]);
-  vi.stubGlobal('fetch', f.fetch);
-  return f.calls;
-}
-
-/** Like stubFetch, but PayPal receives the first request to `path` and its response never arrives. */
-function stubFetchLosingFirstResponse(routes: FakeRoute[], path: string): { calls: RecordedCall[]; lost: TypeError } {
-  const f = fakeFetch([oauth, ...routes]);
-  const lost = new TypeError('fetch failed');
-  let dropNext = true;
-  const flaky: typeof fetch = async (input, init) => {
-    const response = await f.fetch(input, init);
-    if (dropNext && new URL(String(input)).pathname === path) {
-      dropNext = false;
-      throw lost;
-    }
-    return response;
-  };
-  vi.stubGlobal('fetch', flaky);
-  return { calls: f.calls, lost };
-}
-
-const apiCalls = (calls: RecordedCall[]) => calls.filter((c) => new URL(c.url).pathname !== TOKEN_PATH);
 
 /** The paid batch with its one item's status replaced. */
 function withItemStatus(status: string) {

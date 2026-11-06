@@ -1,21 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fakeFetch, type FakeRoute, type RecordedCall } from '@/tests/helpers/fake-fetch';
+import { apiCalls, stubFetch, stubFetchLosingFirstResponse } from '@/tests/helpers/paypal-fetch';
 import refundCompleted from '@/tests/fixtures/paypal/refund-completed.json';
 import { PayPalApiError, resetPaypalTokenCacheForTests, setPaypalRetrySleepForTests } from '@/lib/paypal/http';
 import { refundCapture } from '@/lib/paypal/refunds';
-
-const TOKEN_PATH = '/v1/oauth2/token';
 
 const PURCHASE = 'a71e4c92-0d5b-4e83-b6f1-2c9d8e7a5f14';
 const CAPTURE_ID = '2FN86302RL1957468';
 const REFUND_PATH = `/v2/payments/captures/${CAPTURE_ID}/refund`;
 const REFUND_ID = '0LT61953WD8340275';
-
-const oauth: FakeRoute = {
-  method: 'POST',
-  path: TOKEN_PATH,
-  body: { access_token: 'T1', token_type: 'Bearer', expires_in: 32_400 },
-};
 
 const refundInput = {
   captureId: CAPTURE_ID,
@@ -23,31 +15,6 @@ const refundInput = {
   note: 'North Fork Coffee could not fill this order, so your payment is refunded.',
   requestId: `${PURCHASE}:refund`,
 };
-
-function stubFetch(routes: FakeRoute[]): RecordedCall[] {
-  const f = fakeFetch([oauth, ...routes]);
-  vi.stubGlobal('fetch', f.fetch);
-  return f.calls;
-}
-
-/** Like stubFetch, but PayPal receives the first request to `path` and its response never arrives. */
-function stubFetchLosingFirstResponse(routes: FakeRoute[], path: string): { calls: RecordedCall[]; lost: TypeError } {
-  const f = fakeFetch([oauth, ...routes]);
-  const lost = new TypeError('fetch failed');
-  let dropNext = true;
-  const flaky: typeof fetch = async (input, init) => {
-    const response = await f.fetch(input, init);
-    if (dropNext && new URL(String(input)).pathname === path) {
-      dropNext = false;
-      throw lost;
-    }
-    return response;
-  };
-  vi.stubGlobal('fetch', flaky);
-  return { calls: f.calls, lost };
-}
-
-const apiCalls = (calls: RecordedCall[]) => calls.filter((c) => new URL(c.url).pathname !== TOKEN_PATH);
 
 beforeEach(() => {
   vi.stubEnv('PAYPAL_CLIENT_ID', 'client-id');

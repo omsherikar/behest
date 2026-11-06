@@ -1,19 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fakeFetch, type FakeRoute, type RecordedCall } from '@/tests/helpers/fake-fetch';
+import type { FakeRoute } from '@/tests/helpers/fake-fetch';
+import { apiCalls, stubFetch } from '@/tests/helpers/paypal-fetch';
 import paymentToken from '@/tests/fixtures/paypal/payment-token.json';
 import setupToken from '@/tests/fixtures/paypal/setup-token.json';
 import { resetPaypalTokenCacheForTests, setPaypalRetrySleepForTests } from '@/lib/paypal/http';
 import { createPaymentToken, createSetupToken } from '@/lib/paypal/vault';
 
-const TOKEN_PATH = '/v1/oauth2/token';
 const SETUP_TOKENS = '/v3/vault/setup-tokens';
 const PAYMENT_TOKENS = '/v3/vault/payment-tokens';
-
-const oauth: FakeRoute = {
-  method: 'POST',
-  path: TOKEN_PATH,
-  body: { access_token: 'T1', token_type: 'Bearer', expires_in: 32_400 },
-};
 
 const unavailable = (path: string): FakeRoute => ({
   method: 'POST',
@@ -28,14 +22,6 @@ const setupInput = {
   cancelUrl: 'https://behest.test/mandate/cancelled',
   description: 'Let my shopping agent pay within my mandate',
 };
-
-function stubFetch(routes: FakeRoute[]): RecordedCall[] {
-  const f = fakeFetch([oauth, ...routes]);
-  vi.stubGlobal('fetch', f.fetch);
-  return f.calls;
-}
-
-const apiCalls = (calls: RecordedCall[]) => calls.filter((c) => new URL(c.url).pathname !== TOKEN_PATH);
 
 beforeEach(() => {
   vi.stubEnv('PAYPAL_CLIENT_ID', 'client-id');

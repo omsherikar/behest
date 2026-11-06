@@ -1,7 +1,6 @@
 'use client';
 
-import { useSyncExternalStore, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useSyncExternalStore } from 'react';
 import { EditIcon, EyeIcon, RedoIcon, RefreshIcon, UndoIcon } from './ui/icons';
 import { Button, IconButton } from './ui/ui';
 
@@ -11,6 +10,9 @@ export function ReportHeader({
   reportName,
   pageTitle,
   asOf,
+  source,
+  refreshing,
+  onRefresh,
   editing,
   pageIsEmpty,
   canUndo,
@@ -24,6 +26,10 @@ export function ReportHeader({
   reportName: string;
   pageTitle?: string;
   asOf: string;
+  /** Where the data comes from, in words. */
+  source: string;
+  refreshing: boolean;
+  onRefresh: () => void;
   editing: boolean;
   pageIsEmpty: boolean;
   canUndo: boolean;
@@ -35,11 +41,11 @@ export function ReportHeader({
   onEditingChange: (editing: boolean) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b border-pp-border bg-white px-8 py-5">
+    <div className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b border-pp-border bg-white px-4 py-4 sm:px-8 sm:py-5">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-pp-muted">{reportName}</p>
         <h1 className="truncate text-[28px] font-semibold leading-tight text-pp-navy">{pageTitle}</h1>
-        <DataFreshness asOf={asOf} />
+        <DataFreshness asOf={asOf} source={source} refreshing={refreshing} onRefresh={onRefresh} />
       </div>
       <div className="flex items-center gap-2">
         {editing && pageIsEmpty && (
@@ -99,16 +105,24 @@ function relativeTime(iso: string, at: number) {
   return hours < 24 ? `${hours} h ago` : new Date(iso).toLocaleDateString('en-GB');
 }
 
-function DataFreshness({ asOf }: { asOf: string }) {
-  const router = useRouter();
-  const [refreshing, startRefresh] = useTransition();
+function DataFreshness({
+  asOf,
+  source,
+  refreshing,
+  onRefresh,
+}: {
+  asOf: string;
+  source: string;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
   const at = useSyncExternalStore(subscribeNow, () => now, () => 0);
 
   return (
     <p className="mt-1 flex items-center gap-2 text-sm text-pp-muted">
       <span className="inline-flex items-center gap-1.5">
         <span className="size-2 rounded-full bg-pp-success" aria-hidden />
-        PayPal sandbox
+        {source}
       </span>
       <span aria-hidden>·</span>
       <span title={new Date(asOf).toLocaleString('en-GB')}>
@@ -116,7 +130,7 @@ function DataFreshness({ asOf }: { asOf: string }) {
       </span>
       <button
         type="button"
-        onClick={() => startRefresh(() => router.refresh())}
+        onClick={onRefresh}
         disabled={refreshing}
         aria-label="Refresh data"
         title="Refresh data"

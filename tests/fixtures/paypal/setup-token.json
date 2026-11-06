@@ -15,18 +15,14 @@
   },
   "links": [
     {
+      "href": "https://api.sandbox.paypal.com/v3/vault/setup-tokens/4SR36794JN117492X",
+      "rel": "self",
+      "method": "GET",
+      "encType": "application/json"
+    },
+    {
       "href": "https://www.sandbox.paypal.com/agreements/approve?approval_session_id=4SR36794JN117492X",
       "rel": "approve",
-      "method": "GET"
-    },
-    {
-      "href": "https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/4SR36794JN117492X/confirm-payment-token",
-      "rel": "confirm",
-      "method": "POST"
-    },
-    {
-      "href": "https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/4SR36794JN117492X",
-      "rel": "self",
       "method": "GET",
       "encType": "application/json"
     }

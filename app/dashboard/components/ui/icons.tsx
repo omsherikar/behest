@@ -81,3 +81,10 @@ export const InboxIcon = icon(
     <path d="M5.5 5h13L21 13v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z" />
   </>,
 );
+export const MenuIcon = icon(<path d="M4 7h16M4 12h16M4 17h16" />);
+export const SwitchIcon = icon(
+  <>
+    <path d="M16 3l4 4-4 4M20 7H8" />
+    <path d="M8 21l-4-4 4-4M4 17h12" />
+  </>,
+);

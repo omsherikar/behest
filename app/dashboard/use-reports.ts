@@ -1,17 +1,18 @@
 // Saved reports as React state, written through to localStorage on every change.
 
 import { useRef, useState } from 'react';
+import type { Persona } from '@/lib/session';
 import { findReport, loadReports, saveReports, upsert, type SavedReport, type StoredReports } from './reports-store';
 
-export function useReports() {
-  const [store, setStore] = useState(loadReports);
+export function useReports(persona: Persona) {
+  const [store, setStore] = useState(() => loadReports(persona));
   // The latest reports, for handlers that run one after another before React re-renders.
   const storeRef = useRef(store);
 
   const update = (change: (current: StoredReports) => StoredReports) => {
     const next = change(storeRef.current);
     storeRef.current = next;
-    saveReports(next);
+    saveReports(next, persona);
     setStore(next);
   };
 

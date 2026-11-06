@@ -1,9 +1,9 @@
 // Page titles for the sidebar and header. Studio's state has no page names, so each report
 // keeps its own map of page id -> title. Pages without a saved title are numbered by position.
 
-import type { AgReportState } from 'ag-studio';
+import type { ReportState } from './studio/widgets';
 
-type Titled = { pageTitles: Record<string, string>; state: AgReportState };
+type Titled = { pageTitles: Record<string, string>; state: ReportState };
 
 export type ReportPage = { id: string; title: string };
 

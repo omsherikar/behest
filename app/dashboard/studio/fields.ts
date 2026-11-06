@@ -1,0 +1,30 @@
+// The Studio fields the Behest widgets (../widgets) read directly, by id. They are defined in
+// ./data.ts and must stay visible there, since a widget only finds fields shown in the data panel.
+
+export const WIDGET_FIELDS = {
+  purchaseId: 'purchases.id',
+  purchaseVerdict: 'purchases.verdict',
+  purchaseCreatedAt: 'purchases.createdAt',
+  outcomePurchaseId: 'gateOutcomes.purchaseId',
+  outcomePosition: 'gateOutcomes.position',
+  outcomeRule: 'gateOutcomes.rule',
+  outcomeResult: 'gateOutcomes.result',
+  outcomeDetail: 'gateOutcomes.detail',
+  budgetMandateId: 'budgets.mandateId',
+  budgetPeriod: 'budgets.period',
+  budgetPeriodStart: 'budgets.periodStart',
+  budgetPeriodEnd: 'budgets.periodEnd',
+  budgetAmount: 'budgets.budget',
+  budgetSpent: 'budgets.spent',
+  budgetInFlight: 'budgets.inFlight',
+  budgetRemaining: 'budgets.remaining',
+  stepMandateId: 'budgetSteps.mandateId',
+  stepAt: 'budgetSteps.at',
+  stepSpent: 'budgetSteps.spentToDate',
+  stepInFlight: 'budgetSteps.inFlightToDate',
+  receiptId: 'receipts.id',
+  receiptIssuedAt: 'receipts.issuedAt',
+  receiptSellerSlug: 'receipts.sellerSlug',
+  receiptJws: 'receipts.jws',
+  receiptCart: 'receipts.cart',
+} as const;

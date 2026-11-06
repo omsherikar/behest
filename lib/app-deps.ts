@@ -49,8 +49,15 @@ export async function appJwks(): Promise<{ keys: JWK[] }> {
   return publicJwks([await appSigningKey()]);
 }
 
-/** PayPal, through the live REST client in lib/paypal. */
+/**
+ * PayPal, through the live REST client in lib/paypal. Throws when the REST app's credentials are
+ * not set, so a route that takes PayPal before it stores anything stores nothing without them.
+ */
 export function appPaypal(): PaypalPort {
+  const { PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET } = process.env;
+  if (!PAYPAL_CLIENT_ID || !PAYPAL_CLIENT_SECRET) {
+    throw new Error('PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET must be set (see .env.example)');
+  }
   return {
     createSetupToken,
     createPaymentToken,

@@ -102,8 +102,18 @@ describe('appSigner and appJwks', () => {
 });
 
 describe('appPaypal', () => {
+  it.each(['PAYPAL_CLIENT_ID', 'PAYPAL_CLIENT_SECRET'])('refuses to start without %s', async (name) => {
+    const { appPaypal } = await freshAppDeps();
+    vi.stubEnv('PAYPAL_CLIENT_ID', 'client-id');
+    vi.stubEnv('PAYPAL_CLIENT_SECRET', 'client-secret');
+    vi.stubEnv(name, '');
+    expect(() => appPaypal()).toThrow('PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET must be set (see .env.example)');
+  });
+
   it('assembles the live PayPal client functions', async () => {
     const { appPaypal } = await freshAppDeps();
+    vi.stubEnv('PAYPAL_CLIENT_ID', 'client-id');
+    vi.stubEnv('PAYPAL_CLIENT_SECRET', 'client-secret');
     // The client modules app-deps loaded, not the ones a static import made before the reset.
     const [vault, orders, payouts, refunds, disputes, webhooks] = await Promise.all([
       import('@/lib/paypal/vault'),

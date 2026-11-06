@@ -181,10 +181,10 @@ describe('propose_purchase', () => {
     ['a total', { totalCents: 1 }],
     ['a category', { category: 'spices' }],
   ])('refuses %s before the purchase flow sees it', async (_, change) => {
-    const { tool, propose } = await setup();
+    const { call, propose } = await setup();
     const input = { sellerSlug: 'ravi-spices', items: [{ sku: 'TUR-100', quantity: 1 }], rationale: 'Turmeric.', ...change };
 
-    expect(() => tool('propose_purchase').parse(input)).toThrow();
+    await expect(call('propose_purchase', input)).rejects.toThrow();
     expect(propose).not.toHaveBeenCalled();
   });
 

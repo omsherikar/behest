@@ -1,6 +1,7 @@
-import type { Category } from '@/lib/domain/categories';
+import { categoryLabel, type Category } from '@/lib/domain/categories';
 import { formatUsd } from '@/lib/domain/money';
 import type { BudgetPeriod, MandatePolicy } from '@/lib/domain/policy';
+import { plural } from '@/lib/domain/words';
 
 // The plain-English readback the buyer confirms. This code renders it from the policy JSON and no
 // model ever writes or rewords it, so what the buyer reads is exactly what the gate enforces. It
@@ -13,10 +14,7 @@ const PER_PERIOD: Record<BudgetPeriod, string> = {
   once: 'in total',
 };
 
-const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
-
-/** Category ids are shown as words, the way the gate names them in its details. */
-const categoryList = (ids: Category[]) => ids.map((id) => id.replaceAll('_', ' ')).join(', ');
+const categoryList = (ids: Category[]) => ids.map(categoryLabel).join(', ');
 
 function allowedCategories({ allow, deny }: MandatePolicy['categories']): string {
   if (allow === null) return deny.length > 0 ? 'Any category not listed below.' : 'Any category.';

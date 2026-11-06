@@ -22,20 +22,26 @@ const QUESTION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const NOT_JSON = 'Send the mandate as JSON.';
 const UNKNOWN_QUESTION = 'Each answer must name a question Behest asked.';
 const SHORT_ANSWER = 'Each answer must be short text.';
+const ONE_LINE = 'Each answer must be one line.';
 
 const Text = z
   .string({ error: 'Write your mandate first.' })
   .max(MAX_TEXT_LENGTH, { error: 'Keep your mandate under 2,000 characters.' })
   .refine((text) => text.trim() !== '', { error: 'Write your mandate first.' });
 
+/**
+ * One answer. It goes to the compiler as one `id: answer` line inside the <answers> block, so a line
+ * break, even a trailing one, could add a line or close the block.
+ */
 const Answer = z
   .string({ error: SHORT_ANSWER })
+  .regex(/^[^\r\n]*$/, { error: ONE_LINE })
   .trim()
   .min(1, { error: SHORT_ANSWER })
   .max(MAX_ANSWER_LENGTH, { error: SHORT_ANSWER });
 
 /** Answers keyed by question id. */
-const Answers = z.record(z.string(), Answer).refine(
+const Answers = z.record(z.string(), Answer, { error: UNKNOWN_QUESTION }).refine(
   (answers) => {
     const ids = Object.keys(answers);
     return ids.length <= MAX_ANSWERS && ids.every((id) => QUESTION_ID.test(id));

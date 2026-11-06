@@ -31,26 +31,29 @@ const FIRST_POLL_DELAY_MS = 30_000;
 
 /**
  * Pays the seller of an accepted purchase its total, and queues a `payout_poll` job to follow the
- * payout. Only the first call sends anything. A purchase that has moved on from `accepted` with its
- * payout made is left alone; one that never reached `accepted` is refused. If PayPal's answer is
- * lost, the payout may or may not exist: that is logged as a `payout_unknown` event and left to the
- * poll, which sends it again under the same sender batch id.
+ * payout. Only the first call sends anything. A purchase refunded before its payout, or one that has
+ * moved on from `accepted` with its payout made, is left alone; one that never reached `accepted` is
+ * refused. If PayPal's answer is lost, the payout may or may not exist: that is logged as a
+ * `payout_unknown` event and left to the poll, which sends it again under the same sender batch id.
  */
 export async function payoutSeller(deps: SettleDeps, purchaseId: string): Promise<void> {
   const { db } = deps;
-  const [purchase] = await db
-    .select({ status: purchases.status, sellerId: purchases.sellerId, totalCents: purchases.totalCents })
-    .from(purchases)
-    .where(eq(purchases.id, purchaseId));
-  if (!purchase) throw new Error(`there is no purchase ${purchaseId}`);
-  if (purchase.status !== 'accepted') {
-    if (await hasPayout(db, purchaseId)) return;
-    throw new Error(`purchase ${purchaseId} is ${purchase.status}, and only an order its seller accepted is paid out`);
-  }
-  const { sellerId, totalCents } = purchase;
-  if (!sellerId || totalCents === null) throw new Error(`accepted purchase ${purchaseId} has no seller or no total`);
-
   const payout = await db.transaction(async (tx) => {
+    // Locked until the payout row is written, so a refund either lands first and stops the payout,
+    // or waits and finds the payout row.
+    const [purchase] = await tx
+      .select({ status: purchases.status, sellerId: purchases.sellerId, totalCents: purchases.totalCents })
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId))
+      .for('update');
+    if (!purchase) throw new Error(`there is no purchase ${purchaseId}`);
+    if (purchase.status !== 'accepted') {
+      if (purchase.status === 'refunded' || (await hasPayout(tx, purchaseId))) return undefined;
+      throw new Error(`purchase ${purchaseId} is ${purchase.status}, and only an order its seller accepted is paid out`);
+    }
+    const { sellerId, totalCents } = purchase;
+    if (!sellerId || totalCents === null) throw new Error(`accepted purchase ${purchaseId} has no seller or no total`);
+
     const [row] = await tx
       .insert(payouts)
       .values({ purchaseId, sellerId, amountCents: totalCents, senderBatchId: `${purchaseId}:payout` })

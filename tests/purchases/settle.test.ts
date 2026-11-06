@@ -98,6 +98,16 @@ describe('payoutSeller', () => {
     expect(paypal.callsTo('createPayout')).toHaveLength(1);
   });
 
+  it('pays nothing for a purchase refunded before its payout', async () => {
+    const { db, paypal, purchaseId, deps } = await setUp('refunded');
+
+    await payoutSeller(deps, purchaseId);
+
+    expect(paypal.calls).toEqual([]);
+    expect(await payoutRows(db)).toEqual([]);
+    expect(await db.select().from(jobs)).toEqual([]);
+  });
+
   it('refuses to pay for a purchase its seller has not accepted', async () => {
     const { db, paypal, purchaseId, deps } = await setUp('captured');
 

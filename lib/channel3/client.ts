@@ -34,9 +34,9 @@ export type MarketProduct = {
   title: string;
   brand: string | null;
   imageUrl: string | null;
-  /** The product's offers priced in USD, in the order Channel3 lists them, whatever their stock or condition. */
+  /** The product's offers that are in stock, new and priced in USD, in the order Channel3 lists them. */
   offers: MarketOffer[];
-  /** The median price of the offers that are in stock and new, or null when there are none. */
+  /** The median price of the offers, or null when there are none. */
   medianPriceCents: number | null;
 };
 
@@ -84,8 +84,9 @@ type Offer = z.infer<typeof Offer>;
 let sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Products on the open web matching `query`, at most `limit` (default 5), each with an offer that is
- * in stock and new. A 429 is retried twice, waiting as Retry-After asks up to 5 seconds, then
+ * Products on the open web matching `query`, at most `limit` (default 5), each listing only its
+ * offers that are in stock, new and priced in USD. A product left with none has no offers and a
+ * null median. A 429 is retried twice, waiting as Retry-After asks up to 5 seconds, then
  * surfaces as a `Channel3ApiError`, as does any other status outside 2xx at once. A request that
  * takes over 10 seconds, or a body that is not a search response, is a `Channel3Error`, also not
  * retried. Other network errors propagate. Throws before any request when CHANNEL3_API_KEY is not
@@ -153,18 +154,16 @@ function marketProducts(text: string): MarketProduct[] {
   if (!response.success) throw new Channel3Error('Channel3 sent an unexpected search response: it has no product list');
 
   return valid(Product, response.data.products).map((product) => {
-    const usd = valid(Offer, product.offers ?? []).flatMap((offer) => {
-      const market = usdOffer(offer);
-      return market ? [{ market, benchmark: offer.availability === 'InStock' && offer.condition === 'new' }] : [];
-    });
+    // Channel3 returns every offer of a matching product, including ones its filters did not match.
+    const offers = valid(Offer, product.offers ?? []).flatMap((offer) => marketOffer(offer) ?? []);
     const brand = valid(Brand, product.brands ?? [])[0];
     return {
       id: product.id,
       title: oneLine(product.title, TEXT_MAX),
       brand: brand ? oneLine(brand.name, TEXT_MAX) || null : null,
       imageUrl: imageUrl(valid(Image, product.images ?? [])),
-      offers: usd.map((o) => o.market),
-      medianPriceCents: median(usd.filter((o) => o.benchmark).map((o) => o.market.priceCents)),
+      offers,
+      medianPriceCents: median(offers.map((offer) => offer.priceCents)),
     };
   });
 }
@@ -177,14 +176,16 @@ function valid<T>(schema: z.ZodType<T>, items: unknown[]): T[] {
   });
 }
 
-/** The offer in cents when it is priced in USD at a storable whole number of cents and linked over http. */
-function usdOffer(offer: Offer): MarketOffer | null {
+/**
+ * The offer in cents when it is in stock, new, priced in USD at a storable whole number of cents
+ * and linked over http. Null for any other offer, including one whose condition is unknown.
+ */
+function marketOffer(offer: Offer): MarketOffer | null {
+  if (offer.availability !== 'InStock' || offer.condition !== 'new' || offer.price.currency !== 'USD') return null;
   const amount = offer.price.price ?? offer.price.amount;
   const priceCents = amount == null ? null : cents(amount);
   const url = webUrl(offer.url);
-  if (offer.price.currency !== 'USD' || priceCents === null || priceCents < 1 || priceCents > INT_MAX || url === null) {
-    return null;
-  }
+  if (priceCents === null || priceCents < 1 || priceCents > INT_MAX || url === null) return null;
   return { domain: offer.domain, priceCents, availability: offer.availability, url };
 }
 

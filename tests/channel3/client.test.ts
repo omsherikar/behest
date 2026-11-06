@@ -169,7 +169,7 @@ describe('searchMarket results', () => {
     expect(product.medianPriceCents).toBe(574);
   });
 
-  it('lists offers out of stock, used or of unknown condition, but leaves them out of the median', async () => {
+  it('returns only the offers that are new and in stock, and gives a product left with none no median', async () => {
     const mixed = fakeFetch([
       found(
         oneProduct([
@@ -177,6 +177,7 @@ describe('searchMarket results', () => {
           offer(1, 'USD', 'resale.com', { condition: 'used' }),
           offer(2, 'USD', 'soldout.com', { availability: 'OutOfStock' }),
           offer(2.5, 'USD', 'unknown.com', { condition: null }),
+          offer(9, 'USD', 'pantryhouse.com'),
         ]),
       ),
     ]);
@@ -185,9 +186,12 @@ describe('searchMarket results', () => {
     const [product] = await searchMarket('turmeric', { fetch: mixed.fetch });
     const [soldOut] = await searchMarket('turmeric', { fetch: onlySoldOut.fetch });
 
-    expect(product.offers.map((o) => o.domain)).toEqual(['spicebarn.com', 'resale.com', 'soldout.com', 'unknown.com']);
-    expect(product.medianPriceCents).toBe(300);
-    expect(soldOut.offers).toHaveLength(1);
+    expect(product.offers).toEqual([
+      { domain: 'spicebarn.com', priceCents: 300, availability: 'InStock', url: 'https://buy.trychannel3.com/r/spicebarn.com-3' },
+      { domain: 'pantryhouse.com', priceCents: 900, availability: 'InStock', url: 'https://buy.trychannel3.com/r/pantryhouse.com-9' },
+    ]);
+    expect(product.medianPriceCents).toBe(600);
+    expect(soldOut.offers).toEqual([]);
     expect(soldOut.medianPriceCents).toBeNull();
   });
 

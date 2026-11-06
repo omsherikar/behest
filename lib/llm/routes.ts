@@ -18,6 +18,9 @@ export type RouteConfig = { model: string; effort: LlmEffort; maxTokens: number 
 
 export const DEFAULT_MODEL = 'claude-opus-5-5';
 
+/** Every model request names its route in this header, for logs and for replaying recorded replies. */
+export const ROUTE_HEADER = 'x-behest-route';
+
 const DEFAULTS: Record<LlmRoute, { effort: LlmEffort; maxTokens: number }> = {
   mandate_compile: { effort: 'medium', maxTokens: 8000 },
   shopping_agent: { effort: 'medium', maxTokens: 16000 },

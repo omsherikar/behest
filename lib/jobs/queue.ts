@@ -18,11 +18,11 @@ export type JobHandler<D> = (payload: JobPayload, deps: D) => Promise<JobOutcome
 export type JobHandlers<D> = Record<JobKind, JobHandler<D>>;
 
 /** A job whose run fails this many times is marked dead and never runs again. */
-export const MAX_ATTEMPTS = 8;
+const MAX_ATTEMPTS = 8;
 /** How long after its claim a running job is treated as abandoned by a worker that stopped. */
-export const ABANDONED_AFTER_MS = 10 * 60 * 1000;
+const ABANDONED_AFTER_MS = 10 * 60 * 1000;
 /** The most jobs one runDueJobs call claims. The rest wait for the next call. */
-export const CLAIM_LIMIT = 25;
+const CLAIM_LIMIT = 25;
 
 const BACKOFF_BASE_MS = 15 * 1000;
 const BACKOFF_CAP_MS = 10 * 60 * 1000;

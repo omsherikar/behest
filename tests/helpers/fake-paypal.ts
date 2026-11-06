@@ -6,7 +6,8 @@ import type { DisputeDetail, PaypalPort } from '@/lib/paypal/port';
 // PayPal does: a charge, approval order, capture or refund repeated with the same request id gets
 // the first answer and nothing happens twice, while a payout repeated with the same sender batch
 // id is refused with PayoutAlreadyExists naming the batch already sent. An approval order can be
-// captured only once the test has approved it, as the buyer would at PayPal. A test can make the
+// captured only once the test has approved it, as the buyer would at PayPal, and a capture is never
+// refunded beyond its amount. A test can make the
 // next call of a method fail, and can read back every call and every capture, payout and refund made.
 
 type Method = keyof PaypalPort;
@@ -170,9 +171,11 @@ export class FakePaypal implements PaypalPort {
   refundCapture(i: Parameters<PaypalPort['refundCapture']>[0]) {
     return this.call('refundCapture', [i], () =>
       this.once('refundCapture', i.requestId, () => {
-        if (!this.captures.some((c) => c.captureId === i.captureId)) {
-          throw apiError(404, `/v2/payments/captures/${i.captureId}/refund`, 'RESOURCE_NOT_FOUND');
-        }
+        const path = `/v2/payments/captures/${i.captureId}/refund`;
+        const capture = this.captures.find((c) => c.captureId === i.captureId);
+        if (!capture) throw apiError(404, path, 'RESOURCE_NOT_FOUND');
+        const refunded = this.refunds.filter((r) => r.captureId === i.captureId).reduce((sum, r) => sum + r.amountCents, 0);
+        if (refunded + i.amountCents > capture.amountCents) throw apiError(422, path, 'REFUND_AMOUNT_EXCEEDED');
         const refundId = this.nextId('REFUND');
         this.refunds.push({ refundId, captureId: i.captureId, amountCents: i.amountCents, note: i.note });
         return { refundId, status: 'COMPLETED' };

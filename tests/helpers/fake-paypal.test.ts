@@ -137,6 +137,22 @@ describe('charges and captures', () => {
     expect(again).toEqual(first);
     expect(paypal.refunds).toEqual([{ refundId: first.refundId, captureId, amountCents: 1875, note: refund.note }]);
   });
+
+  it('refuses a refund beyond what is left of the capture, while a repeated request id still gets its first answer', async () => {
+    const paypal = new FakePaypal();
+    const { captureId } = await paypal.chargeSavedWallet(charge('purchase-1:charge'));
+    const refund = (amountCents: number, requestId: string) => ({ captureId, amountCents, note: 'Partly refunded', requestId });
+    const first = await paypal.refundCapture(refund(1000, 'refund-1'));
+
+    const refused = await paypal.refundCapture(refund(900, 'refund-2')).catch((error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(PayPalApiError);
+    expect(refused).toMatchObject({ status: 422 });
+    expect(issueOf(refused)).toBe('REFUND_AMOUNT_EXCEEDED');
+    expect(await paypal.refundCapture(refund(1000, 'refund-1'))).toEqual(first);
+    await expect(paypal.refundCapture(refund(875, 'refund-3'))).resolves.toMatchObject({ status: 'COMPLETED' });
+    expect(paypal.refunds.map((r) => r.amountCents)).toEqual([1000, 875]);
+  });
 });
 
 describe('payouts', () => {

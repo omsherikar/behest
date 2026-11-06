@@ -77,7 +77,8 @@ const ledger: AgWidgetDefinition<'behest-ledger', LedgerDef> = {
   comp: LedgerWidget,
   featureConfig: { crossFilter: { supportsHighlight: true } },
   defaultSize: { width: 900, height: 480 },
-  minSize: { width: 480, height: 240 },
+  // Narrow enough for a phone; the grid inside scrolls sideways when its columns need more.
+  minSize: { width: 300, height: 240 },
   ai: {
     description:
       'A table of every purchase the agent proposed, newest first: a verdict chip (ALLOW green, ASK amber, BLOCK red), chosen ' +
@@ -97,7 +98,7 @@ const burnDown: AgWidgetDefinition<'behest-burn-down', BurnDownDef> = {
   defaultState: { format: { title: { enabled: true, text: 'Budget burn-down' } } },
   comp: BurnDownWidget,
   defaultSize: { width: 640, height: 420 },
-  minSize: { width: 360, height: 260 },
+  minSize: { width: 280, height: 260 },
   ai: {
     description:
       "The active mandate's budget for the current UTC period: what is left, money reserved by purchases still in flight, " +
@@ -117,7 +118,7 @@ const receiptCard: AgWidgetDefinition<'behest-receipt', ReceiptCardDef> = {
   defaultState: { format: { title: { enabled: true, text: 'Receipt' } } },
   comp: ReceiptCardWidget,
   defaultSize: { width: 420, height: 560 },
-  minSize: { width: 320, height: 360 },
+  minSize: { width: 280, height: 360 },
   ai: {
     description:
       "One signed purchase receipt at a time, newest first, with each of its claims (signature, seller, cart, amount, decision, " +

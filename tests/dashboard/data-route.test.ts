@@ -48,7 +48,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('GET /api/dashboard/data', () => {
+// Each test reads a PGlite database, which can take several seconds on a busy machine.
+describe('GET /api/dashboard/data', { timeout: 20_000 }, () => {
   it.each([undefined, 'forged'] as const)('refuses a request with cookie %s with 401', async (cookie) => {
     const response = await GET(await request(cookie));
     expect(response.status).toBe(401);

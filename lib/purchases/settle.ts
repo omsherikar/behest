@@ -193,11 +193,26 @@ async function setPayoutStatus(db: Db, purchaseId: string, status: string): Prom
 }
 
 /**
+ * Locks the purchase row for the rest of the transaction and returns its status. Every write here
+ * that touches both rows takes the purchase first and the payout second, so two writers never
+ * wait on each other in opposite orders.
+ */
+async function lockPurchase(tx: Db, purchaseId: string): Promise<PurchaseStatus> {
+  const [{ status }] = await tx
+    .select({ status: purchases.status })
+    .from(purchases)
+    .where(eq(purchases.id, purchaseId))
+    .for('update');
+  return status;
+}
+
+/**
  * Stores a status other than SUCCESS. The first time it is a failure, logs a `payout_failed` event
  * with what PayPal reported, in the same transaction, so overlapping polls log it once.
  */
 async function recordStatus(db: Db, purchaseId: string, status: string, reported: Reported): Promise<void> {
   await db.transaction(async (tx) => {
+    await lockPurchase(tx, purchaseId);
     if ((await setPayoutStatus(tx, purchaseId, status)) && FAILED_STATUSES.has(status)) {
       await appendEvent(tx, purchaseId, 'payout_failed', reported);
     }
@@ -212,11 +227,7 @@ async function recordStatus(db: Db, purchaseId: string, status: string, reported
  */
 async function recordSuccess(db: Db, purchaseId: string): Promise<void> {
   await db.transaction(async (tx) => {
-    const [{ status }] = await tx
-      .select({ status: purchases.status })
-      .from(purchases)
-      .where(eq(purchases.id, purchaseId))
-      .for('update');
+    const status = await lockPurchase(tx, purchaseId);
     const firstSeen = await setPayoutStatus(tx, purchaseId, 'SUCCESS');
     if (status === 'accepted') await transition(tx, purchaseId, 'accepted', 'settled');
     else if (status === 'refunded' && firstSeen) await appendEvent(tx, purchaseId, 'payout_after_refund', { status });

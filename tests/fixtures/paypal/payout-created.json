@@ -9,7 +9,7 @@
   },
   "links": [
     {
-      "href": "https://api-m.sandbox.paypal.com/v1/payments/payouts/7KQ2XWB9MNZ4E",
+      "href": "https://api.sandbox.paypal.com/v1/payments/payouts/7KQ2XWB9MNZ4E",
       "rel": "self",
       "method": "GET",
       "encType": "application/json"

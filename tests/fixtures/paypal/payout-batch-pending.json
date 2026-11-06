@@ -27,11 +27,12 @@
         "note": "Behest order 5d0c7a1e-3b84-4f2a-9e61-c8a24f7b3d90",
         "receiver": "payouts@northfork.example.com",
         "sender_item_id": "5d0c7a1e-3b84-4f2a-9e61-c8a24f7b3d90:payout",
-        "recipient_wallet": "PAYPAL"
+        "recipient_wallet": "PAYPAL",
+        "purpose": "GOODS"
       },
       "links": [
         {
-          "href": "https://api-m.sandbox.paypal.com/v1/payments/payouts-item/QH3N8VXK2LBRA",
+          "href": "https://api.sandbox.paypal.com/v1/payments/payouts-item/QH3N8VXK2LBRA",
           "rel": "item",
           "method": "GET",
           "encType": "application/json"
@@ -41,7 +42,7 @@
   ],
   "links": [
     {
-      "href": "https://api-m.sandbox.paypal.com/v1/payments/payouts/7KQ2XWB9MNZ4E?page_size=1000&page=1",
+      "href": "https://api.sandbox.paypal.com/v1/payments/payouts/7KQ2XWB9MNZ4E?page_size=1000&page=1",
       "rel": "self",
       "method": "GET",
       "encType": "application/json"

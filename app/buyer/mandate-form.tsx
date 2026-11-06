@@ -243,29 +243,8 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
                 {questions.map((question) => (
                   <li key={question.id}>
                     <p className="text-pp-ink">{question.question}</p>
-                    {question.options.length > 0 ? (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {question.options.map((option) => {
-                          const chosen = answers[question.id] === option;
-                          return (
-                            <button
-                              key={option}
-                              type="button"
-                              aria-pressed={chosen}
-                              disabled={busy !== null}
-                              onClick={() => choose(question, option)}
-                              className={`rounded-full border px-3 py-1.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60 ${
-                                chosen
-                                  ? 'border-pp-blue bg-pp-highlight text-pp-blue-dark'
-                                  : 'border-pp-border bg-pp-surface text-pp-ink hover:border-pp-blue'
-                              }`}
-                            >
-                              {option}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : (
+                    {/* Only the buyer can answer a question that offers nothing but to decline, such as an amount. */}
+                    {question.options.every(isDeclineAnswer) && (
                       <input
                         type="text"
                         aria-label={question.question}
@@ -276,6 +255,27 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
                         className="mt-2 w-full rounded-xl border border-pp-border bg-pp-surface px-3 py-2 text-pp-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60"
                       />
                     )}
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {question.options.map((option) => {
+                        const chosen = answers[question.id] === option;
+                        return (
+                          <button
+                            key={option}
+                            type="button"
+                            aria-pressed={chosen}
+                            disabled={busy !== null}
+                            onClick={() => choose(question, option)}
+                            className={`rounded-full border px-3 py-1.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60 ${
+                              chosen
+                                ? 'border-pp-blue bg-pp-highlight text-pp-blue-dark'
+                                : 'border-pp-border bg-pp-surface text-pp-ink hover:border-pp-blue'
+                            }`}
+                          >
+                            {option}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </li>
                 ))}
               </ul>

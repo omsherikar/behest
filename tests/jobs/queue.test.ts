@@ -449,3 +449,23 @@ it('clears the deadline once the handler settles', async () => {
   expect(await runDueJobs(db, handlers, deps, at(T))).toBe(2);
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it('refuses a handler deadline that is not under the 10 minutes after which a job looks abandoned', async () => {
+  const db = await createTestDb();
+  const id = await enqueue(db, 'webhook', { eventId: 'WH-1' }, T);
+  const webhook = vi.fn<JobHandler<Deps>>(async () => 'done');
+  const clock = vi.fn(() => T);
+  const handlers = handlersWith({ webhook });
+
+  for (const handlerTimeoutMs of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 10 * MINUTE]) {
+    await expect(runDueJobs(db, handlers, deps, clock, { handlerTimeoutMs })).rejects.toThrow(
+      'handlerTimeoutMs must be between 0 and 10 minutes',
+    );
+  }
+  expect(clock).not.toHaveBeenCalled();
+  expect(webhook).not.toHaveBeenCalled();
+  expect(await jobRow(db, id)).toMatchObject({ status: 'queued', attempts: 0 });
+
+  expect(await runDueJobs(db, handlers, deps, clock, { handlerTimeoutMs: 10 * MINUTE - 1 })).toBe(1);
+  expect(await jobRow(db, id)).toMatchObject({ status: 'done' });
+});

@@ -26,8 +26,8 @@ export type JobHandlers<D> = Record<JobKind, JobHandler<D>>;
 export type Clock = () => Date;
 export type RunOptions = {
   /**
-   * How long a handler may run before its job counts as a retry. Defaults to five minutes. Keep it
-   * under the ten minutes after which a running job looks abandoned to other workers.
+   * How long a handler may run before its job counts as a retry. Defaults to five minutes. Must be
+   * above zero and under the ten minutes after which a running job looks abandoned to other workers.
    */
   handlerTimeoutMs?: number;
 };
@@ -64,7 +64,7 @@ export async function enqueue(db: Db, kind: JobKind, payload: JobPayload, runAt?
  * handler and records the outcome. A kind missing from `handlers` marks its jobs dead. The clock
  * is read once for the claim, again as each job starts, and again when a retry is recorded.
  * Returns the number of jobs this call processed: those it claimed and still held when their turn
- * came.
+ * came. Throws before claiming anything if `handlerTimeoutMs` is out of range.
  */
 export async function runDueJobs<D>(
   db: Db,
@@ -73,6 +73,10 @@ export async function runDueJobs<D>(
   clock: Clock,
   { handlerTimeoutMs = HANDLER_TIMEOUT_MS }: RunOptions = {},
 ): Promise<number> {
+  // Written so that NaN, which fails every comparison, is refused too.
+  if (!(handlerTimeoutMs > 0 && handlerTimeoutMs < ABANDONED_AFTER_MS)) {
+    throw new Error('handlerTimeoutMs must be between 0 and 10 minutes');
+  }
   const claimedAt = clock();
   const claimed = await claimDueJobs(db, claimedAt);
   const run: Run<D> = { db, handlers, deps, clock, claimedAt, handlerTimeoutMs };

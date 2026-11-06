@@ -42,8 +42,11 @@ export interface LedgerDef {
 
 type Reason = { rule: string; result: 'Ask' | 'Block'; detail: string };
 type LedgerRow = { id: string; verdict: Verdict; values: Record<string, unknown>; reasons: Reason[] };
-/** `highlighted` holds the purchases a cross-filter selects, or null when none is active. */
-type Ledger = { columns: AgWidgetField[]; rows: LedgerRow[]; highlighted: Set<string> | null };
+/**
+ * `highlighted` holds the purchases a cross-filter selects, or null when none is active.
+ * `hasReasons` is false when the report has no decision outcomes, as for the seller.
+ */
+type Ledger = { columns: AgWidgetField[]; rows: LedgerRow[]; highlighted: Set<string> | null; hasReasons: boolean };
 
 const F = WIDGET_FIELDS;
 const LEDGER_FIELDS = [F.purchaseId, F.purchaseVerdict, F.purchaseCreatedAt] as const;
@@ -63,11 +66,16 @@ const MIN_WIDTH: Record<AgWidgetField['dataType'], number> = {
 };
 const CELL_CLASS = 'leading-5 !py-2.5';
 
-/** The ledger's rows: the purchases in view, and each one's non-passing rule outcomes in rule order. */
+/**
+ * The ledger's rows: the purchases in view, and each one's non-passing decision outcomes in order.
+ * Null when the report lacks the purchase fields the ledger needs.
+ */
 async function loadLedger(params: AgWidgetParams<LedgerDef>): Promise<Ledger | null> {
   const { widgetApi, dataMapping } = params;
-  const f = findFields(widgetApi, [...LEDGER_FIELDS, ...REASON_FIELDS]);
+  const f = findFields(widgetApi, LEDGER_FIELDS);
   if (!f) return null;
+  // Optional: the seller's report has no decision outcomes, and its ledger simply shows none.
+  const r = findFields(widgetApi, REASON_FIELDS);
   const id = f[F.purchaseId];
   const verdict = f[F.purchaseVerdict];
   const columns = (dataMapping.columns ?? []).filter((c) => c.key !== id.key && c.key !== verdict.key);
@@ -82,21 +90,25 @@ async function loadLedger(params: AgWidgetParams<LedgerDef>): Promise<Ledger | n
     ),
     // Reasons are looked up by purchase, so they ignore filters: the rows query already decides
     // which purchases are shown.
-    widgetApi.getData(
-      { fields: REASON_FIELDS.map((fieldId) => f[fieldId]), sort: [{ field: f[F.outcomePosition], direction: 'asc' }] },
-      { queryId: 'reasons', filter: false, crossFilter: 'none' },
-    ),
+    r
+      ? widgetApi.getData(
+          { fields: REASON_FIELDS.map((fieldId) => r[fieldId]), sort: [{ field: r[F.outcomePosition], direction: 'asc' }] },
+          { queryId: 'reasons', filter: false, crossFilter: 'none' },
+        )
+      : null,
   ]);
 
   const reasons = new Map<string, Reason[]>();
-  for (const row of outcomes.results.rows) {
-    const result = row[f[F.outcomeResult].key];
-    if (result !== 'Ask' && result !== 'Block') continue;
-    const purchaseId = String(row[f[F.outcomePurchaseId].key]);
-    reasons.set(purchaseId, [
-      ...(reasons.get(purchaseId) ?? []),
-      { rule: String(row[f[F.outcomeRule].key]), result, detail: String(row[f[F.outcomeDetail].key] ?? '') },
-    ]);
+  if (r && outcomes) {
+    for (const row of outcomes.results.rows) {
+      const result = row[r[F.outcomeResult].key];
+      if (result !== 'Ask' && result !== 'Block') continue;
+      const purchaseId = String(row[r[F.outcomePurchaseId].key]);
+      reasons.set(purchaseId, [
+        ...(reasons.get(purchaseId) ?? []),
+        { rule: String(row[r[F.outcomeRule].key]), result, detail: String(row[r[F.outcomeDetail].key] ?? '') },
+      ]);
+    }
   }
 
   const rows = main.results.rows.flatMap((row): LedgerRow[] => {
@@ -106,7 +118,7 @@ async function loadLedger(params: AgWidgetParams<LedgerDef>): Promise<Ledger | n
     return [{ id: purchaseId, verdict: value, values: row, reasons: reasons.get(purchaseId) ?? [] }];
   });
   const highlighted = main.crossFilter ? new Set(main.crossFilter.rows.map((row) => String(row[id.key]))) : null;
-  return { columns, rows, highlighted };
+  return { columns, rows, highlighted, hasReasons: r !== null };
 }
 
 function VerdictCell({ data }: CustomCellRendererProps<LedgerRow>) {
@@ -168,7 +180,7 @@ export function LedgerWidget(params: AgWidgetParams<LedgerDef>) {
   const { widgetApi, format } = params;
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const loaded = useRef(false);
-  const showReasons = format?.style?.showReasons !== false;
+  const showReasons = format?.style?.showReasons !== false && ledger?.hasReasons !== false;
   const showVerdictMix = format?.style?.showVerdictMix !== false;
 
   // Studio passes new params whenever the mapping, the filters or the data change.

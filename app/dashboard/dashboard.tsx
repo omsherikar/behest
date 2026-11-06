@@ -122,7 +122,7 @@ function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, lice
   const state = studioState ?? initialState;
   const studioData = useMemo(() => buildStudioData(data), [data]);
   // `ai` is read once, when Studio is created.
-  const ai = useMemo(() => (analyst ? buildAi() : undefined), [analyst]);
+  const ai = useMemo(() => (analyst ? buildAi(persona) : undefined), [analyst, persona]);
 
   // --- Driving Studio ---------------------------------------------------------------
   const load = (

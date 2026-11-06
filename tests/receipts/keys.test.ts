@@ -1,8 +1,20 @@
 import { createHash, createPublicKey, generateKeyPairSync } from 'node:crypto';
 import { CompactSign, compactVerify, createLocalJWKSet } from 'jose';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { sha256Hex } from '@/lib/receipts/canonical';
 import { generateSigningKey, loadSigningKey, publicJwks } from '@/lib/receipts/keys';
+
+// Passes through to node:crypto, except that one test sets `derivePublicKeyFrom` so the public key
+// derived while loading belongs to a different key pair than the private key.
+const swap = vi.hoisted(() => ({ derivePublicKeyFrom: undefined as string | undefined }));
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  return {
+    ...actual,
+    createPublicKey: (key: Parameters<typeof actual.createPublicKey>[0]) =>
+      actual.createPublicKey(swap.derivePublicKeyFrom ?? key),
+  };
+});
 
 it('generates a key that loads as a non-extractable Ed25519 private key', async () => {
   const { pem, kid } = await generateSigningKey();
@@ -115,5 +127,17 @@ it('refuses a PEM flattened onto one line with the same clear error', async () =
     expect(await loadError({ RECEIPT_SIGNING_KEY: value })).toBe(
       'RECEIPT_SIGNING_KEY is not an Ed25519 private key in PKCS8 PEM form',
     );
+  }
+});
+
+it('refuses a key whose derived public key does not verify its signatures', async () => {
+  const { pem } = await generateSigningKey();
+  swap.derivePublicKeyFrom = (await generateSigningKey()).pem;
+  try {
+    expect(await loadError({ RECEIPT_SIGNING_KEY: pem })).toBe(
+      'RECEIPT_SIGNING_KEY failed its self-check: its public key does not verify its signature',
+    );
+  } finally {
+    swap.derivePublicKeyFrom = undefined;
   }
 });

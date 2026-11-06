@@ -1,9 +1,10 @@
-import { createPublicKey, type KeyObject } from 'node:crypto';
+import { createPublicKey, type KeyObject, verify } from 'node:crypto';
 import { calculateJwkThumbprint, exportJWK, exportPKCS8, generateKeyPair, importPKCS8, type JWK } from 'jose';
 import { sha256Hex } from './canonical';
 
 const ALG = 'EdDSA';
 const KEY_ID = /^[0-9a-f]{16}$/;
+const SELF_CHECK_MESSAGE = new TextEncoder().encode('behest signing key self-check');
 
 /** First 16 hex chars of the SHA-256 of the key's RFC 7638 thumbprint. */
 async function keyIdOf(publicJwk: JWK): Promise<string> {
@@ -36,6 +37,13 @@ export async function loadSigningKey(env: {
     publicKey = createPublicKey(pem);
   } catch (cause) {
     throw new Error('RECEIPT_SIGNING_KEY is not an Ed25519 private key in PKCS8 PEM form', { cause });
+  }
+
+  // Each half of the key comes from the PEM through a different parser. Before publishing the
+  // public half, prove that it verifies what the private half signs.
+  const signature = new Uint8Array(await crypto.subtle.sign('Ed25519', privateKey, SELF_CHECK_MESSAGE));
+  if (!verify(null, SELF_CHECK_MESSAGE, publicKey, signature)) {
+    throw new Error('RECEIPT_SIGNING_KEY failed its self-check: its public key does not verify its signature');
   }
 
   const publicJwk = await exportJWK(publicKey);

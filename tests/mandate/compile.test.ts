@@ -6,6 +6,7 @@ import { MANDATE_SYSTEM_PROMPT } from '@/lib/mandate/prompts';
 import demoReply from '@/tests/fixtures/llm/mandate_compile/demo.json';
 import noAmountReply from '@/tests/fixtures/llm/mandate_compile/no-amount.json';
 import nonUsdReply from '@/tests/fixtures/llm/mandate_compile/non-usd.json';
+import onlyCoffeeReply from '@/tests/fixtures/llm/mandate_compile/only-coffee.json';
 import refusalReply from '@/tests/fixtures/llm/mandate_compile/refusal.json';
 import unknownSellerReply from '@/tests/fixtures/llm/mandate_compile/unknown-seller.json';
 import weekendsAnsweredReply from '@/tests/fixtures/llm/mandate_compile/weekends-answered.json';
@@ -152,6 +153,24 @@ describe('a mandate Behest cannot honour is never compiled silently', () => {
       policy: { ...demoPolicy, merchants: { allow: [], deny: [] } },
       readback: expect.arrayContaining(['No seller is allowed.']),
       questions: [{ id: 'ravi_seller', question: expect.stringContaining('"Ravi"'), options: [] }],
+    });
+  });
+
+  it('asks before widening only coffee to every beverage, and allows no category meanwhile', async () => {
+    const { result } = await compileWith(onlyCoffeeReply, '$30 a month, only coffee');
+
+    expect(result).toMatchObject({
+      ok: true,
+      policy: { categories: { allow: [], deny: [] } },
+      readback: expect.arrayContaining(['No category is allowed.']),
+      assumptions: expect.arrayContaining(['not enforced: only coffee; allowing it means allowing all beverages']),
+      questions: [
+        {
+          id: 'allow_all_beverages',
+          question: expect.stringContaining('all beverages'),
+          options: ['Allow all beverages', "Don't set up this mandate"],
+        },
+      ],
     });
   });
 

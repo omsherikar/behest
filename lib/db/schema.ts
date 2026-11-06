@@ -238,3 +238,75 @@ export const sellerOrders = pgTable(
   },
   (t) => [unique('seller_orders_receipt_seller_unique').on(t.receiptId, t.sellerId)],
 );
+
+// Payouts, refunds and disputes
+
+/** The seller's payout for one purchase. One per purchase, so a repeated payout attempt fails on insert. */
+export const payouts = pgTable('payouts', {
+  id: id(),
+  purchaseId: uuid('purchase_id')
+    .notNull()
+    .unique()
+    .references(() => purchases.id),
+  sellerId: uuid('seller_id')
+    .notNull()
+    .references(() => sellers.id),
+  amountCents: integer('amount_cents').notNull(),
+  currency: currency(),
+  /** The idempotency key sent to PayPal: `${purchaseId}:payout`. */
+  senderBatchId: text('sender_batch_id').notNull(),
+  paypalBatchId: text('paypal_batch_id'),
+  paypalItemId: text('paypal_item_id'),
+  /** The latest PayPal status, such as PENDING, SUCCESS or RETURNED. */
+  status: text('status').notNull().default('PENDING'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const refunds = pgTable('refunds', {
+  id: id(),
+  purchaseId: uuid('purchase_id')
+    .notNull()
+    .references(() => purchases.id),
+  amountCents: integer('amount_cents').notNull(),
+  currency: currency(),
+  paypalRefundId: text('paypal_refund_id'),
+  /** The latest PayPal status, such as PENDING or COMPLETED. */
+  status: text('status').notNull().default('PENDING'),
+  /** Why the refund was issued, as sent to the payer. */
+  reason: text('reason'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** One evidence item in a dispute pack. */
+export type StoredEvidenceItem = { id: string; title: string; body: string };
+/** A dispute narrative in which every claim cites evidence item ids. */
+export type StoredNarrative = { summary: string; claims: { text: string; evidenceIds: string[] }[] };
+
+export const disputes = pgTable('disputes', {
+  id: id(),
+  paypalDisputeId: text('paypal_dispute_id').notNull().unique(),
+  /** Null until the dispute's capture is matched to a purchase. */
+  purchaseId: uuid('purchase_id').references(() => purchases.id),
+  /** The disputed PayPal capture, used to match the purchase. */
+  captureId: text('capture_id'),
+  reason: text('reason').notNull(),
+  /** The latest PayPal status, such as OPEN or RESOLVED. */
+  status: text('status').notNull(),
+  amountCents: integer('amount_cents').notNull(),
+  currency: currency(),
+  buyerNotes: text('buyer_notes'),
+  /** When the buyer opened the dispute at PayPal. */
+  openedAt: timestamp('opened_at', { withTimezone: true }),
+  evidencePack: jsonb('evidence_pack').$type<{
+    disputeId: string;
+    purchaseId: string;
+    items: StoredEvidenceItem[];
+  }>(),
+  narrative: jsonb('narrative').$type<StoredNarrative>(),
+  /** When the operator submitted the evidence to PayPal. Null until submitted. */
+  submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});

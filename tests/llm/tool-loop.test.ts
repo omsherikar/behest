@@ -390,10 +390,12 @@ it('stops before running a tool call that a declining model made before a fallba
 });
 
 it('runs a tool call the fallback model made after the fallback', async () => {
-  const { run, loop } = await setup([
+  // The fallback model's own text and call, after the fallback block.
+  const { fake, run, loop } = await setup([
     messageJson({
-      fallbackFrom: { model: 'claude-opus-5-5', text: 'Let me look.' },
+      fallbackFrom: { model: 'claude-opus-5-5' },
       model: 'claude-opus-4-8',
+      text: 'Let me look.',
       toolUses: [searchCall],
     }),
     messageJson({ text: 'Done.', model: 'claude-opus-4-8' }),
@@ -401,6 +403,10 @@ it('runs a tool call the fallback model made after the fallback', async () => {
 
   expect(await loop()).toMatchObject({ ok: true, value: { stop_reason: 'end_turn' } });
   expect(run).toHaveBeenCalledTimes(1);
+  expect(fake.requests[1].body.messages).toContainEqual({
+    role: 'user',
+    content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'Turmeric, 100g, $4 (searched for turmeric)' }],
+  });
 });
 
 it('runs every tool call of a reply that did not fall back', async () => {

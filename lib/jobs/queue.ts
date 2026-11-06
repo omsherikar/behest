@@ -25,7 +25,7 @@ const MAX_ATTEMPTS = 8;
 /** How long after its claim a running job is treated as abandoned by a worker that stopped. */
 const ABANDONED_AFTER_MS = 10 * 60 * 1000;
 /** The most jobs one runDueJobs call claims. The rest wait for the next call. */
-const CLAIM_LIMIT = 25;
+const CLAIM_LIMIT = 5;
 
 const BACKOFF_BASE_MS = 15 * 1000;
 const BACKOFF_CAP_MS = 10 * 60 * 1000;

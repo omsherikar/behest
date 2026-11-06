@@ -300,12 +300,12 @@ it('records only the outcome of the run that reclaimed a job, not of the abandon
   expect(await jobRow(db, id)).toMatchObject({ status: 'done', attempts: 0 });
 });
 
-it('claims at most 25 jobs per run, oldest first', async () => {
+it('claims at most 5 jobs per run, oldest first', async () => {
   const db = await createTestDb();
   const newest = await enqueue(db, 'webhook', { eventId: 'WH-new' }, T);
-  for (let n = 0; n < 25; n++) await enqueue(db, 'webhook', { eventId: `WH-${n}` }, after(-MINUTE));
+  for (let n = 0; n < 5; n++) await enqueue(db, 'webhook', { eventId: `WH-${n}` }, after(-MINUTE));
 
-  expect(await runDueJobs(db, handlersWith(), deps, at(T))).toBe(25);
+  expect(await runDueJobs(db, handlersWith(), deps, at(T))).toBe(5);
   expect(await jobRow(db, newest)).toMatchObject({ status: 'queued' });
 
   expect(await runDueJobs(db, handlersWith(), deps, at(T))).toBe(1);

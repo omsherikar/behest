@@ -6,7 +6,8 @@ import type { MandatePolicy } from '@/lib/domain/policy';
 import { isDeclineAnswer } from '@/lib/mandate/decline';
 
 // The buyer writes a mandate, Behest reads back the policy compiled from it, the buyer answers any
-// open questions until none is left, then confirms, which signs the mandate, and links PayPal.
+// open questions until none is left, then confirms, which signs the mandate, and links PayPal unless
+// a wallet is already linked.
 // Answers from every round are sent again with each compile, which keeps no state between calls.
 
 type Question = { id: string; question: string; options: string[] };
@@ -36,21 +37,34 @@ function sentence(message: string): string {
   return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
-/** POSTs JSON to a route and returns its JSON body, or throws an Error whose message the buyer can read. */
+/** A failed request, with a message the buyer can read and the HTTP status, or null when nothing came back. */
+class RequestFailed extends Error {
+  constructor(
+    message: string,
+    readonly status: number | null,
+  ) {
+    super(message);
+  }
+}
+
+/** POSTs JSON to a route and returns its JSON body, or throws RequestFailed. */
 async function post<T>(url: string, body: unknown): Promise<T> {
   let response: Response;
   try {
     response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   } catch {
-    throw new Error('Could not reach Behest. Check your connection and try again.');
+    throw new RequestFailed('Could not reach Behest. Check your connection and try again.', null);
   }
   const json: unknown = await response.json().catch(() => null);
   if (!response.ok) {
     const message = (json as { error?: { message?: unknown } } | null)?.error?.message;
-    throw new Error(typeof message === 'string' ? sentence(message) : 'Something went wrong. Try again.');
+    throw new RequestFailed(typeof message === 'string' ? sentence(message) : 'Something went wrong. Try again.', response.status);
   }
   return json as T;
 }
+
+/** What a confirm returns. `approveUrl` is null when the buyer's wallet is already linked. */
+type Signed = { mandateId: string; approveUrl: string | null };
 
 export function MandateForm({ replacing }: { replacing: boolean }) {
   const router = useRouter();
@@ -59,7 +73,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
   const [compiled, setCompiled] = useState<{ text: string; result: Compiled } | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [declined, setDeclined] = useState(false);
-  const [signed, setSigned] = useState<{ mandateId: string; approveUrl: string } | null>(null);
+  const [signed, setSigned] = useState<Signed | null>(null);
   const [busy, setBusy] = useState<'compile' | 'confirm' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,7 +103,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
       setCompiled({ text, result });
       setAnswers(withAnswers);
     } catch (failure) {
-      setError((failure as Error).message);
+      setError((failure as RequestFailed).message);
     } finally {
       setBusy(null);
     }
@@ -101,11 +115,13 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
     setError(null);
     try {
       const body = { text: compiled.text, policy: compiled.result.policy, confirmToken };
-      setSigned(await post<{ mandateId: string; approveUrl: string }>('/api/mandates/confirm', body));
-      // Shows the new mandate as the active one above.
+      setSigned(await post<Signed>('/api/mandates/confirm', body));
+      // Shows the new mandate as the active one above, with the wallet that pays within it.
       router.refresh();
     } catch (failure) {
-      setError((failure as Error).message);
+      setError((failure as RequestFailed).message);
+      // A 502 means the mandate was signed, replacing the old one, before PayPal failed.
+      if ((failure as RequestFailed).status === 502) router.refresh();
     } finally {
       setBusy(null);
     }
@@ -138,12 +154,18 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
     return (
       <div className="mt-4 rounded-xl border border-pp-border bg-pp-surface p-5">
         <p className="font-semibold text-pp-navy">Your mandate is signed.</p>
-        <p className="mt-1 text-sm text-pp-muted">
-          Link your PayPal wallet so your agent can pay within it. You approve this at PayPal, then come back here.
-        </p>
-        <a href={signed.approveUrl} className={`mt-4 ${primaryButton}`}>
-          Link PayPal
-        </a>
+        {signed.approveUrl === null ? (
+          <p className="mt-1 text-sm text-pp-muted">Your linked PayPal wallet pays within it, as shown above.</p>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-pp-muted">
+              Link your PayPal wallet so your agent can pay within it. You approve this at PayPal, then come back here.
+            </p>
+            <a href={signed.approveUrl} className={`mt-4 ${primaryButton}`}>
+              Link PayPal
+            </a>
+          </>
+        )}
       </div>
     );
   }

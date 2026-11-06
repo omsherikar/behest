@@ -1,0 +1,22 @@
+{
+  "id": "msg_catalog_photos",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"items\":[{\"sku\":\"GHEE-500ML\",\"title\":\"Cow Ghee, 500 ml\",\"description\":\"A glass jar of cow ghee labelled 500 ml.\",\"category\":\"groceries\",\"screening\":{\"suspicious\":false,\"reason\":null}},{\"sku\":\"BRASS-DIYA\",\"title\":\"Brass Diya Oil Lamp\",\"description\":\"A small brass oil lamp with a single wick.\",\"category\":\"home_decor\",\"screening\":{\"suspicious\":false,\"reason\":null}}]}",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 3650,
+    "output_tokens": 210,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

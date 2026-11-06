@@ -129,25 +129,41 @@ export async function retryCharge(deps: ChargeDeps, purchaseId: string): Promise
  * Takes a `charging` purchase whose PayPal capture has COMPLETED to its receipt and delivery:
  * records the capture's ids and time with a `capture` event and moves the purchase to `captured`,
  * then issues the receipt and hands the order to the seller. Used by the charge, its retry, and
- * PayPal's webhook for a capture that was pending. Only the call that records the capture goes on,
- * so a capture reported twice is delivered once; any other call returns the purchase as it stands.
+ * PayPal's webhook for a capture that was pending. The purchase row is locked while the capture is
+ * checked and recorded, so only one call records it and goes on; a capture reported again is a
+ * quiet no-op. A capture that does not fit the purchase, because the purchase is not `charging` or
+ * already holds other PayPal ids, is never recorded over them: it is logged as `capture_unmatched`
+ * for an operator, since PayPal holds money the purchase does not account for. Either way the
+ * purchase is returned as it stands.
  */
 export async function completeCapture(deps: ChargeDeps, purchaseId: string, capture: Capture): Promise<ProposalOutcome> {
   const { db } = deps;
   const { orderId, captureId } = capture;
-  try {
-    await db.transaction(async (tx) => {
-      await appendEvent(tx, purchaseId, 'capture', { orderId, captureId });
-      await transition(tx, purchaseId, 'charging', 'captured', {
-        paypalOrderId: orderId,
-        paypalCaptureId: captureId,
-        capturedAt: deps.now(),
-      });
+  const recorded = await db.transaction(async (tx) => {
+    const [purchase] = await tx
+      .select({ status: purchases.status, orderId: purchases.paypalOrderId, captureId: purchases.paypalCaptureId })
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId))
+      .for('update');
+    if (!purchase) throw new Error(`there is no purchase ${purchaseId}`);
+    if (purchase.status !== 'charging' && purchase.captureId === captureId) return false;
+    const fits =
+      purchase.status === 'charging' &&
+      (purchase.captureId ?? captureId) === captureId &&
+      (purchase.orderId ?? orderId) === orderId;
+    if (!fits) {
+      await appendEvent(tx, purchaseId, 'capture_unmatched', { captureId });
+      return false;
+    }
+    await appendEvent(tx, purchaseId, 'capture', { orderId, captureId });
+    await transition(tx, purchaseId, 'charging', 'captured', {
+      paypalOrderId: orderId,
+      paypalCaptureId: captureId,
+      capturedAt: deps.now(),
     });
-  } catch (error) {
-    if (error instanceof StaleTransition) return purchaseOutcome(db, purchaseId);
-    throw error;
-  }
+    return true;
+  });
+  if (!recorded) return purchaseOutcome(db, purchaseId);
   await issueReceipt(deps, purchaseId);
   await deliverToSeller(deps, purchaseId);
   return purchaseOutcome(db, purchaseId);

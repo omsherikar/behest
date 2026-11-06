@@ -385,6 +385,45 @@ describe('completeCapture', () => {
     expect(await stepsOf(db, purchaseId)).toEqual(['charge', 'capture_pending', 'capture', 'receipt', 'seller_accepted']);
   });
 
+  it('logs a capture that does not match the one recorded, changing nothing', async () => {
+    const { db, deps, paypal, seller, purchaseId } = await setUp();
+    const charged = await chargeAllowed(deps, purchaseId);
+    const [{ orderId, captureId }] = paypal.captures;
+
+    const outcome = await completeCapture(deps, purchaseId, { orderId: 'ORDER-9', captureId: 'CAPTURE-9' });
+
+    expect(outcome).toEqual(charged);
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({ status: 'accepted', paypalOrderId: orderId, paypalCaptureId: captureId });
+    expect(await db.select().from(receipts)).toHaveLength(1);
+    expect(seller.orders).toHaveLength(1);
+    expect((await eventsOf(db, purchaseId)).at(-1)).toEqual({ kind: 'capture_unmatched', data: { captureId: 'CAPTURE-9' } });
+  });
+
+  it('logs a capture that does not match the pending one, keeping the stored ids', async () => {
+    const { db, deps, paypal, seller, purchaseId } = await setUp();
+    paypal.failNext('chargeSavedWallet', { status: 'PENDING' });
+    await chargeAllowed(deps, purchaseId);
+    const [{ orderId, captureId }] = paypal.captures;
+
+    const outcome = await completeCapture(deps, purchaseId, { orderId, captureId: 'CAPTURE-9' });
+
+    expect(outcome).toMatchObject({ status: 'charging', receiptId: null });
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({ paypalOrderId: orderId, paypalCaptureId: captureId, capturedAt: null });
+    expect(seller.orders).toEqual([]);
+    expect(await stepsOf(db, purchaseId)).toEqual(['charge', 'capture_pending', 'capture_unmatched']);
+  });
+
+  it('logs a capture reported for a purchase whose charge was declined', async () => {
+    const { db, deps, paypal, purchaseId } = await setUp();
+    paypal.failNext('chargeSavedWallet', { status: 'DECLINED' });
+    await chargeAllowed(deps, purchaseId);
+
+    await completeCapture(deps, purchaseId, { orderId: 'ORDER-9', captureId: 'CAPTURE-9' });
+
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({ status: 'failed', paypalOrderId: null, paypalCaptureId: null });
+    expect(await stepsOf(db, purchaseId)).toEqual(['charge', 'charge_declined', 'capture_unmatched']);
+  });
+
   it('does nothing more for a capture already recorded', async () => {
     const { db, deps, paypal, seller, purchaseId } = await setUp();
     const charged = await chargeAllowed(deps, purchaseId);

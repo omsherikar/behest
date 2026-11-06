@@ -1,4 +1,5 @@
 import {
+  bigint,
   integer,
   jsonb,
   pgEnum,
@@ -8,8 +9,10 @@ import {
   unique,
   uuid,
 } from 'drizzle-orm/pg-core';
+import type { Cart } from '../domain/cart';
 import type { Category } from '../domain/categories';
 import type { MandatePolicy } from '../domain/policy';
+import type { PurchaseProposal } from '../domain/proposal';
 
 // The database schema. Money is integer cents with an ISO currency code (USD only), and every
 // timestamp is stored with its time zone so it reads back as an exact instant.
@@ -110,3 +113,86 @@ export const products = pgTable(
   },
   (t) => [unique('products_seller_sku_unique').on(t.sellerId, t.sku)],
 );
+
+// Purchases and purchase events
+
+export const verdict = pgEnum('verdict', ['ALLOW', 'ASK', 'BLOCK']);
+export const purchaseStatus = pgEnum('purchase_status', [
+  'proposed',
+  'blocked',
+  'charging',
+  'awaiting_approval',
+  'cancelled',
+  'captured',
+  'failed',
+  'accepted',
+  'refunded',
+  'settled',
+  'disputed',
+  'resolved',
+]);
+export const approver = pgEnum('approver', ['policy', 'human']);
+
+/** One gate rule's result as stored on a purchase. */
+export type StoredRuleOutcome = { rule: string; result: 'pass' | 'ask' | 'block' | 'skip'; detail: string };
+/** The intent check's result as stored on a purchase. */
+export type StoredIntentResult = {
+  verdict: 'consistent' | 'needs_human' | 'inconsistent' | 'unavailable';
+  reasons: string[];
+};
+
+export const purchases = pgTable('purchases', {
+  id: id(),
+  buyerId: uuid('buyer_id')
+    .notNull()
+    .references(() => buyers.id),
+  mandateId: uuid('mandate_id')
+    .notNull()
+    .references(() => mandates.id),
+  /** Null only when the proposal named a seller Behest does not know; such a purchase is blocked. */
+  sellerId: uuid('seller_id').references(() => sellers.id),
+  /** The shopping agent run that proposed this purchase, if any. */
+  runId: text('run_id'),
+  /** The buyer's request the agent was acting on. */
+  request: text('request').notNull(),
+  /** The agent's proposal exactly as received: seller slug, SKUs, quantities and its unverified rationale. */
+  proposal: jsonb('proposal').$type<PurchaseProposal>().notNull(),
+  /** The canonical cart rebuilt from the catalog. Null when the gate could not build a valid cart. */
+  cart: jsonb('cart').$type<Cart>(),
+  cartHash: text('cart_hash'),
+  totalCents: integer('total_cents'),
+  currency: currency(),
+  gateVerdict: verdict('gate_verdict').notNull(),
+  /** Details of the gate rules that did not pass, in rule order. */
+  gateReasons: jsonb('gate_reasons').$type<string[]>().notNull().default([]),
+  /** Every gate rule's outcome, in rule order. */
+  gateOutcomes: jsonb('gate_outcomes').$type<StoredRuleOutcome[]>().notNull().default([]),
+  rulesetVersion: text('ruleset_version').notNull(),
+  /** Null when the intent check did not run (the gate blocked). */
+  intent: jsonb('intent').$type<StoredIntentResult>(),
+  /** The gate verdict after the intent check tightened it. Null until the intent check has run or been skipped. */
+  finalVerdict: verdict('final_verdict'),
+  /** Who approved the payment: the policy for ALLOW, the buyer for ASK. Null until approved. */
+  approver: approver('approver'),
+  status: purchaseStatus('status').notNull().default('proposed'),
+  paypalOrderId: text('paypal_order_id'),
+  paypalCaptureId: text('paypal_capture_id'),
+  /** The PayPal link the buyer opens to approve an ASK purchase. */
+  approveUrl: text('approve_url'),
+  capturedAt: timestamp('captured_at', { withTimezone: true }),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** Append-only log of a purchase's transitions and agent steps. Rows are never updated or deleted. */
+export const purchaseEvents = pgTable('purchase_events', {
+  id: id(),
+  /** Insertion order. Timestamps alone can tie inside one transaction. */
+  seq: bigint('seq', { mode: 'number' }).notNull().generatedAlwaysAsIdentity(),
+  purchaseId: uuid('purchase_id')
+    .notNull()
+    .references(() => purchases.id),
+  kind: text('kind').notNull(),
+  data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: createdAt(),
+});

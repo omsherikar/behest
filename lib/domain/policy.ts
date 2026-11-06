@@ -7,6 +7,11 @@ import { CATEGORIES } from './categories';
 
 const cents = z.number().int().nonnegative();
 const category = z.enum(CATEGORIES);
+/**
+ * A seller slug: lower-case letters, digits and hyphens, starting with a letter or digit, at most
+ * 63 characters. With no commas, spaces or upper case, a list of slugs reads back unambiguously.
+ */
+const merchantSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 
 export const BudgetPeriod = z.enum(['day', 'week', 'month', 'once']);
 export type BudgetPeriod = z.infer<typeof BudgetPeriod>;
@@ -31,8 +36,8 @@ export const MandatePolicy = z
     merchants: z
       .object({
         /** Merchant slugs. Null means any merchant not denied. */
-        allow: z.array(z.string().min(1)).nullable(),
-        deny: z.array(z.string().min(1)),
+        allow: z.array(merchantSlug).nullable(),
+        deny: z.array(merchantSlug),
       })
       .strict(),
     /** At most this many purchases in a rolling window. Null means no limit. */

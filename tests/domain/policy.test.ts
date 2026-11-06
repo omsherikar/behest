@@ -13,3 +13,28 @@ it('rejects non-USD', () => expect(MandatePolicy.safeParse({ ...demoPolicy, curr
 it('rejects unknown keys', () => expect(MandatePolicy.safeParse({ ...demoPolicy, note: 'x' }).success).toBe(false));
 it('rejects unknown keys inside nested objects', () =>
   expect(MandatePolicy.safeParse({ ...demoPolicy, budget: { ...demoPolicy.budget, rollover: true } }).success).toBe(false));
+
+const acceptsSellers = (merchants: unknown) => MandatePolicy.safeParse({ ...demoPolicy, merchants }).success;
+
+it.each([
+  ['a hyphenated slug', 'ravi-spices'],
+  ['a one-character slug', 'a'],
+  ['a slug starting with a digit', '7eleven'],
+  ['a slug of 63 characters', 'a'.repeat(63)],
+])('accepts %s as a seller', (_, slug) => {
+  expect(acceptsSellers({ allow: [slug], deny: [] })).toBe(true);
+  expect(acceptsSellers({ allow: null, deny: [slug] })).toBe(true);
+});
+
+it.each([
+  ['a slug containing a comma and space', 'ravi-spices, bad-shop'],
+  ['an upper-case slug', 'Ravi-Spices'],
+  ['an empty slug', ''],
+  ['a slug starting with a hyphen', '-ravi'],
+  ['a slug containing a space', 'ravi spices'],
+  ['a slug containing an underscore', 'ravi_spices'],
+  ['a slug of 64 characters', 'a'.repeat(64)],
+])('rejects %s as a seller', (_, slug) => {
+  expect(acceptsSellers({ allow: [slug], deny: [] })).toBe(false);
+  expect(acceptsSellers({ allow: null, deny: [slug] })).toBe(false);
+});

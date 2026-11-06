@@ -114,6 +114,30 @@ function clientAddress(request: NextRequest): string {
   return request.headers.get('x-real-ip') ?? request.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
 }
 
+/**
+ * The request body as text, or null when it is over MAX_BODY_BYTES. A body that declares a larger
+ * length is refused unread; any other is counted as it arrives, so one that misstates or leaves
+ * out its length is stopped as soon as it passes the limit.
+ */
+async function readBody(request: NextRequest): Promise<string | null> {
+  if (Number(request.headers.get('content-length')) > MAX_BODY_BYTES) return null;
+  if (!request.body) return '';
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 /** The events as server-sent events. A reader that goes away stops the reply. */
 function serverSentEvents(events: AsyncGenerator<LlmStreamEvent, void, undefined>): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -148,10 +172,8 @@ export async function POST(request: NextRequest) {
     return error(429, 'Too many questions at once. Try again in a minute.');
   }
 
-  const text = await request.text();
-  if (Buffer.byteLength(text) > MAX_BODY_BYTES) {
-    return error(413, 'This conversation is too long for the analyst. Start a new one.');
-  }
+  const text = await readBody(request);
+  if (text === null) return error(413, 'This conversation is too long for the analyst. Start a new one.');
   const read = readTurn(text);
   if (!read.ok) return error(400, read.message);
 

@@ -60,6 +60,41 @@ async function request(
   });
 }
 
+/**
+ * A request body of 64 KiB chunks that never ends, which says how much of it was read. It makes
+ * a chunk only when one is read (a high water mark of 0), so its pulls count the reads.
+ */
+function endlessBody() {
+  let pulls = 0;
+  let cancelled = false;
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(64 * 1024).fill(0x20));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    },
+    { highWaterMark: 0 },
+  );
+  return { stream, pulled: () => pulls, cancelled: () => cancelled };
+}
+
+/** A buyer's request whose body arrives as `body`, with `headers` added. */
+async function streamedRequest(body: ReadableStream<Uint8Array>, headers: Record<string, string>) {
+  const sent = new Headers({
+    'content-type': 'application/json',
+    'x-forwarded-for': '203.0.113.7',
+    cookie: `${SESSION_COOKIE}=${await sessionCookie('buyer')}`,
+    ...headers,
+  });
+  // A streamed body needs `duplex: 'half'`, which Next.js's own RequestInit type does not list.
+  const init: ConstructorParameters<typeof NextRequest>[1] & { duplex: 'half' } = { method: 'POST', headers: sent, body, duplex: 'half' };
+  return new NextRequest('http://localhost/api/ai/studio', init);
+}
+
 /** A fresh database for the route to use. Only the tests that reach Claude need one. */
 async function useDb(): Promise<Db> {
   const db = await createTestDb();
@@ -139,6 +174,29 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
     const response = await POST(await request(big));
 
     expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: { message: 'This conversation is too long for the analyst. Start a new one.' } });
+    expect(createClaude).not.toHaveBeenCalled();
+  });
+
+  it('refuses a request that declares more than a megabyte without reading its body', async () => {
+    const body = endlessBody();
+
+    const response = await POST(await streamedRequest(body.stream, { 'content-length': '1000001' }));
+
+    expect(response.status).toBe(413);
+    expect(body.pulled()).toBe(0);
+    expect(createClaude).not.toHaveBeenCalled();
+  });
+
+  it('stops reading a body once it passes a megabyte, whatever its content-length says', async () => {
+    const body = endlessBody();
+
+    const response = await POST(await streamedRequest(body.stream, { 'content-length': '200' }));
+
+    expect(response.status).toBe(413);
+    // 64 KiB chunks: the 16th passes the limit.
+    expect(body.pulled()).toBe(16);
+    expect(body.cancelled()).toBe(true);
     expect(createClaude).not.toHaveBeenCalled();
   });
 

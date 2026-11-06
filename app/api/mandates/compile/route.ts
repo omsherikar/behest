@@ -24,6 +24,7 @@ const NOT_JSON = 'Send the mandate as JSON.';
 const UNKNOWN_QUESTION = 'Each answer must name a question Behest asked.';
 const SHORT_ANSWER = 'Each answer must be short text.';
 const ONE_LINE = 'Each answer must be one line.';
+const NO_TAGS = 'Each answer must leave out < and >.';
 
 const Text = z
   .string({ error: 'Write your mandate first.' })
@@ -32,11 +33,12 @@ const Text = z
 
 /**
  * One answer. It goes to the compiler as one `id: answer` line inside the <answers> block, so a line
- * break, even a trailing one, could add a line or close the block.
+ * break, even a trailing one, could add a line, and an angle bracket could close the block.
  */
 const Answer = z
   .string({ error: SHORT_ANSWER })
   .regex(/^[^\r\n]*$/, { error: ONE_LINE })
+  .regex(/^[^<>]*$/, { error: NO_TAGS })
   .trim()
   .min(1, { error: SHORT_ANSWER })
   .max(MAX_ANSWER_LENGTH, { error: SHORT_ANSWER });

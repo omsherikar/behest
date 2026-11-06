@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Cart } from '@/lib/domain/cart';
 import type { LlmDeps } from '@/lib/llm/client';
 import { callStructured } from '@/lib/llm/structured';
 import { wrapUntrusted } from '@/lib/llm/untrusted';
@@ -22,7 +23,13 @@ const MAX_REASONS = 5;
 const MAX_REASON_CHARS = 200;
 /** The reason shown for a verdict that flags the purchase when the model gives none. */
 const NO_REASON = 'The intent check flagged this purchase without giving a reason.';
-/** How much of the cart's JSON and of the rationale the model reads. The prompt says what a cut means. */
+/** The reason shown first when the model was shown only part of the cart. */
+const CART_CUT = 'The cart was too long to check in full.';
+/**
+ * How much of the cart's JSON and of the rationale the model reads. Seller-written titles have no
+ * length limit and come before each quantity, so a long title can push quantities and later items
+ * out of view; a cart cut to fit is therefore never found consistent.
+ */
 const MAX_CART_CHARS = 20_000;
 const MAX_RATIONALE_CHARS = 4_000;
 
@@ -32,31 +39,50 @@ function clip(text: string, max: number): string {
   return chars.length <= max ? text : `${chars.slice(0, max - 3).join('')}...`;
 }
 
-function userMessage(input: IntentInput): string {
+/** The cart as the model reads it, and whether it was cut to fit. */
+function cartForModel(cart: Cart): { text: string; cut: boolean } {
+  const json = JSON.stringify(cart);
+  const text = wrapUntrusted('seller_listing', json, MAX_CART_CHARS);
+  // Compared with the uncut wrapping, so the length is counted as the wrapper counts it, after escaping.
+  return { text, cut: text !== wrapUntrusted('seller_listing', json, Infinity) };
+}
+
+function userMessage(input: IntentInput, cartText: string): string {
   return [
     `<request>\n${input.request}\n</request>`,
     `<mandate>\n${input.mandateText}\n</mandate>`,
     `<readback>\n${input.readback.join('\n')}\n</readback>`,
-    `<cart>\n${wrapUntrusted('seller_listing', JSON.stringify(input.cart), MAX_CART_CHARS)}\n</cart>`,
+    `<cart>\n${cartText}\n</cart>`,
     `<agent_rationale>\n${wrapUntrusted('agent', input.agentRationale, MAX_RATIONALE_CHARS)}\n</agent_rationale>`,
   ].join('\n\n');
 }
 
+/** At most five reasons of at most 200 characters each. */
+function kept(reasons: string[]): string[] {
+  return reasons.slice(0, MAX_REASONS).map((reason) => clip(reason, MAX_REASON_CHARS));
+}
+
 /**
  * Checks a cart against the buyer's request and mandate, with at most five reasons of at most 200
- * characters. A model call that fails in any way, including a refusal or a spent daily budget,
- * returns `unavailable` with the failure's name as the reason; only misconfiguration and database
- * errors throw.
+ * characters. A verdict that flags the purchase always has a reason. A cart too long to show the
+ * model in full gets at least needs_human, with that reason first. A model call that fails in any
+ * way, including a refusal or a spent daily budget, returns `unavailable` with the failure's name as
+ * the reason; only misconfiguration and database errors throw.
  */
 export async function checkIntent(deps: LlmDeps, input: IntentInput): Promise<IntentResult> {
+  const cart = cartForModel(input.cart);
   const reply = await callStructured(deps, 'intent_check', {
     system: INTENT_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userMessage(input) }],
+    messages: [{ role: 'user', content: userMessage(input, cart.text) }],
     schema: IntentOutput,
   });
   if (!reply.ok) return { verdict: 'unavailable', reasons: [reply.error] };
 
-  const { verdict, reasons } = reply.value;
-  if (verdict !== 'consistent' && reasons.length === 0) return { verdict, reasons: [NO_REASON] };
-  return { verdict, reasons: reasons.slice(0, MAX_REASONS).map((reason) => clip(reason, MAX_REASON_CHARS)) };
+  const { verdict, reasons: given } = reply.value;
+  const reasons = verdict !== 'consistent' && given.length === 0 ? [NO_REASON] : given;
+  if (!cart.cut) return { verdict, reasons: kept(reasons) };
+  // The model judged only the part of the cart it was shown. Its reasons for finding the cart
+  // consistent describe that part alone, so they are not shown as if they covered the whole cart.
+  if (verdict === 'consistent') return { verdict: 'needs_human', reasons: [CART_CUT] };
+  return { verdict, reasons: kept([CART_CUT, ...reasons]) };
 }

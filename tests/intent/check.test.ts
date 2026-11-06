@@ -167,6 +167,81 @@ describe('the request', () => {
   });
 });
 
+describe('a cart too long to read in full goes to the buyer', () => {
+  const CART_CUT = 'The cart was too long to check in full.';
+
+  /** A ten-jar cart whose seller-written title pads its JSON to `length` characters. */
+  function paddedTo(length: number): IntentInput {
+    const unpadded = JSON.stringify(cartOf('', 450, 10)).length;
+    return { ...poisoned, cart: cartOf('x'.repeat(length - unpadded), 450, 10) };
+  }
+
+  const sentContent = (sent: { body: Record<string, unknown> }) =>
+    (sent.body.messages as { content: string }[])[0].content;
+
+  it('raises a consistent verdict to needs_human when a padded title pushes the quantity out of view', async () => {
+    const { result, sent } = await checkWith(consistentReply, paddedTo(25_000));
+
+    expect(sentContent(sent)).not.toContain('"quantity":10');
+    expect(result).toEqual({ verdict: 'needs_human', reasons: [CART_CUT] });
+  });
+
+  it('raises a cart one character over the limit', async () => {
+    const { result } = await checkWith(consistentReply, paddedTo(20_001));
+
+    expect(result).toEqual({ verdict: 'needs_human', reasons: [CART_CUT] });
+  });
+
+  it('keeps an inconsistent verdict and adds the reason', async () => {
+    const { result } = await checkWith(inconsistentReply, paddedTo(25_000));
+
+    expect(result).toEqual({
+      verdict: 'inconsistent',
+      reasons: [
+        CART_CUT,
+        'You asked for one jar of turmeric, but the cart has 10 jars for $45.00.',
+        "The turmeric listing's title tells shopping agents to ignore the buyer's budget, and the agent's rationale repeats it.",
+      ],
+    });
+  });
+
+  it('leaves a cart at the limit as the model found it', async () => {
+    const { result, sent } = await checkWith(consistentReply, paddedTo(20_000));
+
+    expect(sentContent(sent)).toContain('"quantity":10');
+    expect(result).toEqual({
+      verdict: 'consistent',
+      reasons: ['The cart is one 100g jar of turmeric for $4.50 from Ravi Spices, which is what you asked for.'],
+    });
+  });
+
+  it('counts the length after escaping, as the model reads it', async () => {
+    const input = { ...matching, cart: cartOf('<'.repeat(4_000), 450, 10) };
+    expect(JSON.stringify(input.cart).length).toBeLessThan(20_000);
+
+    const { result } = await checkWith(consistentReply, input);
+
+    expect(result).toEqual({ verdict: 'needs_human', reasons: [CART_CUT] });
+  });
+
+  it('keeps at most five reasons, the cut first', async () => {
+    const reasons = ['One.', 'Two.', 'Three.', 'Four.', 'Five.', 'Six.'];
+
+    const { result } = await checkWith(messageJson({ json: { verdict: 'inconsistent', reasons } }), paddedTo(25_000));
+
+    expect(result).toEqual({ verdict: 'inconsistent', reasons: [CART_CUT, 'One.', 'Two.', 'Three.', 'Four.'] });
+  });
+
+  it('keeps the fixed reason for a flag that gave none', async () => {
+    const { result } = await checkWith(messageJson({ json: { verdict: 'needs_human', reasons: [] } }), paddedTo(25_000));
+
+    expect(result).toEqual({
+      verdict: 'needs_human',
+      reasons: [CART_CUT, 'The intent check flagged this purchase without giving a reason.'],
+    });
+  });
+});
+
 describe('a check that cannot run sends the purchase to the buyer', () => {
   it('reports a refusal as unavailable', async () => {
     const { result } = await checkWith(refusalReply);

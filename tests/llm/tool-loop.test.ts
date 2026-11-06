@@ -279,25 +279,33 @@ it('maps a network failure to api_error and logs it', async () => {
 });
 
 it('maps a response that is not a message, or whose usage cannot be priced, to api_error', async () => {
+  const spent = messageJson({ toolUses: [searchCall], usage: { input_tokens: 1000, output_tokens: 500 } });
   const { db, run, loop } = await setup([
     { status: 200, text: '<!doctype html><title>Gateway</title>', headers: { 'content-type': 'text/html' } },
     {},
     { ...messageJson({ toolUses: [searchCall] }), usage: { input_tokens: 1, output_tokens: 1, iterations: [null] } },
+    { ...spent, content: undefined },
+    { ...spent, content: null },
+    { ...spent, content: [{ type: 'tool_use', ...searchCall }, 'tool_use'] },
   ]);
 
   const results = [];
-  for (let i = 0; i < 3; i++) results.push(await loop());
+  for (let i = 0; i < 6; i++) results.push(await loop());
 
   for (const result of results) {
     expect(result).toEqual({ ok: false, error: 'api_error', callId: expect.any(String), detail: expect.any(String) });
   }
   expect(run).not.toHaveBeenCalled();
-  // Usage whose iterations cannot be priced is charged its top-level counts at the highest rates.
+  // Usage whose iterations cannot be priced is charged its top-level counts at the highest rates; a
+  // reply whose content is not a list of blocks is charged its usage: 1000 x $4 + 500 x $20 per million.
   const rows = await db.select().from(llmCalls);
   expect(rows.map((row) => [row.ok, row.requestId, row.costUsd, row.error?.split(':')[0]])).toEqual([
     [false, 'req_fake_1', 0, 'api_error'],
     [false, 'req_fake_2', 0, 'api_error'],
     [false, 'req_fake_3', 0.00006, 'api_error'],
+    [false, 'req_fake_4', 0.014, 'api_error'],
+    [false, 'req_fake_5', 0.014, 'api_error'],
+    [false, 'req_fake_6', 0.014, 'api_error'],
   ]);
 });
 

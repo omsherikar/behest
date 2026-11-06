@@ -249,18 +249,21 @@ it('maps a successful response that is not a message to api_error and logs it', 
     { status: 200, text: '<!doctype html><title>Gateway</title>', headers: { 'content-type': 'text/html' } },
     {},
     { content: [] },
+    { ...messageJson({ json: { answer: 'yes' }, usage: { input_tokens: 1000, output_tokens: 500 } }), content: null },
   ]);
 
-  const results = [await call(), await call(), await call()];
+  const results = [await call(), await call(), await call(), await call()];
 
   for (const result of results) {
     expect(result).toEqual({ ok: false, error: 'api_error', callId: expect.any(String), detail: expect.any(String) });
   }
+  // The SDK's parse rejects a reply without content before handing it over, so its usage cannot be read.
   const rows = await db.select().from(llmCalls);
-  expect(rows.map((row) => [row.ok, row.requestId, row.error?.split(':')[0]])).toEqual([
-    [false, 'req_fake_1', 'api_error'],
-    [false, 'req_fake_2', 'api_error'],
-    [false, 'req_fake_3', 'api_error'],
+  expect(rows.map((row) => [row.ok, row.requestId, row.costUsd, row.error?.split(':')[0]])).toEqual([
+    [false, 'req_fake_1', 0, 'api_error'],
+    [false, 'req_fake_2', 0, 'api_error'],
+    [false, 'req_fake_3', 0, 'api_error'],
+    [false, 'req_fake_4', 0, 'api_error'],
   ]);
 });
 

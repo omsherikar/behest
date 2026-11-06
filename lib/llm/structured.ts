@@ -66,13 +66,19 @@ function readReply<T>(
 
 type Outcome<T> = { ok: true; value: T } | { ok: false; error: LlmFailure; detail?: string };
 
-/** Whether a successful response has the fields of a message that the checks and the log read. */
-export function isMessage(message: Pick<BetaMessage, 'model' | 'usage'>): boolean {
+/**
+ * Whether a successful response has the fields of a message that the checks and the log read: a
+ * model, token counts, and content that is a list of blocks.
+ */
+export function isMessage(message: Pick<BetaMessage, 'model' | 'usage' | 'content'>): boolean {
   const usage: Partial<BetaUsage> | null | undefined = message.usage;
+  const content: unknown = message.content;
   return (
     typeof message.model === 'string' &&
     typeof usage?.input_tokens === 'number' &&
-    typeof usage.output_tokens === 'number'
+    typeof usage.output_tokens === 'number' &&
+    Array.isArray(content) &&
+    content.every((block) => typeof block === 'object' && block !== null)
   );
 }
 

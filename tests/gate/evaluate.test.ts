@@ -9,21 +9,10 @@ import {
   type GateResult,
 } from '@/lib/gate/evaluate';
 import type { RuleId } from '@/lib/gate/rules';
+import { demoPolicy } from '@/tests/helpers/fixtures';
 
 const NOW = new Date('2026-11-06T12:00:00Z');
 const hoursAgo = (hours: number) => new Date(NOW.getTime() - hours * 60 * 60 * 1000);
-
-const demoPolicy: MandatePolicy = {
-  version: 1,
-  currency: 'USD',
-  budget: { amountCents: 6000, period: 'month' },
-  perPurchaseMaxCents: 6000,
-  askAboveCents: 2500,
-  categories: { allow: ['groceries', 'spices'], deny: ['electronics'] },
-  merchants: { allow: null, deny: [] },
-  velocity: null,
-  expiresAt: null,
-};
 
 const listing = (
   sku: string,

@@ -16,6 +16,7 @@ beforeAll(async () => {
 }, 30_000);
 
 const NOW = new Date('2026-11-06T12:00:00Z');
+const DAY_MS = 86_400_000;
 
 /** A database with one purchase in `status`, a fake PayPal, and the dependencies settling needs. */
 async function setUp(status: PurchaseStatus = 'accepted') {
@@ -340,6 +341,38 @@ describe('pollPayout', () => {
 
     expect(await payoutRows(db)).toEqual([expect.objectContaining({ paypalBatchId: null })]);
     expect(paypal.callsTo('getPayoutBatch')).toEqual([]);
+  });
+
+  describe('a payout whose first request may not have reached PayPal', () => {
+    /** The payout, never answered, and the settling dependencies with the clock `ms` after its row was written. */
+    async function unanswered() {
+      const setup = await setUp();
+      setup.paypal.failNext('createPayout', 'network');
+      await payoutSeller(setup.deps, setup.purchaseId);
+      const [{ createdAt }] = await payoutRows(setup.db);
+      const after = (ms: number) => ({ ...setup.deps, now: () => new Date(createdAt.getTime() + ms) });
+      return { ...setup, after };
+    }
+
+    it('is resent up to 29 days after it was written', async () => {
+      const { paypal, purchaseId, after } = await unanswered();
+
+      expect(await pollPayout(after(29 * DAY_MS), purchaseId)).toBe('retry');
+
+      expect(paypal.payouts).toHaveLength(1);
+    });
+
+    it('is not resent once older, since PayPal remembers a sender batch id for only 30 days', async () => {
+      const { db, paypal, purchaseId, after } = await unanswered();
+
+      await expect(pollPayout(after(29 * DAY_MS + 1), purchaseId)).rejects.toThrow(
+        `payout ${purchaseId}:payout is too old to resend safely; check PayPal before paying again`,
+      );
+
+      expect(paypal.callsTo('createPayout')).toHaveLength(1);
+      expect(paypal.payouts).toEqual([]);
+      expect(await payoutRows(db)).toEqual([expect.objectContaining({ paypalBatchId: null, status: 'PENDING' })]);
+    });
   });
 
   it('refuses to poll a purchase that has no payout', async () => {

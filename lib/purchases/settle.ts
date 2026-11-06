@@ -14,15 +14,20 @@ import { appendEvent, StaleTransition, transition } from './events';
 //
 // Both functions may run again, even while an earlier call is still going, and neither may pay
 // twice. The payouts row, one per purchase, is written before PayPal is asked, so only the first
-// call of payoutSeller sends the payout. PayPal refuses a sender batch id it has seen, so when the
-// poll resends a payout whose answer was lost, the worst it can get is PayoutAlreadyExists naming
-// the batch already sent.
+// call of payoutSeller sends the payout. PayPal refuses a sender batch id it has seen in the last 30
+// days, so when the poll resends a payout whose answer was lost, the worst it can get is
+// PayoutAlreadyExists naming the batch already sent. After 30 days PayPal would take the same sender
+// batch id as a new payout and pay the seller again, so the poll never resends a payout older than
+// RESEND_WINDOW_MS.
 
 type SettleDeps = Pick<PurchaseDeps, 'db' | 'paypal' | 'now'>;
 type Payout = typeof payouts.$inferSelect;
 
 /** Item statuses after which PayPal will not pay the seller. Settling then needs an operator. */
 const FAILED_ITEM_STATUSES: ReadonlySet<string> = new Set(['FAILED', 'RETURNED', 'BLOCKED', 'REFUNDED', 'REVERSED']);
+
+/** The oldest payout the poll resends: a day inside the 30 days PayPal remembers a sender batch id. */
+const RESEND_WINDOW_MS = 29 * 24 * 60 * 60 * 1000;
 
 /**
  * How long after sending a payout its first poll runs. PayPal usually pays a one-item batch within
@@ -79,7 +84,8 @@ export async function payoutSeller(deps: SettleDeps, purchaseId: string): Promis
  * once PayPal reports the item failed (recorded on the payout and as a `payout_failed` event, with the
  * purchase left `accepted`), or once the purchase has moved on some other way, such as a refund.
  * `retry` while the item is pending, unclaimed, on hold, missing or in a status not known here.
- * Throws, to be retried, if PayPal cannot be asked, or has the payout but did not name its batch.
+ * Throws, to be retried, if PayPal cannot be asked, or has the payout but did not name its batch, and
+ * without asking PayPal if the payout was never answered and is too old to resend safely.
  */
 export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<'done' | 'retry'> {
   const { db, paypal } = deps;
@@ -92,7 +98,13 @@ export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<
   const { payout, purchaseStatus } = found;
   if (purchaseStatus !== 'accepted' || FAILED_ITEM_STATUSES.has(payout.status)) return 'done';
 
-  const payoutBatchId = payout.paypalBatchId ?? (await sendPayout(deps, payout));
+  let payoutBatchId = payout.paypalBatchId;
+  if (!payoutBatchId) {
+    if (deps.now().getTime() - payout.createdAt.getTime() > RESEND_WINDOW_MS) {
+      throw new Error(`payout ${payout.senderBatchId} is too old to resend safely; check PayPal before paying again`);
+    }
+    payoutBatchId = await sendPayout(deps, payout);
+  }
 
   const { batchStatus, itemStatus } = await paypal.getPayoutBatch(payoutBatchId);
   if (itemStatus === null) return 'retry';

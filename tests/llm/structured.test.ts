@@ -93,7 +93,7 @@ it('never sends tool_choice, temperature or disabled thinking', async () => {
   expect(fake.requests).toHaveLength(LLM_ROUTES.length);
   for (const { body } of fake.requests) {
     for (const key of ['tool_choice', 'temperature', 'top_p', 'top_k']) expect(body).not.toHaveProperty(key);
-    expect(body).not.toHaveProperty('thinking.type', 'disabled');
+    expect(body).not.toHaveProperty('thinking');
   }
 });
 
@@ -130,6 +130,16 @@ it('maps max_tokens to error max_tokens', async () => {
   expect(await db.select().from(llmCalls)).toEqual([
     expect.objectContaining({ ok: false, stopReason: 'max_tokens', error: expect.stringMatching(/^max_tokens/) }),
   ]);
+});
+
+it('maps model_context_window_exceeded to error max_tokens', async () => {
+  const { call } = await setup([messageJson({ text: '{"answer": "y', stop_reason: 'model_context_window_exceeded' })]);
+
+  expect(await call()).toMatchObject({
+    ok: false,
+    error: 'max_tokens',
+    detail: 'The reply stopped with model_context_window_exceeded',
+  });
 });
 
 it('maps schema-invalid output to invalid_output', async () => {
@@ -208,6 +218,18 @@ it('maps an HTTP 500 after retries to api_error', async () => {
       costUsd: 0,
       error: expect.stringMatching(/^api_error: 500/),
     }),
+  ]);
+});
+
+it('maps a network failure to api_error and logs it', async () => {
+  const { db, fake, call } = await setup([]);
+
+  const result = await call();
+
+  expect(fake.requests).toHaveLength(1);
+  expect(result).toEqual({ ok: false, error: 'api_error', callId: expect.any(String), detail: expect.any(String) });
+  expect(await db.select().from(llmCalls)).toEqual([
+    expect.objectContaining({ id: result.callId, ok: false, requestId: null, error: expect.stringMatching(/^api_error: /) }),
   ]);
 });
 

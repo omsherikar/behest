@@ -31,7 +31,8 @@ let signingKey: Promise<SigningKey> | undefined;
  * that fails is not kept, so the next call tries again.
  */
 function appSigningKey(): Promise<SigningKey> {
-  signingKey ??= loadSigningKey(process.env).catch((error: unknown) => {
+  const { RECEIPT_SIGNING_KEY, RECEIPT_KEY_ID } = process.env;
+  signingKey ??= loadSigningKey({ RECEIPT_SIGNING_KEY, RECEIPT_KEY_ID }).catch((error: unknown) => {
     signingKey = undefined;
     throw error;
   });

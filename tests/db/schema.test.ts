@@ -24,12 +24,72 @@ const policy: MandatePolicy = {
   expiresAt: null,
 };
 
+const proposal: PurchaseProposal = {
+  sellerSlug: 'ravi-spices',
+  items: [
+    { sku: 'TUR-100', quantity: 2 },
+    { sku: 'CUM-100', quantity: 1 },
+  ],
+  rationale: 'The buyer asked for turmeric and cumin.',
+};
+
+const cart: Cart = {
+  seller: { slug: 'ravi-spices', name: "Ravi's Spice Co." },
+  currency: 'USD',
+  items: [
+    { sku: 'TUR-100', title: 'Turmeric powder 100g', category: 'spices', unitPriceCents: 450, quantity: 2 },
+    { sku: 'CUM-100', title: 'Cumin seeds 100g', category: 'spices', unitPriceCents: 375, quantity: 1 },
+  ],
+  totalCents: 1275,
+};
+
+async function addBuyer(db: Db) {
+  const [buyer] = await db.insert(buyers).values({ name: 'Priya' }).returning();
+  return buyer;
+}
+
+function mandateRow(buyerId: string, status: 'active' | 'revoked' | 'expired' = 'active') {
+  return {
+    buyerId,
+    sourceText: '$60 a month on groceries and spices, ask me above $25, never electronics',
+    policy,
+    policyHash: HASH,
+    readback: ['Your agent can spend up to $60.00 per calendar month (UTC).'],
+    readbackHash: HASH,
+    jws: 'header.payload.signature',
+    status,
+    confirmedAt: new Date('2026-11-06T10:00:00Z'),
+  };
+}
+
 async function addSeller(db: Db, slug = 'ravi-spices') {
   const [seller] = await db
     .insert(sellers)
     .values({ slug, name: "Ravi's Spice Co.", payoutEmail: 'ravi@example.com' })
     .returning();
   return seller;
+}
+
+/** A buyer with an active mandate, a seller, and the ids a purchase row needs. */
+async function seedParties(db: Db) {
+  const buyer = await addBuyer(db);
+  const [mandate] = await db.insert(mandates).values(mandateRow(buyer.id)).returning();
+  const seller = await addSeller(db);
+  return { buyerId: buyer.id, mandateId: mandate.id, sellerId: seller.id };
+}
+
+function purchaseRow(parties: { buyerId: string; mandateId: string; sellerId: string }) {
+  return {
+    ...parties,
+    request: 'Restock turmeric and cumin',
+    proposal,
+    cart,
+    cartHash: HASH,
+    totalCents: cart.totalCents,
+    gateVerdict: 'ALLOW' as const,
+    gateOutcomes: [{ rule: 'mandate_active', result: 'pass' as const, detail: 'The mandate is active.' }],
+    rulesetVersion: 'gate-v1',
+  };
 }
 
 function turmeric(sellerId: string) {
@@ -51,56 +111,8 @@ it('applies migrations to an empty database', async () => {
 
 it('round-trips a purchase with its jsonb cart', async () => {
   const db = await createTestDb();
-  const [buyer] = await db.insert(buyers).values({ name: 'Priya' }).returning();
-  const [mandate] = await db
-    .insert(mandates)
-    .values({
-      buyerId: buyer.id,
-      sourceText: '$60 a month on groceries and spices, ask me above $25, never electronics',
-      policy,
-      policyHash: HASH,
-      readback: ['Your agent can spend up to $60.00 per calendar month (UTC).'],
-      readbackHash: HASH,
-      jws: 'header.payload.signature',
-      confirmedAt: new Date('2026-11-06T10:00:00Z'),
-    })
-    .returning();
-  const seller = await addSeller(db);
-
-  const proposal: PurchaseProposal = {
-    sellerSlug: 'ravi-spices',
-    items: [
-      { sku: 'TUR-100', quantity: 2 },
-      { sku: 'CUM-100', quantity: 1 },
-    ],
-    rationale: 'The buyer asked for turmeric and cumin.',
-  };
-  const cart: Cart = {
-    seller: { slug: 'ravi-spices', name: "Ravi's Spice Co." },
-    currency: 'USD',
-    items: [
-      { sku: 'TUR-100', title: 'Turmeric powder 100g', category: 'spices', unitPriceCents: 450, quantity: 2 },
-      { sku: 'CUM-100', title: 'Cumin seeds 100g', category: 'spices', unitPriceCents: 375, quantity: 1 },
-    ],
-    totalCents: 1275,
-  };
-
-  const [{ id }] = await db
-    .insert(purchases)
-    .values({
-      buyerId: buyer.id,
-      mandateId: mandate.id,
-      sellerId: seller.id,
-      request: 'Restock turmeric and cumin',
-      proposal,
-      cart,
-      cartHash: HASH,
-      totalCents: cart.totalCents,
-      gateVerdict: 'ALLOW',
-      gateOutcomes: [{ rule: 'mandate_active', result: 'pass', detail: 'The mandate is active.' }],
-      rulesetVersion: 'gate-v1',
-    })
-    .returning({ id: purchases.id });
+  const parties = await seedParties(db);
+  const [{ id }] = await db.insert(purchases).values(purchaseRow(parties)).returning({ id: purchases.id });
 
   const [row] = await db.select().from(purchases).where(eq(purchases.id, id));
   expect(row.cart).toEqual(cart);

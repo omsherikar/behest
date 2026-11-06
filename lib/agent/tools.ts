@@ -213,7 +213,11 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<
         items: items.map(({ sku, quantity }) => ({ sku, quantity })),
         rationale,
       });
-      return JSON.stringify(outcome);
+      // Gate reasons repeat seller titles and names, and intent reasons are the check model's own words.
+      return JSON.stringify({
+        ...outcome,
+        reasons: outcome.reasons.map((reason) => quoteUntrusted('seller_listing', reason, 400)),
+      });
     },
   });
 

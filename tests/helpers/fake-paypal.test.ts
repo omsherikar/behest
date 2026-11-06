@@ -14,6 +14,20 @@ const charge = (requestId: string) => ({
   requestId,
 });
 
+const approvalOrder = {
+  amountCents: 3200,
+  description: 'Behest order',
+  invoiceId: 'purchase-1',
+  returnUrl: 'http://localhost:3000/api/purchases/return',
+  cancelUrl: 'http://localhost:3000/buyer/approvals',
+  requestId: 'purchase-1:approval',
+};
+
+/** The issue PayPal names in a 422 body. */
+function issueOf(error: unknown): unknown {
+  return error instanceof PayPalApiError ? JSON.parse(error.body).details?.[0]?.issue : undefined;
+}
+
 const payout = { receiverEmail: 'payouts@ravi-spices.example.com', amountCents: 1875, note: 'Behest order', senderBatchId: 'purchase-1:payout' };
 
 describe('charges and captures', () => {
@@ -81,14 +95,8 @@ describe('charges and captures', () => {
 
   it('captures an approved order once, and refuses a second capture under a new request id', async () => {
     const paypal = new FakePaypal();
-    const { orderId } = await paypal.createApprovalOrder({
-      amountCents: 3200,
-      description: 'Behest order',
-      invoiceId: 'purchase-1',
-      returnUrl: 'http://localhost:3000/api/purchases/return',
-      cancelUrl: 'http://localhost:3000/buyer/approvals',
-      requestId: 'purchase-1:approval',
-    });
+    const { orderId } = await paypal.createApprovalOrder(approvalOrder);
+    paypal.approve(orderId);
 
     const first = await paypal.captureOrder(orderId, 'purchase-1:capture');
     const replayed = await paypal.captureOrder(orderId, 'purchase-1:capture');
@@ -98,6 +106,24 @@ describe('charges and captures', () => {
     await expect(refused).rejects.toBeInstanceOf(PayPalApiError);
     await expect(refused).rejects.toMatchObject({ status: 422 });
     expect(paypal.captures).toEqual([{ captureId: first.captureId, orderId, amountCents: 3200, status: 'COMPLETED' }]);
+  });
+
+  it('refuses to capture an approval order the buyer has not approved, then captures it once approved', async () => {
+    const paypal = new FakePaypal();
+    const { orderId } = await paypal.createApprovalOrder(approvalOrder);
+
+    const refused = await paypal.captureOrder(orderId, 'purchase-1:capture').catch((error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(PayPalApiError);
+    expect(refused).toMatchObject({ status: 422 });
+    expect(issueOf(refused)).toBe('ORDER_NOT_APPROVED');
+    expect(paypal.captures).toEqual([]);
+    paypal.approve(orderId);
+    await expect(paypal.captureOrder(orderId, 'purchase-1:capture')).resolves.toMatchObject({ status: 'COMPLETED' });
+  });
+
+  it('cannot approve an order it never created', () => {
+    expect(() => new FakePaypal().approve('ORDER-404')).toThrow('ORDER-404');
   });
 
   it('refunds a capture once per request id', async () => {

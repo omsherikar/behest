@@ -5,8 +5,9 @@ import type { DisputeDetail, PaypalPort } from '@/lib/paypal/port';
 // An in-memory PayPal for tests of the purchase flow. It keeps request ids per method the way
 // PayPal does: a charge, approval order, capture or refund repeated with the same request id gets
 // the first answer and nothing happens twice, while a payout repeated with the same sender batch
-// id is refused with PayoutAlreadyExists naming the batch already sent. A test can make the next
-// call of a method fail, and can read back every call and every capture, payout and refund made.
+// id is refused with PayoutAlreadyExists naming the batch already sent. An approval order can be
+// captured only once the test has approved it, as the buyer would at PayPal. A test can make the
+// next call of a method fail, and can read back every call and every capture, payout and refund made.
 
 type Method = keyof PaypalPort;
 type Answer<M extends Method> = Awaited<ReturnType<PaypalPort[M]>>;
@@ -48,8 +49,11 @@ function networkError(): TypeError {
   return new TypeError('fetch failed');
 }
 
-function apiError(status: number, path: string, issue: string): PayPalApiError {
-  return new PayPalApiError(status, path, JSON.stringify({ details: [{ issue }] }));
+const ERROR_NAMES: Record<number, string> = { 404: 'RESOURCE_NOT_FOUND', 422: 'UNPROCESSABLE_ENTITY' };
+
+/** The error the PayPal client throws for a 4xx, with PayPal's body: a name and the issue in its details. */
+function apiError(status: 404 | 422, path: string, issue: string): PayPalApiError {
+  return new PayPalApiError(status, path, JSON.stringify({ name: ERROR_NAMES[status], details: [{ issue }] }));
 }
 
 export class FakePaypal implements PaypalPort {
@@ -67,7 +71,7 @@ export class FakePaypal implements PaypalPort {
 
   private readonly failures = new Map<Method, Failure[]>();
   private readonly answers = new Map<string, unknown>();
-  private readonly orders = new Map<string, { amountCents: number; captured: boolean }>();
+  private readonly orders = new Map<string, { amountCents: number; approved: boolean; captured: boolean }>();
   private readonly counters = new Map<string, number>();
 
   /** Makes the next call of `method` that has not already been told to fail go wrong as `failure` says. */
@@ -78,6 +82,13 @@ export class FakePaypal implements PaypalPort {
   /** The arguments of each call to `method`, in order. */
   callsTo<M extends Method>(method: M): Parameters<PaypalPort[M]>[] {
     return this.calls.filter((c) => c.method === method).map((c) => c.args as Parameters<PaypalPort[M]>);
+  }
+
+  /** Approves an approval order, as the buyer does on PayPal, so that it can be captured. */
+  approve(orderId: string): void {
+    const order = this.orders.get(orderId);
+    if (!order) throw new Error(`the fake PayPal has no order ${orderId}`);
+    order.approved = true;
   }
 
   /** Sets what getPayoutBatch reports for a batch from now on. */
@@ -106,7 +117,7 @@ export class FakePaypal implements PaypalPort {
       this.once('chargeSavedWallet', i.requestId, () => {
         if (status === 'DECLINED') return { orderId: '', captureId: '', status };
         const orderId = this.nextId('ORDER');
-        this.orders.set(orderId, { amountCents: i.amountCents, captured: true });
+        this.orders.set(orderId, { amountCents: i.amountCents, approved: true, captured: true });
         return { orderId, captureId: this.capture(orderId, i.amountCents, status), status };
       }),
     );
@@ -116,13 +127,13 @@ export class FakePaypal implements PaypalPort {
     return this.call('createApprovalOrder', [i], () =>
       this.once('createApprovalOrder', i.requestId, () => {
         const orderId = this.nextId('ORDER');
-        this.orders.set(orderId, { amountCents: i.amountCents, captured: false });
+        this.orders.set(orderId, { amountCents: i.amountCents, approved: false, captured: false });
         return { orderId, approveUrl: `https://www.sandbox.paypal.com/checkoutnow?token=${orderId}` };
       }),
     );
   }
 
-  /** Treats every order as approved by the buyer. */
+  /** Captures an approval order once the test has approved it. */
   captureOrder(orderId: string, requestId: string) {
     return this.call('captureOrder', [orderId, requestId], (status) =>
       this.once('captureOrder', requestId, () => {
@@ -130,6 +141,7 @@ export class FakePaypal implements PaypalPort {
         const order = this.orders.get(orderId);
         if (!order) throw apiError(404, path, 'RESOURCE_NOT_FOUND');
         if (order.captured) throw apiError(422, path, 'ORDER_ALREADY_CAPTURED');
+        if (!order.approved) throw apiError(422, path, 'ORDER_NOT_APPROVED');
         if (status === 'DECLINED') return { captureId: '', status };
         order.captured = true;
         return { captureId: this.capture(orderId, order.amountCents, status), status };

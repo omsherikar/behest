@@ -141,6 +141,10 @@ export async function buildListings(deps: LlmDeps, input: BuildInput): Promise<L
       schema: PhotoOutput,
     });
     if (!reply.ok) return reply;
+    // The photo numbers are checked here, after the call, rather than by a refinement on the schema:
+    // with the SDK's zod helper any refinement moves part of the schema it sends into $defs and $ref,
+    // so the request would change. The gap is that the call's llm_calls row records a success for a
+    // reply that this check turns into invalid_output.
     const items = itemsByPhoto(reply.value.items, photos.length);
     if (typeof items === 'string') return { ok: false, error: 'invalid_output', callId: reply.callId, detail: items };
     const claimed = new Set(rows.map((r) => r.sku.toUpperCase()));

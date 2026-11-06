@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
+import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import { describe, expect, it } from 'vitest';
 import {
   type BuildInput,
@@ -8,6 +9,7 @@ import {
   CatalogInputError,
   type ListingDraft,
   type ListingPhoto,
+  PhotoOutput,
 } from '@/lib/catalog/build';
 import { type CatalogRow, parseCatalogCsv } from '@/lib/catalog/csv';
 import { CATALOG_SYSTEM_PROMPT } from '@/lib/catalog/prompts';
@@ -454,6 +456,21 @@ describe('listings from photos', () => {
         ],
       },
     ]);
+  });
+
+  it('sends the photo schema the SDK makes from PhotoOutput, with the photo number as an integer', async () => {
+    const { requests } = await build([photosReply], { images: photos });
+
+    const { format } = requests[0].body.output_config as { format: { schema: object } };
+    expect(format.schema).toEqual(betaZodOutputFormat(PhotoOutput).schema);
+    expect(format.schema).toMatchObject({
+      properties: { items: { items: { properties: { photo: { type: 'integer' } } } } },
+    });
+  });
+
+  it('checks photo numbers after the call, because a refinement would change the schema the SDK sends', () => {
+    expect(betaZodOutputFormat(PhotoOutput).schema).not.toHaveProperty('$defs');
+    expect(betaZodOutputFormat(PhotoOutput.superRefine(() => {})).schema).toHaveProperty('$defs');
   });
 
   it('accepts a WebP photo', async () => {

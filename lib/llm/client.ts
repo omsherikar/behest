@@ -85,6 +85,20 @@ export async function spentTodayUsd(db: Db, now: Date): Promise<number> {
   return Number(row?.total ?? 0);
 }
 
+/**
+ * The spend_cap failure to return instead of calling the model once the logged spend of the UTC day
+ * that contains `now` has reached `capUsd`, or null while it is under the cap.
+ */
+export async function spendCapFailure(
+  db: Db,
+  now: Date,
+  capUsd: number,
+): Promise<Extract<LlmResult<never>, { ok: false }> | null> {
+  const spent = await spentTodayUsd(db, now);
+  if (spent < capUsd) return null;
+  return { ok: false, error: 'spend_cap', callId: null, detail: `Spent $${spent} of the $${capUsd} daily model budget` };
+}
+
 export const DEFAULT_DAILY_CAP_USD = 5;
 
 /** The most the app may spend on model calls per UTC day, from LLM_DAILY_CAP_USD. */

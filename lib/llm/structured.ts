@@ -8,7 +8,7 @@ import type {
   BetaUsage,
 } from '@anthropic-ai/sdk/resources/beta/messages';
 import { z } from 'zod';
-import { dailyCapUsd, type LlmDeps, type LlmFailure, type LlmResult, recordCall, spentTodayUsd } from './client';
+import { dailyCapUsd, type LlmDeps, type LlmFailure, type LlmResult, recordCall, spendCapFailure } from './client';
 import { estimateCostUsd, type TokenUsage } from './prices';
 import { type LlmRoute, ROUTE_HEADER, routeConfig } from './routes';
 
@@ -169,10 +169,8 @@ export async function callStructured<T>(
   const cap = dailyCapUsd(env);
   // Built before the request, so a schema that cannot become a JSON schema throws as the bug it is.
   const format = outputFormat(req.schema);
-  const spent = await spentTodayUsd(deps.db, deps.now());
-  if (spent >= cap) {
-    return { ok: false, error: 'spend_cap', callId: null, detail: `Spent $${spent} of the $${cap} daily model budget` };
-  }
+  const capped = await spendCapFailure(deps.db, deps.now(), cap);
+  if (capped) return capped;
 
   let requestId: string | null = null;
   const captureRequestId: Middleware = async (request, next) => {

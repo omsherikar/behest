@@ -1,6 +1,7 @@
 import type { Middleware } from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import type {
+  BetaContentBlock,
   BetaMessage,
   BetaMessageParam,
   BetaRefusalStopDetails,
@@ -19,25 +20,48 @@ export const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; detail: string };
 
+/** Reply text checked against the schema. */
+function checkText<T>(schema: z.ZodType<T>, text: string): Parsed<T> {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { ok: false, detail: 'The reply was not JSON' };
+  }
+  const parsed = schema.safeParse(data);
+  return parsed.success ? { ok: true, value: parsed.data } : { ok: false, detail: z.prettifyError(parsed.error) };
+}
+
 /**
  * The structured output format for `schema`. The SDK's own parser throws on a reply that does not
  * match, which would lose the stop reason and token usage the call log needs, so this one reports
  * the mismatch as a value instead.
  */
 function outputFormat<T>(schema: z.ZodType<T>) {
-  return {
-    ...betaZodOutputFormat(schema),
-    parse(content: string): Parsed<T> {
-      let data: unknown;
-      try {
-        data = JSON.parse(content);
-      } catch {
-        return { ok: false, detail: 'The reply was not JSON' };
-      }
-      const parsed = schema.safeParse(data);
-      return parsed.success ? { ok: true, value: parsed.data } : { ok: false, detail: z.prettifyError(parsed.error) };
-    },
-  };
+  return { ...betaZodOutputFormat(schema), parse: (text: string) => checkText(schema, text) };
+}
+
+function textOf(blocks: readonly BetaContentBlock[]): string {
+  return blocks.map((block) => (block.type === 'text' ? block.text : '')).join('');
+}
+
+/**
+ * The reply checked against the schema. The SDK parses only the first text block, which is enough
+ * unless a server-side fallback happened. Then the content is the declining model's text, a
+ * `fallback` block, and the fallback model's text, which either continues the declined text or
+ * starts over. So the whole text is tried, then the text after the last fallback alone. Text from
+ * before a fallback is never taken on its own: it came from a model that declined.
+ */
+function readReply<T>(
+  schema: z.ZodType<T>,
+  message: { content: readonly BetaContentBlock[]; parsed_output: Parsed<T> | null },
+): Parsed<T> {
+  const lastFallback = message.content.findLastIndex((block) => block.type === 'fallback');
+  if (lastFallback === -1) return message.parsed_output ?? { ok: false, detail: 'The reply had no text' };
+  const afterFallback = textOf(message.content.slice(lastFallback + 1));
+  if (!afterFallback.trim()) return { ok: false, detail: 'The reply had no text after the fallback' };
+  const whole = checkText(schema, textOf(message.content));
+  return whole.ok ? whole : checkText(schema, afterFallback);
 }
 
 type Outcome<T> = { ok: true; value: T } | { ok: false; error: LlmFailure; detail?: string };
@@ -126,10 +150,8 @@ export async function callStructured<T>(
     if (message.stop_reason !== 'end_turn') {
       return { ok: false, error: 'invalid_output', detail: `The reply stopped with ${message.stop_reason}` };
     }
-    const parsed = message.parsed_output;
-    if (!parsed) return { ok: false, error: 'invalid_output', detail: 'The reply had no text' };
-    if (!parsed.ok) return { ok: false, error: 'invalid_output', detail: parsed.detail };
-    return { ok: true, value: parsed.value };
+    const reply = readReply(req.schema, message);
+    return reply.ok ? reply : { ok: false, error: 'invalid_output', detail: reply.detail };
   })();
 
   const { usage } = message;

@@ -245,6 +245,48 @@ it('honours CLAUDE_MODEL_ and CLAUDE_EFFORT_ overrides', async () => {
   ]);
 });
 
+it('continues an answer the declining model started before a fallback', async () => {
+  const { call } = await setup([
+    messageJson({
+      fallbackFrom: { model: 'claude-opus-5-5', text: '{"answer": ' },
+      model: 'claude-opus-4-8',
+      text: '"yes"}',
+    }),
+  ]);
+
+  expect(await call()).toMatchObject({ ok: true, value: { answer: 'yes' } });
+});
+
+it('takes a complete answer the fallback model restarts after the fallback', async () => {
+  const { call } = await setup([
+    messageJson({
+      fallbackFrom: { model: 'claude-opus-5-5', text: '{"answer": "y' },
+      model: 'claude-opus-4-8',
+      json: { answer: 'no' },
+    }),
+  ]);
+
+  expect(await call()).toMatchObject({ ok: true, value: { answer: 'no' } });
+});
+
+it('never accepts text from before a fallback on its own', async () => {
+  const declined = { model: 'claude-opus-5-5', text: '{"answer": "yes"}' };
+  const { db, call } = await setup([
+    messageJson({ fallbackFrom: declined, model: 'claude-opus-4-8', text: 'Here is what I found.' }),
+    messageJson({ fallbackFrom: declined, model: 'claude-opus-4-8', text: ' ' }),
+    messageJson({ fallbackFrom: declined, model: 'claude-opus-4-8' }),
+  ]);
+
+  const results = [await call(), await call(), await call()];
+
+  expect(results).toEqual([
+    { ok: false, error: 'invalid_output', callId: expect.any(String), detail: 'The reply was not JSON' },
+    { ok: false, error: 'invalid_output', callId: expect.any(String), detail: 'The reply had no text after the fallback' },
+    { ok: false, error: 'invalid_output', callId: expect.any(String), detail: 'The reply had no text after the fallback' },
+  ]);
+  expect((await db.select().from(llmCalls)).map((row) => row.ok)).toEqual([false, false, false]);
+});
+
 it('replays the route stub when LLM_STUB=1 and refuses to in production', async () => {
   vi.stubEnv('LLM_STUB', '1');
   const db = await createTestDb();

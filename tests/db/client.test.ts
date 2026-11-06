@@ -15,6 +15,12 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+it('refuses to fall back to a local database in production', () => {
+  vi.stubEnv('NODE_ENV', 'production');
+  vi.stubEnv('DATABASE_URL', undefined);
+  expect(() => getDb()).toThrow('DATABASE_URL is required in production');
+});
+
 it('logs Postgres pool errors instead of crashing', () => {
   vi.stubEnv('DATABASE_URL', UNREACHABLE_POSTGRES);
   const log = vi.spyOn(console, 'error').mockImplementation(() => {});

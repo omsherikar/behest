@@ -36,6 +36,7 @@ function openDb(): DbHandle {
     pool.on('error', (error) => console.error(`Postgres pool error: ${error.message}`));
     return { db: drizzlePg({ client: pool, schema }), close: () => pool.end() };
   }
+  if (process.env.NODE_ENV === 'production') throw new Error('DATABASE_URL is required in production');
   // PGlite creates its data directory but not the parents.
   mkdirSync(LOCAL_DATA_DIR, { recursive: true });
   const client = new PGlite(LOCAL_DATA_DIR);

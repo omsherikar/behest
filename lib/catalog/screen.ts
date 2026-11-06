@@ -5,13 +5,15 @@
 
 export type Screening = { suspicious: boolean; matches: string[] };
 
+// Whole words only, so `Thai assistant` or `budgeting` is not a match. `disregard` has no closing
+// boundary on purpose: `disregarded` and `disregarding` read as instructions just as well.
 const PATTERNS = [
-  /ignore (all |your |previous )?(instructions|budget|rules|limits)/gi,
-  /(ai|shopping) (agent|assistant)s?/gi,
-  /system prompt/gi,
-  /buy \d+ (of these|units|now)/gi,
-  /disregard/gi,
-  /you must (buy|purchase|order)/gi,
+  /\bignore\s+(?:(?:all|your|previous|prior|the|any|earlier)\s+)*(?:instructions|budget|rules|limits)\b/gi,
+  /\b(?:ai|shopping)\s+(?:agent|assistant)s?\b/gi,
+  /\bsystem\s+prompt\b/gi,
+  /\bbuy\s+\d+\s+(?:of\s+these|units|now)\b/gi,
+  /\bdisregard/gi,
+  /\byou\s+must\s+(?:buy|purchase|order)\b/gi,
 ];
 
 /** Unicode tag characters that mirror printable ASCII. They render as nothing, but models can read them. */

@@ -10,8 +10,8 @@ import { type BilledUsage, billedUsage, FALLBACK_BETA, isMessage, salvagedUsage,
 // request, logged to llm_calls and held to the daily spend cap like any other model call.
 
 /**
- * The stop reasons after which the tool runner sends no further request. After any other reply it
- * runs the tools or resumes the turn, so the spend cap is checked first.
+ * The stop reasons after which the tool runner neither runs tools nor sends another request. After
+ * any other reply it runs the tools or resumes the turn, so the spend cap is checked first.
  */
 const FINAL_STOP_REASONS: ReadonlySet<BetaStopReason | null> = new Set<BetaStopReason | null>([
   null,
@@ -46,10 +46,10 @@ export type ToolLoopRequest = {
 
 /**
  * Runs the route's model over `req.tools` for at most `req.maxTurns` turns, unless today's spend has
- * reached the cap, and returns the last reply. The cap is checked again before every later turn, and
- * a loop it stops returns spend_cap before the tools of the last reply run. A loop that runs out of
- * turns returns its last reply as it is: if that reply called tools, they have run, but the model has
- * not seen their results.
+ * reached the cap, and returns the last reply. The cap is checked again after every reply whose tools
+ * would run, the last permitted turn's included, so once it is reached no tool runs and the loop
+ * returns spend_cap. A loop that runs out of turns returns its last reply as it is: if that reply
+ * called tools, they have run, but the model has not seen their results.
  *
  * Every failure of a request comes back as an LlmResult failure, with the turns before it logged. A
  * refused or cut-off turn ends the loop without running its tool calls, and so does a reply holding
@@ -117,7 +117,7 @@ export async function runToolLoop(
   const turns = runner[Symbol.asyncIterator]();
   let last: { message: BetaMessage; callId: string } | undefined;
   try {
-    for (let count = 1; ; count++) {
+    for (;;) {
       turn = { startedAt: null, requestId: null };
       let response: unknown;
       let message: BetaMessage;
@@ -155,7 +155,8 @@ export async function runToolLoop(
       if (failure) return { ok: false, ...failure, callId };
       last = { message, callId };
 
-      if (count < req.maxTurns && !FINAL_STOP_REASONS.has(message.stop_reason)) {
+      // Also on the last permitted turn, whose tools the runner still runs.
+      if (!FINAL_STOP_REASONS.has(message.stop_reason)) {
         const cappedNow = await spendCapFailure(deps.db, deps.now(), cap);
         if (cappedNow) return cappedNow;
       }

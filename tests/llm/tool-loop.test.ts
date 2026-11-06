@@ -178,6 +178,25 @@ it('returns spend_cap once a turn reaches the cap, before running its tools, and
   ]);
 });
 
+it('returns spend_cap when the last permitted turn reaches the cap, without running its tools', async () => {
+  const { db, fake, run, loop } = await setup(
+    [messageJson({ toolUses: [searchCall], usage: { input_tokens: 1000, output_tokens: 500 } })],
+    { env: { LLM_DAILY_CAP_USD: '0.01' } },
+  );
+
+  const result = await loop({ maxTurns: 1 });
+
+  expect(result).toEqual({
+    ok: false,
+    error: 'spend_cap',
+    callId: null,
+    detail: 'Spent $0.014 of the $0.01 daily model budget',
+  });
+  expect(fake.requests).toHaveLength(1);
+  expect(run).not.toHaveBeenCalled();
+  expect(await db.select().from(llmCalls)).toEqual([expect.objectContaining({ ok: true, costUsd: 0.014 })]);
+});
+
 it('refuses to start once the daily cap is spent', async () => {
   const { db, fake, loop } = await setup([messageJson({ text: 'Done.' })]);
   await recordCall(db, { route: 'intent_check', model: 'claude-opus-5-5', effort: 'low', ok: true, costUsd: 5, createdAt: NOW });

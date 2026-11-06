@@ -36,8 +36,8 @@ export interface ToolkitLike {
   }): Promise<{ content: string | { text: string }[] }>;
 }
 
-/** The official toolkit, signed in with Behest's PayPal app credentials. */
-function toolkitFromEnv(): ToolkitLike {
+/** The official toolkit, signed in with Behest's PayPal app credentials and given only the read actions. */
+export function paypalAgentToolkit(): PayPalAgentToolkit {
   const { PAYPAL_CLIENT_ID: clientId, PAYPAL_CLIENT_SECRET: clientSecret } = process.env;
   if (!clientId || !clientSecret) {
     throw new Error('PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET must be set (see .env.example)');
@@ -51,7 +51,7 @@ function toolkitFromEnv(): ToolkitLike {
  * tool the toolkit does not offer is left out with a warning rather than an error.
  */
 export function paypalReadOnlyTools(opts: { toolkit?: ToolkitLike } = {}): BetaRunnableTool[] {
-  const toolkit = opts.toolkit ?? toolkitFromEnv();
+  const toolkit = opts.toolkit ?? paypalAgentToolkit();
   const offered = toolkit.getTools().map((tool) => tool.function);
 
   const tools: BetaRunnableTool[] = [];
@@ -77,18 +77,20 @@ function claudeTool(toolkit: ToolkitLike, name: string, definition: ToolkitFunct
       const invalid = invalidArgument(definition.parameters, input);
       if (invalid) throw new Error(`${name} was given an invalid ${invalid}`);
 
-      let result;
+      let content: string;
       try {
-        result = await toolkit.handleToolCall({
+        const result = await toolkit.handleToolCall({
           id: `call_${randomUUID()}`,
           type: 'function',
           function: { name, arguments: JSON.stringify(input) },
         });
+        content = textOf(result.content);
       } catch (error) {
-        console.error(`The PayPal Agent Toolkit failed on ${name}: ${describeFailure(error)}`);
-        throw new Error(`PayPal could not return ${name}`);
+        failed(name, describeFailure(error));
       }
-      return wrapUntrusted('paypal', textOf(result.content), MAX_RESULT_CHARS);
+      const reported = reportedFailure(content);
+      if (reported) failed(name, reported);
+      return wrapUntrusted('paypal', content, MAX_RESULT_CHARS);
     },
   });
 }
@@ -106,6 +108,38 @@ function invalidArgument(schema: Record<string, unknown> | undefined, input: Rec
     const value = input[key];
     return typeof value !== 'string' || (typeof pattern === 'string' && !new RegExp(pattern).test(value));
   });
+}
+
+/** Logs why `name` failed and throws the short message the model sees, which never carries the cause. */
+function failed(name: string, cause: string): never {
+  console.error(`The PayPal Agent Toolkit failed on ${name}: ${cause}`);
+  throw new Error(`PayPal could not return ${name}`);
+}
+
+/**
+ * The failure a toolkit result reports, described for the log, or null for a real result. The toolkit
+ * catches its own errors and returns them as content rather than throwing: an LlmError as
+ * `{ ok: false, status, code, message }` with a message it keeps free of secrets, and any other error as
+ * `{ error: { message, type: 'paypal_error' } }`.
+ */
+function reportedFailure(content: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) return null;
+  if (parsed.ok === false) {
+    return `${String(parsed.code)}, status ${String(parsed.status ?? 'unknown')}: ${String(parsed.message)}`;
+  }
+  const { error } = parsed;
+  if (isRecord(error) && error.type === 'paypal_error') return `paypal_error: ${String(error.message)}`;
+  return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**

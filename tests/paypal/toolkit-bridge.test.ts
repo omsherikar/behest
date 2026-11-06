@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { paypalReadOnlyTools, READ_ONLY_TOOLS, type ToolkitLike } from '@/lib/paypal/toolkit-bridge';
+import {
+  paypalAgentToolkit,
+  paypalReadOnlyTools,
+  READ_ONLY_TOOLS,
+  type ToolkitLike,
+} from '@/lib/paypal/toolkit-bridge';
 
 type ToolCall = Parameters<ToolkitLike['handleToolCall']>[0];
 type Reply = Awaited<ReturnType<ToolkitLike['handleToolCall']>>;
@@ -224,5 +229,56 @@ describe('a read-only tool', () => {
     const logged = String(vi.mocked(console.error).mock.calls[0][0]);
     expect(logged).toContain('get_dispute');
     expect(logged).toContain('Failed to fetch access token: invalid_client');
+  });
+});
+
+describe('a read-only tool when PayPal fails', () => {
+  /** What the toolkit returns in place of a result: it reports failures as content and never throws. */
+  const failures = [
+    {
+      shape: 'an LlmError',
+      content: '{"ok":false,"status":404,"code":"PAYPAL_API_HTTP_ERROR","message":"The specified resource does not exist."}',
+      logged: ['PAYPAL_API_HTTP_ERROR', '404', 'The specified resource does not exist.'],
+    },
+    {
+      shape: 'any other error',
+      content: '{"error":{"message":"Failed to fetch access token: Client Authentication failed","type":"paypal_error"}}',
+      logged: ['paypal_error', 'Failed to fetch access token: Client Authentication failed'],
+    },
+  ];
+
+  it.each(failures)('treats $shape reported as content as a failure, and logs it', async ({ content, logged }) => {
+    const { toolkit } = fakeToolkit(['get_dispute'], () => ({ content }));
+
+    await expect(toolNamed(toolkit, 'get_dispute').run({ dispute_id: 'PP-R-QXT-10071254' })).rejects.toThrow(
+      new Error('PayPal could not return get_dispute'),
+    );
+    expect(console.error).toHaveBeenCalledOnce();
+    const log = String(vi.mocked(console.error).mock.calls[0][0]);
+    expect(log).toContain('get_dispute');
+    for (const part of logged) expect(log).toContain(part);
+  });
+
+  it.each(['{"dispute_id":"PP-R-QXT-10071254","status":"OPEN"}', '{"ok":true}', 'null', 'not JSON'])(
+    'returns content that reports no failure, such as %j',
+    async (content) => {
+      expect(await resultFor(content)).toBe(`<untrusted source="paypal">${content}</untrusted>`);
+      expect(console.error).not.toHaveBeenCalled();
+    },
+  );
+
+  it('fails safely when the official toolkit cannot get a PayPal token', async () => {
+    vi.stubEnv('PAYPAL_CLIENT_ID', 'client-id');
+    vi.stubEnv('PAYPAL_CLIENT_SECRET', 'client-secret');
+    const toolkit = paypalAgentToolkit();
+    vi.spyOn(toolkit.client, 'getAccessToken').mockRejectedValue(
+      new Error('Failed to fetch access token: Client Authentication failed'),
+    );
+
+    await expect(toolNamed(toolkit, 'get_dispute').run({ dispute_id: 'PP-R-QXT-10071254' })).rejects.toThrow(
+      new Error('PayPal could not return get_dispute'),
+    );
+    expect(console.error).toHaveBeenCalledOnce();
+    expect(String(vi.mocked(console.error).mock.calls[0][0])).toContain('Client Authentication failed');
   });
 });

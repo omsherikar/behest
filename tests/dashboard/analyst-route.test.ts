@@ -109,6 +109,25 @@ function claudeAnswers(responses: object[]) {
   return fake;
 }
 
+/** The frames of an SSE body, each with its blank line. */
+const frames = (body: string) => body.split('\n\n').filter(Boolean).map((frame) => `${frame}\n\n`);
+
+/** A Claude whose streamed reply sends only what the test sends, when it sends it. */
+function heldClaude() {
+  let send: (text: string) => void = () => {};
+  let end: () => void = () => {};
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      send = (text) => controller.enqueue(new TextEncoder().encode(text));
+      end = () => controller.close();
+    },
+  });
+  const reply: typeof fetch = async () =>
+    new Response(body, { headers: { 'content-type': 'text/event-stream', 'request-id': 'req_held' } });
+  vi.mocked(createClaude).mockReturnValue(new Anthropic({ apiKey: API_KEY, fetch: reply, maxRetries: 0 }));
+  return { send: (text: string) => send(text), end: () => end() };
+}
+
 // The first createTestDb() in a file migrates the template database, which is slow on a busy machine.
 beforeAll(() => createTestDb(), 30_000);
 
@@ -122,6 +141,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
@@ -239,5 +259,27 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
       { type: 'error', error: { type: 'spend_cap', message: 'Spent $5 of the $5 daily model budget' } },
     ]);
     expect(fake.requests).toHaveLength(0);
+  });
+  it('logs one call and no error when the reader cancels while waiting for Claude', async () => {
+    const db = await useDb();
+    const claude = heldClaude();
+    const [start, ...rest] = frames(recordedStream('text-turn'));
+    claude.send(start);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await POST(await request(turn));
+    const reader = response.body!.getReader();
+    await reader.read();
+    // Let the stream ask for the next event, which waits on Claude.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const cancelling = reader.cancel();
+    claude.send(rest.join(''));
+    claude.end();
+    await cancelling;
+
+    expect(await db.select().from(llmCalls)).toEqual([
+      expect.objectContaining({ ok: false, error: 'api_error: The reader stopped before the reply ended' }),
+    ]);
+    expect(errors).not.toHaveBeenCalled();
   });
 });

@@ -138,17 +138,24 @@ async function readBody(request: NextRequest): Promise<string | null> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-/** The events as server-sent events. A reader that goes away stops the reply. */
+/**
+ * The events as server-sent events. A reader that goes away (a closed tab, or Studio's Stop
+ * button) cancels the stream: the reply stops and its call is still logged once, and nothing more
+ * is sent or reported as a failure.
+ */
 function serverSentEvents(events: AsyncGenerator<LlmStreamEvent, void, undefined>): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const frame = (event: LlmStreamEvent) => encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  let cancelled = false;
   return new ReadableStream({
     async pull(controller) {
       try {
         const next = await events.next();
+        if (cancelled) return;
         if (next.done) controller.close();
         else controller.enqueue(frame(next.value));
       } catch (failure) {
+        if (cancelled) return;
         // Misconfiguration or the database: the details go to the server log, not the browser.
         console.error('[analyst] The reply failed:', failure);
         controller.enqueue(frame({ type: 'error', error: { type: 'api_error', message: 'The analyst failed. Try again later.' } }));
@@ -156,7 +163,13 @@ function serverSentEvents(events: AsyncGenerator<LlmStreamEvent, void, undefined
       }
     },
     async cancel() {
-      await events.return();
+      cancelled = true;
+      try {
+        // Stops the reply; the reply logs its call as it ends.
+        await events.return();
+      } catch (failure) {
+        console.error('[analyst] Logging a cancelled reply failed:', failure);
+      }
     },
   });
 }

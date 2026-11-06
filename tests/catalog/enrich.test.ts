@@ -52,6 +52,12 @@ describe('enrichListing', () => {
     }
   });
 
+  it('rejects a draft priced at 0, or at something that is not a number', async () => {
+    for (const priceCents of [0, Number.NaN]) {
+      await expect(enrichListing({ ...draft, priceCents }, searchReturning(product('c3', 300)))).resolves.toBeNull();
+    }
+  });
+
   it('never accepts a first result without a median, even when a later one has one', async () => {
     const search = searchReturning(product('c3-no-usd', null), product('c3-usd', 300));
 

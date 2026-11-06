@@ -69,7 +69,7 @@ describe('the request', () => {
     const { sent } = await compileWith(demoReply);
 
     expect(sent).toMatchObject({
-      system: MANDATE_SYSTEM_PROMPT,
+      system: [{ type: 'text', text: MANDATE_SYSTEM_PROMPT }],
       messages: [{ role: 'user', content: `Today is Friday, 2026-11-06 (UTC).\n\n<mandate>\n${DEMO_TEXT}\n</mandate>` }],
     });
   });

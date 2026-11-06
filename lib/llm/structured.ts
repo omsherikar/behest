@@ -227,11 +227,12 @@ export async function callStructured<T>(
       {
         model,
         max_tokens: maxTokens,
-        system: req.system,
+        // The cache marker ends at the system prompt, the prefix every request on the route shares. A
+        // top-level marker would land on the user message, which differs every time, so each request
+        // would pay to write a cache entry that is never read.
+        system: [{ type: 'text', text: req.system, cache_control: { type: 'ephemeral' } }],
         messages: req.messages,
         output_config: { effort, format },
-        // Automatic prompt caching: the API marks the last cacheable block, so a repeated prefix is read back.
-        cache_control: { type: 'ephemeral' },
         betas: [FALLBACK_BETA],
         fallbacks: 'default',
       },

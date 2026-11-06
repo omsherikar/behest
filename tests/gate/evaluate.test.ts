@@ -375,3 +375,131 @@ it('passes velocity when the mandate sets no limit', () => {
     detail: 'Your mandate sets no limit on how often to buy',
   });
 });
+
+it('asks for a $40 gift set', () => {
+  const result = evaluateGate(input({ proposal: proposal(['GIFT-SET', 1]) }));
+  expect(result.verdict).toBe('ASK');
+  expect(outcome(result, 'ask_threshold')).toEqual({
+    rule: 'ask_threshold',
+    result: 'ask',
+    detail: '$40.00 is over your $25.00 approval limit',
+  });
+});
+
+it('does not ask for a total exactly at the approval limit', () => {
+  const result = evaluateGate(input({ policy: { ...demoPolicy, askAboveCents: 1875 } }));
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'ask_threshold')).toMatchObject({
+    result: 'pass',
+    detail: '$18.75 is within your $18.75 approval limit',
+  });
+});
+
+it('never asks on amount alone when the mandate sets no approval limit', () => {
+  const result = evaluateGate(
+    input({ policy: { ...demoPolicy, askAboveCents: null }, proposal: proposal(['GIFT-SET', 1]) }),
+  );
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'ask_threshold')).toMatchObject({
+    result: 'pass',
+    detail: 'Your mandate sets no approval limit on amount',
+  });
+});
+
+it('asks when one SKU quantity is over 5', () => {
+  const result = evaluateGate(input({ proposal: proposal(['TUR-100', 6]) }));
+  expect(result.verdict).toBe('ASK');
+  expect(result.cart?.totalCents).toBe(2700);
+  expect(outcome(result, 'quantity')).toEqual({
+    rule: 'quantity',
+    result: 'ask',
+    detail: 'Turmeric 100g has a quantity of 6, more than 5',
+  });
+  expect(outcome(result, 'ask_threshold')?.result).toBe('ask');
+});
+
+it('does not ask for a quantity of exactly 5', () => {
+  const result = evaluateGate(input({ proposal: proposal(['TUR-100', 5]) }));
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'quantity')).toMatchObject({ result: 'pass', detail: 'No item has a quantity over 5' });
+});
+
+it('asks when price is over 1.5x the market median', () => {
+  const result = evaluateGate(input({ catalog: catalog('TUR-100', { marketMedianCents: 250 }) }));
+  expect(result.verdict).toBe('ASK');
+  expect(outcome(result, 'price_benchmark')).toEqual({
+    rule: 'price_benchmark',
+    result: 'ask',
+    detail: 'Turmeric 100g costs $4.50, more than 1.5 times its $2.50 market median',
+  });
+});
+
+it('does not ask for a price exactly 1.5x the market median', () => {
+  const result = evaluateGate(input({ catalog: catalog('TUR-100', { marketMedianCents: 300 }) }));
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'price_benchmark')).toMatchObject({
+    result: 'pass',
+    detail: 'Every benchmarked price is within 1.5 times its market median',
+  });
+});
+
+it('skips the benchmark when no median exists', () => {
+  const result = evaluateGate(input());
+  expect(result.verdict).toBe('ALLOW');
+  expect(outcome(result, 'price_benchmark')).toEqual({
+    rule: 'price_benchmark',
+    result: 'skip',
+    detail: 'No market price benchmark exists for these items',
+  });
+});
+
+it('asks when no wallet is linked', () => {
+  const result = evaluateGate(input({ walletLinked: false }));
+  expect(result.verdict).toBe('ASK');
+  expect(outcome(result, 'wallet_linked')).toEqual({
+    rule: 'wallet_linked',
+    result: 'ask',
+    detail: 'No saved PayPal wallet is linked',
+  });
+});
+
+it('always reports all 12 rules in order', () => {
+  const allowed = evaluateGate(input());
+  expect(allowed.outcomes.map((o) => [o.rule, o.result])).toEqual([
+    ['mandate_active', 'pass'],
+    ['cart_valid', 'pass'],
+    ['category_allowed', 'pass'],
+    ['seller_allowed', 'pass'],
+    ['listing_clean', 'pass'],
+    ['per_purchase_max', 'pass'],
+    ['budget_remaining', 'pass'],
+    ['velocity', 'pass'],
+    ['ask_threshold', 'pass'],
+    ['price_benchmark', 'skip'],
+    ['quantity', 'pass'],
+    ['wallet_linked', 'pass'],
+  ]);
+
+  // Without a cart only the rules that do not need one are evaluated; the rest are skipped.
+  const invalid = evaluateGate(input({ proposal: proposal(['NOPE-1', 1]), walletLinked: false }));
+  expect(invalid.verdict).toBe('BLOCK');
+  expect(invalid.outcomes.map((o) => [o.rule, o.result])).toEqual([
+    ['mandate_active', 'pass'],
+    ['cart_valid', 'block'],
+    ['category_allowed', 'skip'],
+    ['seller_allowed', 'skip'],
+    ['listing_clean', 'skip'],
+    ['per_purchase_max', 'skip'],
+    ['budget_remaining', 'skip'],
+    ['velocity', 'skip'],
+    ['ask_threshold', 'skip'],
+    ['price_benchmark', 'skip'],
+    ['quantity', 'skip'],
+    ['wallet_linked', 'ask'],
+  ]);
+
+  for (const { detail } of [...allowed.outcomes, ...invalid.outcomes]) {
+    expect(detail).toMatch(/^\S.*\S$/);
+    expect(detail).not.toContain('\u2014');
+  }
+});

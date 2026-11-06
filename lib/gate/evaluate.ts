@@ -4,7 +4,13 @@ import { formatUsd } from '@/lib/domain/money';
 import type { BudgetPeriod, MandatePolicy } from '@/lib/domain/policy';
 import { PurchaseProposal } from '@/lib/domain/proposal';
 import { maxVerdict, type Verdict } from '@/lib/domain/verdict';
-import { RULESET_VERSION, type RuleId, type RuleOutcome } from './rules';
+import {
+  MAX_QTY_BEFORE_ASK,
+  PRICE_ANOMALY_RATIO,
+  RULESET_VERSION,
+  type RuleId,
+  type RuleOutcome,
+} from './rules';
 
 // The policy gate (architecture section 5.1): plain TypeScript with no model in it, deciding
 // ALLOW, ASK or BLOCK for one purchase and recording why. Prices, titles and categories come
@@ -51,6 +57,7 @@ export type GateResult = {
 
 type Check = Omit<RuleOutcome, 'rule'>;
 const pass = (detail: string): Check => ({ result: 'pass', detail });
+const ask = (detail: string): Check => ({ result: 'ask', detail });
 const block = (detail: string): Check => ({ result: 'block', detail });
 const skip = (detail: string): Check => ({ result: 'skip', detail });
 
@@ -76,6 +83,9 @@ const CART_RULES: [RuleId, (context: CartContext) => Check][] = [
   ['per_purchase_max', perPurchaseMax],
   ['budget_remaining', budgetRemaining],
   ['velocity', velocity],
+  ['ask_threshold', askThreshold],
+  ['price_benchmark', priceBenchmark],
+  ['quantity', quantity],
 ];
 
 const NOT_CHECKED = skip('Not checked because the cart is not valid');
@@ -90,6 +100,7 @@ export function evaluateGate(input: GateInput): GateResult {
   ];
   const context: CartContext | null = built.cart && { input, policy, cart: built.cart, entries: built.entries };
   for (const [rule, check] of CART_RULES) outcomes.push({ rule, ...(context ? check(context) : NOT_CHECKED) });
+  outcomes.push({ rule: 'wallet_linked', ...walletLinked(input) });
   return {
     verdict: maxVerdict(...outcomes.map((o) => VERDICT_OF[o.result])),
     outcomes,
@@ -204,4 +215,42 @@ function velocity({ policy, input }: CartContext): Check {
   const recent = input.recentPurchaseTimes.filter((t) => t.getTime() > windowStart).length;
   const limit = `limit of ${plural(maxPurchases, 'purchase')} in ${plural(windowHours, 'hour')}`;
   return recent < maxPurchases ? pass(`Within your ${limit}`) : block(`Your ${limit} is already reached`);
+}
+
+function askThreshold({ cart, policy }: CartContext): Check {
+  if (policy.askAboveCents === null) return pass('Your mandate sets no approval limit on amount');
+  const total = formatUsd(cart.totalCents);
+  const limit = `${formatUsd(policy.askAboveCents)} approval limit`;
+  return atOrBelow(cart.totalCents, policy.askAboveCents)
+    ? pass(`${total} is within your ${limit}`)
+    : ask(`${total} is over your ${limit}`);
+}
+
+function priceBenchmark({ entries }: CartContext): Check {
+  let benchmarked = false;
+  // The entries' prices are the cart's prices, since the cart was built from them.
+  for (const { title, priceCents, marketMedianCents } of entries) {
+    if (marketMedianCents === null) continue;
+    benchmarked = true;
+    if (!atOrBelow(priceCents, PRICE_ANOMALY_RATIO * marketMedianCents)) {
+      const price = formatUsd(priceCents);
+      const median = formatUsd(marketMedianCents);
+      return ask(`${title} costs ${price}, more than ${PRICE_ANOMALY_RATIO} times its ${median} market median`);
+    }
+  }
+  return benchmarked
+    ? pass(`Every benchmarked price is within ${PRICE_ANOMALY_RATIO} times its market median`)
+    : skip('No market price benchmark exists for these items');
+}
+
+function quantity({ cart }: CartContext): Check {
+  const bulk = cart.items.find((i) => !atOrBelow(i.quantity, MAX_QTY_BEFORE_ASK));
+  return bulk
+    ? ask(`${bulk.title} has a quantity of ${bulk.quantity}, more than ${MAX_QTY_BEFORE_ASK}`)
+    : pass(`No item has a quantity over ${MAX_QTY_BEFORE_ASK}`);
+}
+
+function walletLinked({ walletLinked }: GateInput): Check {
+  // Compared strictly, so a missing value asks the buyer instead of passing.
+  return walletLinked === true ? pass('A saved PayPal wallet is linked') : ask('No saved PayPal wallet is linked');
 }

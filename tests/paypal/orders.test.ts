@@ -35,8 +35,8 @@ const unprocessable = (path: string, issue: string): FakeRoute => ({
 
 type OrderWithCapture = { purchase_units: { payments: { captures: { status: string }[] } }[] };
 
-/** The order with its first capture's status replaced. */
-function withCaptureStatus<T extends OrderWithCapture>(order: T, status: string): T {
+/** The order with its first capture's status replaced, or removed when `status` is undefined. */
+function withCaptureStatus<T extends OrderWithCapture>(order: T, status: string | undefined): T {
   const [unit] = order.purchase_units;
   const [capture] = unit.payments.captures;
   return { ...order, purchase_units: [{ ...unit, payments: { captures: [{ ...capture, status }] } }] };
@@ -160,6 +160,20 @@ describe('captureOrder', () => {
     expect(await captureOrder(APPROVAL_ORDER_ID, requestId)).toEqual({ captureId: '2FN86302RL1957468', status });
   });
 
+  it.each(['REFUNDED', 'PARTIALLY_REFUNDED'])('fails, naming the order, on a %s capture, since money may have moved', async (captureStatus) => {
+    const body = withCaptureStatus(captureCompleted, captureStatus);
+    stubFetch([{ method: 'POST', path: APPROVAL_CAPTURE, status: 201, body }]);
+
+    await expect(captureOrder(APPROVAL_ORDER_ID, requestId)).rejects.toThrow(new RegExp(`9GT47180MC2365043.*status ${captureStatus}`));
+  });
+
+  it('fails, naming the order, on a capture with no status', async () => {
+    const body = withCaptureStatus(captureCompleted, undefined);
+    stubFetch([{ method: 'POST', path: APPROVAL_CAPTURE, status: 201, body }]);
+
+    await expect(captureOrder(APPROVAL_ORDER_ID, requestId)).rejects.toThrow(/9GT47180MC2365043.*no status/);
+  });
+
   it('reports a declined instrument as declined, with no capture', async () => {
     stubFetch([unprocessable(APPROVAL_CAPTURE, 'INSTRUMENT_DECLINED')]);
 
@@ -232,6 +246,18 @@ describe('chargeSavedWallet', () => {
     stubFetch([{ method: 'POST', path: ORDERS, status: 201, body }]);
 
     expect(await chargeSavedWallet(chargeInput)).toEqual({ ...charged, status });
+  });
+
+  it('fails, naming the order, when a replayed charge returns a refunded capture', async () => {
+    stubFetch([{ method: 'POST', path: ORDERS, status: 201, body: withCaptureStatus(chargeCompleted, 'REFUNDED') }]);
+
+    await expect(chargeSavedWallet(chargeInput)).rejects.toThrow(/3HV10845KS2851937.*status REFUNDED/);
+  });
+
+  it('fails, naming the order, when the capture has no status', async () => {
+    stubFetch([{ method: 'POST', path: ORDERS, status: 201, body: withCaptureStatus(chargeCompleted, undefined) }]);
+
+    await expect(chargeSavedWallet(chargeInput)).rejects.toThrow(/3HV10845KS2851937.*no status/);
   });
 
   it.each(['APPROVED', 'CREATED'])('captures an order that comes back %s, keyed on the charge request id', async (status) => {

@@ -57,6 +57,10 @@ it('prices a model it has no price for at the highest rates', () => {
   expect(estimateCostUsd('claude-unknown-1', cached)).toBe(13);
 });
 
+it('prices an attempt by a model it cannot name at the highest rates', () => {
+  expect(estimateCostUsd(null, { input_tokens: 1000, output_tokens: 500 })).toBe(0.035);
+});
+
 it('knows which models have a price', () => {
   expect(hasPrice('claude-haiku-5-5')).toBe(true);
   expect(hasPrice('claude-unknown-1')).toBe(false);

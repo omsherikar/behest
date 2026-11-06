@@ -36,10 +36,11 @@ const HIGHEST_PRICE: ModelPrice = {
 
 /**
  * The estimated cost of one model attempt in US dollars, rounded to the micro-dollar the log stores.
- * A model without a price is charged the highest rates, so tokens already spent are never left out.
+ * A model without a price, or `null` for a model that cannot be named, is charged the highest rates,
+ * so tokens already spent are never left out.
  */
-export function estimateCostUsd(model: string, usage: TokenUsage): number {
-  const price = hasPrice(model) ? PRICES[model] : HIGHEST_PRICE;
+export function estimateCostUsd(model: string | null, usage: TokenUsage): number {
+  const price = model !== null && hasPrice(model) ? PRICES[model] : HIGHEST_PRICE;
   const perMillion =
     usage.input_tokens * price.input +
     usage.output_tokens * price.output +

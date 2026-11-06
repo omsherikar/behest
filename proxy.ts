@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { getPersona, requiredPersona, SESSION_COOKIE } from '@/lib/session';
+import { getPersona, mayOpen, requiredPersona, SESSION_COOKIE } from '@/lib/session';
 
 // Sends visitors without the matching persona back to the persona picker. This is an optimistic
 // check on the signed cookie only; routes that read or change data check the persona themselves.
@@ -8,7 +8,7 @@ export async function proxy(request: NextRequest) {
   if (!required) return NextResponse.next();
 
   const persona = await getPersona(request.cookies.get(SESSION_COOKIE)?.value);
-  if (persona === required) return NextResponse.next();
+  if (mayOpen(required, persona)) return NextResponse.next();
   return NextResponse.redirect(new URL('/', request.url));
 }
 

@@ -53,9 +53,13 @@ export function sessionCookieOptions() {
   };
 }
 
+/** Who may open a page: one persona, or `any` for every persona. */
+export type PageAccess = Persona | 'any';
+
 // The first path segment of each persona's pages. The starter's PayPal data pages show the whole
-// merchant account, so they belong to the operator.
-const SECTION_PERSONA = new Map<string, Persona>([
+// merchant account, so they belong to the operator. The dashboard scopes its data to whoever is
+// viewing, so every persona may open it.
+const SECTION_ACCESS = new Map<string, PageAccess>([
   ['buyer', 'buyer'],
   ['seller', 'seller'],
   ['ops', 'operator'],
@@ -64,9 +68,17 @@ const SECTION_PERSONA = new Map<string, Persona>([
   ['invoices', 'operator'],
   ['transactions', 'operator'],
   ['balances', 'operator'],
+  ['dashboard', 'any'],
 ]);
 
-/** The persona a page path needs, or null when everyone may open it. Used by proxy.ts. */
-export function requiredPersona(pathname: string): Persona | null {
-  return SECTION_PERSONA.get(pathname.split('/')[1]) ?? null;
+/** Who may open a page path, or null when everyone may, signed in or not. Used by proxy.ts. */
+export function requiredPersona(pathname: string): PageAccess | null {
+  return SECTION_ACCESS.get(pathname.split('/')[1]) ?? null;
+}
+
+/** Whether a visitor with `persona` (null when signed out) may open a page that needs `required`. */
+export function mayOpen(required: PageAccess | null, persona: Persona | null): boolean {
+  if (required === null) return true;
+  if (persona === null) return false;
+  return required === 'any' || required === persona;
 }

@@ -1,6 +1,6 @@
 import { SignJWT } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getPersona, isPersona, PERSONAS, requiredPersona, sessionCookie, sessionCookieOptions } from '@/lib/session';
+import { getPersona, isPersona, mayOpen, PERSONAS, requiredPersona, sessionCookie, sessionCookieOptions } from '@/lib/session';
 
 const SECRET = 'test-session-secret-at-least-32-characters';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -113,14 +113,35 @@ describe('requiredPersona', () => {
     ['/invoices', 'operator'],
     ['/transactions', 'operator'],
     ['/balances', 'operator'],
+    ['/dashboard', 'any'],
+    ['/dashboard/', 'any'],
   ])('%s needs the %s persona', (pathname, persona) => {
     expect(requiredPersona(pathname)).toBe(persona);
   });
 
-  it.each(['/', '/dashboard', '/api/session', '/buyers', '/sellerx', '/operations', '/opsx/disputes', '/shop/buyer', '/constructor', '/__proto__'])(
+  it.each(['/', '/dashboards', '/api/session', '/buyers', '/sellerx', '/operations', '/opsx/disputes', '/shop/buyer', '/constructor', '/__proto__'])(
     '%s is open to everyone',
     (pathname) => {
       expect(requiredPersona(pathname)).toBeNull();
     },
   );
+});
+
+describe('mayOpen', () => {
+  it('lets anyone, signed in or not, open a page with no requirement', () => {
+    expect(mayOpen(null, null)).toBe(true);
+    for (const persona of PERSONAS) expect(mayOpen(null, persona)).toBe(true);
+  });
+
+  it('lets every persona open a page open to any persona, but not a signed-out visitor', () => {
+    for (const persona of PERSONAS) expect(mayOpen('any', persona)).toBe(true);
+    expect(mayOpen('any', null)).toBe(false);
+  });
+
+  it('lets only the matching persona open a persona page', () => {
+    expect(mayOpen('seller', 'seller')).toBe(true);
+    expect(mayOpen('seller', 'buyer')).toBe(false);
+    expect(mayOpen('seller', 'operator')).toBe(false);
+    expect(mayOpen('seller', null)).toBe(false);
+  });
 });

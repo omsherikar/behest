@@ -30,6 +30,17 @@ function allowedSellers({ allow, deny }: MandatePolicy['merchants']): string {
   return `Only these sellers: ${allow.join(', ')}.`;
 }
 
+/**
+ * The UTC instant the mandate ends. An expiry at the last millisecond of a UTC day reads as that
+ * date alone; any other instant also shows its UTC time, so the buyer never reads a whole day the
+ * gate does not allow.
+ */
+function endDate(expiresAt: string): string {
+  const iso = new Date(expiresAt).toISOString();
+  const date = iso.slice(0, 10);
+  return iso.endsWith('T23:59:59.999Z') ? `Ends on ${date}.` : `Ends on ${date} at ${iso.slice(11, 16)} UTC.`;
+}
+
 /** The readback of a policy, one sentence per line. */
 export function renderReadback(policy: MandatePolicy): string[] {
   const { budget, categories, merchants, velocity, expiresAt } = policy;
@@ -46,7 +57,6 @@ export function renderReadback(policy: MandatePolicy): string[] {
     velocity === null
       ? 'No limit on how often it buys.'
       : `At most ${plural(velocity.maxPurchases, 'purchase')} in any ${plural(velocity.windowHours, 'hour')}.`,
-    // The gate compares the expiry instant itself, so the date shown is that instant's UTC date.
-    expiresAt === null ? 'No end date.' : `Ends on ${new Date(expiresAt).toISOString().slice(0, 10)}.`,
+    expiresAt === null ? 'No end date.' : endDate(expiresAt),
   ];
 }

@@ -35,7 +35,7 @@ it('renders every line in a fixed order when every field is set', () =>
     readbackWith({
       merchants: { allow: ['ravi-spices'], deny: ['bad-shop'] },
       velocity: { maxPurchases: 2, windowHours: 24 },
-      expiresAt: '2026-12-31T23:59:59Z',
+      expiresAt: '2026-12-31T23:59:59.999Z',
     }),
   ).toEqual([
     'Your agent can spend up to $60.00 per calendar month (UTC).',
@@ -129,14 +129,26 @@ describe('velocity', () => {
 });
 
 describe('end date', () => {
-  it('reads an expiry as its date', () =>
-    expect(readbackWith({ expiresAt: '2026-12-31T23:59:59Z' })).toEqual(demoWithLine(7, 'Ends on 2026-12-31.')));
+  it('reads an expiry at the last millisecond of a UTC day as that date', () =>
+    expect(readbackWith({ expiresAt: '2026-12-31T23:59:59.999Z' })).toEqual(demoWithLine(7, 'Ends on 2026-12-31.')));
 
-  it('uses the UTC date whatever the server time zone', () => {
+  it('adds the UTC time to any other expiry', () => {
+    expect(readbackWith({ expiresAt: '2026-12-31T00:00:00Z' })).toEqual(
+      demoWithLine(7, 'Ends on 2026-12-31 at 00:00 UTC.'),
+    );
+    expect(readbackWith({ expiresAt: '2026-12-31T14:05:00Z' })[7]).toBe('Ends on 2026-12-31 at 14:05 UTC.');
+    expect(readbackWith({ expiresAt: '2026-12-31T09:30:00Z' })[7]).toBe('Ends on 2026-12-31 at 09:30 UTC.');
+  });
+
+  it('adds the time to an expiry one millisecond before the end of the day', () =>
+    expect(readbackWith({ expiresAt: '2026-12-31T23:59:59.998Z' })[7]).toBe('Ends on 2026-12-31 at 23:59 UTC.'));
+
+  it('uses the UTC date and time whatever the server time zone', () => {
     process.env.TZ = 'Asia/Kolkata';
-    expect(readbackWith({ expiresAt: '2026-12-31T23:30:00Z' })[7]).toBe('Ends on 2026-12-31.');
+    expect(readbackWith({ expiresAt: '2026-12-31T23:59:59.999Z' })[7]).toBe('Ends on 2026-12-31.');
+    expect(readbackWith({ expiresAt: '2026-12-31T23:30:00Z' })[7]).toBe('Ends on 2026-12-31 at 23:30 UTC.');
     process.env.TZ = 'America/Los_Angeles';
-    expect(readbackWith({ expiresAt: '2027-01-01T00:30:00Z' })[7]).toBe('Ends on 2027-01-01.');
+    expect(readbackWith({ expiresAt: '2027-01-01T00:30:00Z' })[7]).toBe('Ends on 2027-01-01 at 00:30 UTC.');
   });
 });
 
@@ -147,7 +159,7 @@ describe('covers every field the gate enforces', () => {
     ...demoPolicy,
     merchants: { allow: ['ravi-spices'], deny: ['bad-shop'] },
     velocity: { maxPurchases: 2, windowHours: 24 },
-    expiresAt: '2026-12-31T23:59:59Z',
+    expiresAt: '2026-12-31T23:59:59.999Z',
   });
   const { merchants } = base;
 
@@ -184,7 +196,9 @@ describe('covers every field the gate enforces', () => {
     { field: 'velocity', to: 'null', policy: { ...base, velocity: null } },
     { field: 'velocity.maxPurchases', to: '3', policy: { ...base, velocity: { maxPurchases: 3, windowHours: 24 } } },
     { field: 'velocity.windowHours', to: '48', policy: { ...base, velocity: { maxPurchases: 2, windowHours: 48 } } },
-    { field: 'expiresAt', to: 'another date', policy: { ...base, expiresAt: '2027-01-15T00:00:00Z' } },
+    { field: 'expiresAt', to: 'another date', policy: { ...base, expiresAt: '2027-01-15T23:59:59.999Z' } },
+    { field: 'expiresAt', to: 'the start of the same day', policy: { ...base, expiresAt: '2026-12-31T00:00:00Z' } },
+    { field: 'expiresAt', to: 'one millisecond earlier', policy: { ...base, expiresAt: '2026-12-31T23:59:59.998Z' } },
     { field: 'expiresAt', to: 'null', policy: { ...base, expiresAt: null } },
   ];
 
@@ -215,7 +229,8 @@ it('ends every line with a full stop and uses no em dash', () => {
     {},
     { budget: { amountCents: 6000, period: 'once' }, askAboveCents: null },
     { categories: { allow: null, deny: [] }, merchants: { allow: [], deny: ['bad-shop'] } },
-    { velocity: { maxPurchases: 1, windowHours: 1 }, expiresAt: '2026-12-31T23:59:59Z' },
+    { velocity: { maxPurchases: 1, windowHours: 1 }, expiresAt: '2026-12-31T14:05:00Z' },
+    { expiresAt: '2026-12-31T23:59:59.999Z' },
   ];
   const lines = policies.flatMap((changes) => readbackWith(changes));
   expect(lines.length).toBeGreaterThan(policies.length);

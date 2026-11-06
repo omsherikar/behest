@@ -6,7 +6,7 @@ import { llmCalls } from '@/lib/db/schema';
 import { createClaude, recordCall } from '@/lib/llm/client';
 import { LLM_ROUTES, type LlmRoute } from '@/lib/llm/routes';
 import { callStructured } from '@/lib/llm/structured';
-import { fakeClaude, messageJson } from '@/tests/helpers/fake-claude';
+import { fakeClaude, iteration, messageJson } from '@/tests/helpers/fake-claude';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 const NOW = new Date('2026-11-06T12:00:00Z');
@@ -233,7 +233,13 @@ it('maps a successful response that is not a message to api_error and logs it', 
 
 it('honours CLAUDE_MODEL_ and CLAUDE_EFFORT_ overrides', async () => {
   const { db, fake, call } = await setup(
-    [messageJson({ json: { answer: 'yes' }, usage: { input_tokens: 1000, output_tokens: 500 } })],
+    [
+      messageJson({
+        json: { answer: 'yes' },
+        model: 'claude-sonnet-5-5',
+        usage: { input_tokens: 1000, output_tokens: 500 },
+      }),
+    ],
     { env: { CLAUDE_MODEL_MANDATE_COMPILE: 'claude-sonnet-5-5', CLAUDE_EFFORT_MANDATE_COMPILE: 'low' } },
   );
 
@@ -285,6 +291,34 @@ it('never accepts text from before a fallback on its own', async () => {
     { ok: false, error: 'invalid_output', callId: expect.any(String), detail: 'The reply had no text after the fallback' },
   ]);
   expect((await db.select().from(llmCalls)).map((row) => row.ok)).toEqual([false, false, false]);
+});
+
+it('prices each fallback hop at its own model and logs the model that served the reply', async () => {
+  const { db, call } = await setup(
+    [
+      messageJson({
+        fallbackFrom: { model: 'claude-sonnet-5-5' },
+        model: 'claude-sonnet-5',
+        json: { answer: 'yes' },
+        usage: {
+          input_tokens: 1000,
+          output_tokens: 500,
+          iterations: [
+            iteration('message', 'claude-sonnet-5-5', { input_tokens: 1000, output_tokens: 100 }),
+            iteration('fallback_message', 'claude-sonnet-5', { input_tokens: 1000, output_tokens: 500 }),
+          ],
+        },
+      }),
+    ],
+    { env: { CLAUDE_MODEL_MANDATE_COMPILE: 'claude-sonnet-5-5' } },
+  );
+
+  expect(await call()).toMatchObject({ ok: true, value: { answer: 'yes' } });
+  // claude-sonnet-5-5 at its own rates: 1000 x $2 + 100 x $10 per million = $0.003.
+  // claude-sonnet-5 has no price, so the highest rates: 1000 x $4 + 500 x $20 per million = $0.014.
+  expect(await db.select().from(llmCalls)).toEqual([
+    expect.objectContaining({ model: 'claude-sonnet-5', inputTokens: 2000, outputTokens: 600, costUsd: 0.017 }),
+  ]);
 });
 
 it('replays the route stub when LLM_STUB=1 and refuses to in production', async () => {

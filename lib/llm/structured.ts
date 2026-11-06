@@ -9,7 +9,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/beta/messages';
 import { z } from 'zod';
 import { dailyCapUsd, type LlmDeps, type LlmFailure, type LlmResult, recordCall, spentTodayUsd } from './client';
-import { estimateCostUsd } from './prices';
+import { estimateCostUsd, type TokenUsage } from './prices';
 import { type LlmRoute, ROUTE_HEADER, routeConfig } from './routes';
 
 // One model call whose reply must match a zod schema. Every way it can go wrong comes back as an
@@ -74,6 +74,43 @@ function isMessage(message: Pick<BetaMessage, 'model' | 'usage'>): boolean {
     typeof usage?.input_tokens === 'number' &&
     typeof usage.output_tokens === 'number'
   );
+}
+
+/** What a reply cost, as logged in its llm_calls row. */
+export type BilledUsage = {
+  /** The model that served the reply. */
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: number;
+};
+
+/**
+ * The tokens and estimated cost of a reply. After a server-side fallback the top-level usage covers
+ * only the model that served the reply, and `usage.iterations` lists every model's attempt, so each
+ * attempt is priced at its own model's rates and the counts are summed. An attempt that names no
+ * model is the requested model's.
+ */
+export function billedUsage(message: Pick<BetaMessage, 'model' | 'usage'>, requestedModel: string): BilledUsage {
+  const iterations = message.usage.iterations ?? [];
+  const attempts: { model: string; usage: TokenUsage }[] =
+    iterations.length > 0
+      ? iterations.map((usage) => ({ model: ('model' in usage && usage.model) || requestedModel, usage }))
+      : [{ model: message.model, usage: message.usage }];
+  const total = (count: (usage: TokenUsage) => number) =>
+    attempts.reduce((sum, attempt) => sum + count(attempt.usage), 0);
+  const costUsd = attempts.reduce((sum, attempt) => sum + estimateCostUsd(attempt.model, attempt.usage), 0);
+  return {
+    model: message.model,
+    inputTokens: total((usage) => usage.input_tokens),
+    outputTokens: total((usage) => usage.output_tokens),
+    cacheReadTokens: total((usage) => usage.cache_read_input_tokens ?? 0),
+    cacheWriteTokens: total((usage) => usage.cache_creation_input_tokens ?? 0),
+    // Each attempt's cost is already whole micro-dollars; rounding drops the float error of the sum.
+    costUsd: Math.round(costUsd * 1_000_000) / 1_000_000,
+  };
 }
 
 function refusalDetail(details: BetaRefusalStopDetails | null): string | undefined {
@@ -154,14 +191,9 @@ export async function callStructured<T>(
     return reply.ok ? reply : { ok: false, error: 'invalid_output', detail: reply.detail };
   })();
 
-  const { usage } = message;
   const callId = await recordCall(deps.db, {
     ...logged(deps.now()),
-    inputTokens: usage.input_tokens,
-    outputTokens: usage.output_tokens,
-    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
-    cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
-    costUsd: estimateCostUsd(model, usage),
+    ...billedUsage(message, model),
     stopReason: message.stop_reason,
     ok: outcome.ok,
     error: outcome.ok ? null : [outcome.error, outcome.detail].filter(Boolean).join(': '),

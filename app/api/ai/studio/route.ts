@@ -8,7 +8,7 @@ import { getDb } from '@/lib/db/client';
 import { createClaude } from '@/lib/llm/client';
 import { type LlmStreamEvent, type StreamRequest, streamReply } from '@/lib/llm/stream';
 import { type Release, takeSlot } from '@/lib/inflight';
-import { rateLimit, STUDIO_ANALYST_LIMIT } from '@/lib/ratelimit';
+import { clientAddress, rateLimit, STUDIO_ANALYST_LIMIT } from '@/lib/ratelimit';
 import { getPersona, SESSION_COOKIE } from '@/lib/session';
 
 // The dashboard analyst. AG Studio's adapter (app/dashboard/studio/anthropic-adapter.ts) runs in
@@ -117,11 +117,6 @@ function readTurn(text: string): { ok: true; turn: StreamRequest } | { ok: false
 function withToday(system: string, now: Date): string {
   const today = `Today is ${now.toISOString().slice(0, 10)} (UTC). Weeks start on Monday.`;
   return system ? `${system}\n\n${today}` : today;
-}
-
-/** The client's address as the hosting platform reports it, which sets both headers itself. */
-function clientAddress(request: NextRequest): string {
-  return request.headers.get('x-real-ip') ?? request.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
 }
 
 /**

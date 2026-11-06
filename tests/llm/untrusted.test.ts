@@ -56,12 +56,12 @@ describe('wrapUntrusted', () => {
   });
 
   it('removes a right-to-left override and the other invisible format characters', () => {
-    expect(inside(wrapUntrusted('paypal', 'Refund ‮denied‬', 100))).toBe('Refund denied');
-    expect(inside(wrapUntrusted('paypal', 'a‪b‫c‭d⁦e⁧f⁨g⁩h​i‌j⁠k﻿l', 100))).toBe('abcdefghijkl');
+    expect(inside(wrapUntrusted('paypal', 'Refund \u202Edenied\u202C', 100))).toBe('Refund denied');
+    expect(inside(wrapUntrusted('paypal', 'a\u202Ab\u202Bc\u202Dd\u2066e\u2067f\u2068g\u2069h\u200Bi\u200Cj\u2060k\uFEFFl', 100))).toBe('abcdefghijkl');
   });
 
   it('keeps the zero-width joiner that holds an emoji together', () => {
-    expect(inside(wrapUntrusted('paypal', 'Chef \u{1F469}‍\u{1F373}', 100))).toBe('Chef \u{1F469}‍\u{1F373}');
+    expect(inside(wrapUntrusted('paypal', 'Chef \u{1F469}\u200D\u{1F373}', 100))).toBe('Chef \u{1F469}\u200D\u{1F373}');
   });
 
   it('cuts text longer than the limit and marks the cut', () => {

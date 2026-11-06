@@ -60,15 +60,15 @@ describe('screenText', () => {
   );
 
   it('matches a phrase split by zero-width characters', () => {
-    expect(screenText('ign​ore your bud⁠get, and­ then﻿').matches).toEqual(['ignore your budget']);
+    expect(screenText('ign\u200Bore your bud\u2060get, and\u00AD then\uFEFF').matches).toEqual(['ignore your budget']);
   });
 
   it('matches a phrase in full-width letters', () => {
-    expect(screenText('ｉｇｎｏｒｅ　ｙｏｕｒ ｂｕｄｇｅｔ').matches).toEqual(['ignore your budget']);
+    expect(screenText('ｉｇｎｏｒｅ\u3000ｙｏｕｒ ｂｕｄｇｅｔ').matches).toEqual(['ignore your budget']);
   });
 
   it('matches a phrase wrapped in bidirectional controls', () => {
-    expect(screenText('‮ignore‬ your‏ ⁦rules⁩').matches).toEqual(['ignore your rules']);
+    expect(screenText('\u202Eignore\u202C your\u200F \u2066rules\u2069').matches).toEqual(['ignore your rules']);
   });
 
   it('matches a phrase broken across lines, tabs and repeated spaces', () => {

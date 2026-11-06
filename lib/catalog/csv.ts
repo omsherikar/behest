@@ -126,7 +126,7 @@ function readRow(record: CsvRecord, width: number, columns: Columns, claimed: Se
 
 /** Every record in the file that has a non-blank cell, with the line it starts on. */
 function readRecords(text: string): CsvRecord[] {
-  const source = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+  const source = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   const records: CsvRecord[] = [];
   let start = 0;
   let line = 1;

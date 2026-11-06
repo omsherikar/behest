@@ -1,0 +1,92 @@
+{
+  "id": "9GT47180MC2365043",
+  "status": "COMPLETED",
+  "payment_source": {
+    "paypal": {
+      "email_address": "buyer@example.com",
+      "account_id": "QJ7XKB4RZ2M5N",
+      "account_status": "VERIFIED",
+      "name": {
+        "given_name": "Test",
+        "surname": "Buyer"
+      },
+      "address": {
+        "country_code": "US"
+      }
+    }
+  },
+  "purchase_units": [
+    {
+      "reference_id": "default",
+      "payments": {
+        "captures": [
+          {
+            "id": "2FN86302RL1957468",
+            "status": "COMPLETED",
+            "amount": {
+              "currency_code": "USD",
+              "value": "64.00"
+            },
+            "final_capture": true,
+            "seller_protection": {
+              "status": "ELIGIBLE",
+              "dispute_categories": ["ITEM_NOT_RECEIVED", "UNAUTHORIZED_TRANSACTION"]
+            },
+            "seller_receivable_breakdown": {
+              "gross_amount": {
+                "currency_code": "USD",
+                "value": "64.00"
+              },
+              "paypal_fee": {
+                "currency_code": "USD",
+                "value": "2.72"
+              },
+              "net_amount": {
+                "currency_code": "USD",
+                "value": "61.28"
+              }
+            },
+            "invoice_id": "a71e4c92-0d5b-4e83-b6f1-2c9d8e7a5f14",
+            "links": [
+              {
+                "href": "https://api-m.sandbox.paypal.com/v2/payments/captures/2FN86302RL1957468",
+                "rel": "self",
+                "method": "GET"
+              },
+              {
+                "href": "https://api-m.sandbox.paypal.com/v2/payments/captures/2FN86302RL1957468/refund",
+                "rel": "refund",
+                "method": "POST"
+              },
+              {
+                "href": "https://api-m.sandbox.paypal.com/v2/checkout/orders/9GT47180MC2365043",
+                "rel": "up",
+                "method": "GET"
+              }
+            ],
+            "create_time": "2026-11-06T15:21:47Z",
+            "update_time": "2026-11-06T15:21:47Z"
+          }
+        ]
+      }
+    }
+  ],
+  "payer": {
+    "name": {
+      "given_name": "Test",
+      "surname": "Buyer"
+    },
+    "email_address": "buyer@example.com",
+    "payer_id": "QJ7XKB4RZ2M5N",
+    "address": {
+      "country_code": "US"
+    }
+  },
+  "links": [
+    {
+      "href": "https://api-m.sandbox.paypal.com/v2/checkout/orders/9GT47180MC2365043",
+      "rel": "self",
+      "method": "GET"
+    }
+  ]
+}

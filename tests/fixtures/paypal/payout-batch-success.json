@@ -1,0 +1,63 @@
+{
+  "batch_header": {
+    "payout_batch_id": "7KQ2XWB9MNZ4E",
+    "batch_status": "SUCCESS",
+    "time_created": "2026-11-06T16:02:11Z",
+    "time_completed": "2026-11-06T16:02:26Z",
+    "time_closed": "2026-11-06T16:02:26Z",
+    "sender_batch_header": {
+      "sender_batch_id": "5d0c7a1e-3b84-4f2a-9e61-c8a24f7b3d90:payout",
+      "email_subject": "You have a Behest payout"
+    },
+    "funding_source": "BALANCE",
+    "amount": {
+      "currency": "USD",
+      "value": "18.75"
+    },
+    "fees": {
+      "currency": "USD",
+      "value": "0.38"
+    }
+  },
+  "items": [
+    {
+      "payout_item_id": "QH3N8VXK2LBRA",
+      "transaction_id": "8YR52714UX9046318",
+      "activity_id": "4PD69238HB7710845",
+      "transaction_status": "SUCCESS",
+      "payout_item_fee": {
+        "currency": "USD",
+        "value": "0.38"
+      },
+      "payout_batch_id": "7KQ2XWB9MNZ4E",
+      "payout_item": {
+        "recipient_type": "EMAIL",
+        "amount": {
+          "currency": "USD",
+          "value": "18.75"
+        },
+        "note": "Behest order 5d0c7a1e-3b84-4f2a-9e61-c8a24f7b3d90",
+        "receiver": "payouts@northfork.example.com",
+        "sender_item_id": "5d0c7a1e-3b84-4f2a-9e61-c8a24f7b3d90:payout",
+        "recipient_wallet": "PAYPAL"
+      },
+      "time_processed": "2026-11-06T16:02:24Z",
+      "links": [
+        {
+          "href": "https://api-m.sandbox.paypal.com/v1/payments/payouts-item/QH3N8VXK2LBRA",
+          "rel": "item",
+          "method": "GET",
+          "encType": "application/json"
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "href": "https://api-m.sandbox.paypal.com/v1/payments/payouts/7KQ2XWB9MNZ4E?page_size=1000&page=1",
+      "rel": "self",
+      "method": "GET",
+      "encType": "application/json"
+    }
+  ]
+}

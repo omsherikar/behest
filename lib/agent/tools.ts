@@ -35,7 +35,10 @@ export type ShoppingToolsContext = {
 
 const SELLER_RESULTS = 10;
 const MARKET_RESULTS = 5;
-/** The catalog keeps descriptions to 2000 characters, so a description is quoted whole. */
+/**
+ * The catalog keeps descriptions to 2000 characters. Quoting escapes each less-than sign into six
+ * characters, so a description holding some may still be cut, with `...` marking the cut.
+ */
 const DESCRIPTION_MAX = 2000;
 /** The largest value of a Postgres integer, the column type of price. */
 const INT_MAX = 2_147_483_647;

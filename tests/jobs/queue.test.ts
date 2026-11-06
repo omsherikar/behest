@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { beforeAll, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import { jobs } from '@/lib/db/schema';
 import {
@@ -17,6 +17,10 @@ import { createTestDb } from '@/tests/helpers/test-db';
 beforeAll(async () => {
   await createTestDb();
 }, 30_000);
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -53,7 +57,7 @@ async function jobRow(db: Db, id: string) {
   return row;
 }
 
-/** A handler that signals once it starts and settles only when the test calls `finish`. */
+/** A handler that signals once it starts and settles only when the test calls `finish` or `fail`. */
 function heldHandler() {
   const started = Promise.withResolvers<void>();
   const outcome = Promise.withResolvers<JobOutcome>();
@@ -61,8 +65,11 @@ function heldHandler() {
     started.resolve();
     return outcome.promise;
   };
-  return { handler, started: started.promise, finish: outcome.resolve };
+  return { handler, started: started.promise, finish: outcome.resolve, fail: outcome.reject };
 }
+
+/** Lets pending promise callbacks run without advancing any clock. */
+const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 it('stores a new job as queued with no attempts', async () => {
   const db = await createTestDb();
@@ -133,7 +140,12 @@ it('reschedules a job that asks to retry with backoff and counts the attempt', a
   const handlers = handlersWith({ payout_poll: payoutPoll });
 
   expect(await runDueJobs(db, handlers, deps, at(T))).toBe(1);
-  expect(await jobRow(db, id)).toMatchObject({ status: 'queued', attempts: 1, runAt: after(15 * SECOND), lastError: null });
+  expect(await jobRow(db, id)).toMatchObject({
+    status: 'queued',
+    attempts: 1,
+    runAt: after(15 * SECOND),
+    lastError: null,
+  });
 
   expect(await runDueJobs(db, handlers, deps, at(after(15 * SECOND - 1)))).toBe(0);
   const second = after(15 * SECOND);
@@ -362,4 +374,71 @@ it('measures the backoff from when the job started, not from when its batch was 
     attempts: 1,
     runAt: after(15 * SECOND, startedAt),
   });
+});
+
+it('gives up on a handler after 5 minutes, reschedules its job and moves on to the next', async () => {
+  const db = await createTestDb();
+  const stuckId = await enqueue(db, 'charge_retry', { purchaseId: 'pur-1' }, T);
+  const nextId = await enqueue(db, 'webhook', { eventId: 'WH-1' }, T);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const stuck = heldHandler();
+  const webhook = vi.fn<JobHandler<Deps>>(async () => 'done');
+  let finished = false;
+  const run = runDueJobs(db, handlersWith({ charge_retry: stuck.handler, webhook }), deps, at(T)).then((count) => {
+    finished = true;
+    return count;
+  });
+  await stuck.started;
+
+  vi.advanceTimersByTime(5 * MINUTE - 1);
+  await settle();
+  expect(finished).toBe(false);
+
+  vi.advanceTimersByTime(1);
+  expect(await run).toBe(2);
+  expect(await jobRow(db, stuckId)).toMatchObject({
+    status: 'queued',
+    attempts: 1,
+    runAt: after(15 * SECOND),
+    lastError: 'timed out after 5 minutes',
+  });
+  expect(await jobRow(db, nextId)).toMatchObject({ status: 'done' });
+  expect(webhook).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('takes a different handler deadline when given one, and ignores the abandoned call when it settles', async () => {
+  const db = await createTestDb();
+  const id = await enqueue(db, 'payout_poll', { purchaseId: 'pur-1' }, T);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const stuck = heldHandler();
+  const run = runDueJobs(db, handlersWith({ payout_poll: stuck.handler }), deps, at(T), {
+    handlerTimeoutMs: 90 * SECOND,
+  });
+  await stuck.started;
+
+  vi.advanceTimersByTime(90 * SECOND);
+  expect(await run).toBe(1);
+  const timedOut = { status: 'queued', attempts: 1, lastError: 'timed out after 90 seconds' };
+  expect(await jobRow(db, id)).toMatchObject(timedOut);
+
+  // The abandoned call failing later is neither an unhandled rejection nor a change to the job.
+  stuck.fail(new Error('PayPal returned 500'));
+  await settle();
+  expect(await jobRow(db, id)).toMatchObject(timedOut);
+});
+
+it('clears the deadline once the handler settles', async () => {
+  const db = await createTestDb();
+  await enqueue(db, 'webhook', { eventId: 'WH-1' }, T);
+  await enqueue(db, 'charge_retry', { purchaseId: 'pur-1' }, T);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const handlers = handlersWith({
+    charge_retry: async () => {
+      throw new Error('PayPal returned 503');
+    },
+  });
+
+  expect(await runDueJobs(db, handlers, deps, at(T))).toBe(2);
+  expect(vi.getTimerCount()).toBe(0);
 });

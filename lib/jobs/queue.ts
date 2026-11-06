@@ -10,6 +10,11 @@ import { jobs } from '@/lib/db/schema';
 // handler starts, the time it started. A job still running more than ten minutes after that is
 // taken to belong to a worker that stopped mid-run, so it is due again. A run cut short that way
 // does not count as an attempt.
+//
+// A handler gets five minutes by default. One still running then is abandoned, not stopped: its
+// job counts as a retry and the run moves on, so a retry can start while the abandoned call is
+// still going. Handlers must be safe to overlap with themselves, for example by reusing the same
+// request ids.
 
 export type JobKind = 'payout_poll' | 'approval_expiry' | 'dispute_sync' | 'webhook' | 'charge_retry';
 export type JobPayload = Record<string, unknown>;
@@ -19,13 +24,22 @@ export type JobHandler<D> = (payload: JobPayload, deps: D) => Promise<JobOutcome
 export type JobHandlers<D> = Record<JobKind, JobHandler<D>>;
 /** Reads the current time. The worker passes the real clock; tests pass a fixed or scripted one. */
 export type Clock = () => Date;
+export type RunOptions = {
+  /**
+   * How long a handler may run before its job counts as a retry. Defaults to five minutes. Keep it
+   * under the ten minutes after which a running job looks abandoned to other workers.
+   */
+  handlerTimeoutMs?: number;
+};
 
 /** A job whose run fails this many times is marked dead and never runs again. */
 const MAX_ATTEMPTS = 8;
-/** How long after its claim a running job is treated as abandoned by a worker that stopped. */
+/** How long after its claim, or its start once its turn comes, a running job is treated as abandoned. */
 const ABANDONED_AFTER_MS = 10 * 60 * 1000;
 /** The most jobs one runDueJobs call claims. The rest wait for the next call. */
 const CLAIM_LIMIT = 5;
+/** How long a handler may run, unless the caller says otherwise, before its job counts as a retry. */
+const HANDLER_TIMEOUT_MS = 5 * 60 * 1000;
 
 const BACKOFF_BASE_MS = 15 * 1000;
 const BACKOFF_CAP_MS = 10 * 60 * 1000;
@@ -56,15 +70,27 @@ export async function runDueJobs<D>(
   handlers: Partial<JobHandlers<D>>,
   deps: D,
   clock: Clock,
+  { handlerTimeoutMs = HANDLER_TIMEOUT_MS }: RunOptions = {},
 ): Promise<number> {
   const claimedAt = clock();
   const claimed = await claimDueJobs(db, claimedAt);
+  const run: Run<D> = { db, handlers, deps, clock, claimedAt, handlerTimeoutMs };
   let processed = 0;
   for (const job of claimed) {
-    if (await runJob(db, job, handlers, deps, claimedAt, clock)) processed++;
+    if (await runJob(run, job)) processed++;
   }
   return processed;
 }
+
+/** What every job in one runDueJobs call shares. */
+type Run<D> = {
+  db: Db;
+  handlers: Partial<JobHandlers<D>>;
+  deps: D;
+  clock: Clock;
+  claimedAt: Date;
+  handlerTimeoutMs: number;
+};
 
 type ClaimedJob = { id: string; kind: string; payload: JobPayload; attempts: number };
 
@@ -96,12 +122,8 @@ function claimDueJobs(db: Db, now: Date): Promise<ClaimedJob[]> {
 
 /** Runs one claimed job. Returns false, without running it, if another run has taken it over. */
 async function runJob<D>(
-  db: Db,
+  { db, handlers, deps, clock, claimedAt, handlerTimeoutMs }: Run<D>,
   job: ClaimedJob,
-  handlers: Partial<JobHandlers<D>>,
-  deps: D,
-  claimedAt: Date,
-  clock: Clock,
 ): Promise<boolean> {
   // Renew the claim from this job's own start, so time spent waiting behind earlier jobs in the
   // batch does not count toward looking abandoned. If the claim from `claimedAt` is gone, another
@@ -128,15 +150,7 @@ async function runJob<D>(
     return true;
   }
 
-  let outcome: JobOutcome;
-  let error: string | undefined;
-  try {
-    outcome = await handler(job.payload, deps);
-  } catch (thrown) {
-    outcome = 'retry';
-    error = errorMessage(thrown);
-  }
-
+  const { outcome, error } = await callHandler(() => handler(job.payload, deps), handlerTimeoutMs);
   if (outcome === 'done') {
     await db.update(jobs).set({ status: 'done' }).where(stillClaimed);
     return true;
@@ -154,6 +168,39 @@ async function runJob<D>(
     })
     .where(stillClaimed);
   return true;
+}
+
+const TIMED_OUT = Symbol('timed out');
+
+/**
+ * Calls a handler with a deadline. A throw counts as a retry with its message as the error. A call
+ * still running at the deadline counts as a retry too; it is left to finish on its own, and
+ * whatever it does then is ignored.
+ */
+async function callHandler(
+  call: () => Promise<JobOutcome>,
+  timeoutMs: number,
+): Promise<{ outcome: JobOutcome; error?: string }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), timeoutMs);
+  });
+  try {
+    const result = await Promise.race([call(), deadline]);
+    if (result === TIMED_OUT) return { outcome: 'retry', error: `timed out after ${describeDuration(timeoutMs)}` };
+    return { outcome: result };
+  } catch (thrown) {
+    return { outcome: 'retry', error: errorMessage(thrown) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** A duration in its largest whole unit, such as "5 minutes" or "90 seconds". */
+function describeDuration(ms: number): string {
+  const [amount, unit] =
+    ms % 60_000 === 0 ? [ms / 60_000, 'minute'] : ms % 1000 === 0 ? [ms / 1000, 'second'] : [ms, 'millisecond'];
+  return `${amount} ${unit}${amount === 1 ? '' : 's'}`;
 }
 
 /**

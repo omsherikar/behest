@@ -103,7 +103,7 @@ describe('POST /api/mandates/compile', () => {
     expect(body).not.toHaveProperty('confirmToken');
   });
 
-  it("offers the exact decline option last on every question, in place of the model's own wording", async () => {
+  it('offers the exact decline option last on every question, in place of a decline the model wrote another way', async () => {
     const weekends = 'Behest cannot limit purchases to weekends. Do you want to go ahead?';
     const amount = 'How much should your agent be able to spend?';
     await claudeAnswers([
@@ -112,7 +112,7 @@ describe('POST /api/mandates/compile', () => {
           policy: demoPolicy,
           assumptions: [],
           questions: [
-            { id: 'weekend_limit', question: weekends, options: ["Don't create this mandate", 'Buy on any day'] },
+            { id: 'weekend_limit', question: weekends, options: ['dont set up this mandate.', 'Buy on any day'] },
             { id: 'budget_amount', question: amount, options: [] },
           ],
         },

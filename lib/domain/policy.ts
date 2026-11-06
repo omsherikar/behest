@@ -75,6 +75,10 @@ export const MandatePolicy = z
   .refine((p) => !p.categories.allow || p.categories.allow.every((c) => !p.categories.deny.includes(c)), {
     message: 'a category cannot be both allowed and denied',
     path: ['categories'],
+  })
+  .refine((p) => !p.merchants.allow || p.merchants.allow.every((m) => !p.merchants.deny.includes(m)), {
+    message: 'a seller cannot be both allowed and denied',
+    path: ['merchants'],
   });
 
 export type MandatePolicy = z.infer<typeof MandatePolicy>;

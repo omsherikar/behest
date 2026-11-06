@@ -9,6 +9,20 @@ it('rejects an ask threshold at or above the per-purchase max', () =>
   expect(MandatePolicy.safeParse({ ...demoPolicy, askAboveCents: 6000 }).success).toBe(false));
 it('rejects a category both allowed and denied', () =>
   expect(MandatePolicy.safeParse({ ...demoPolicy, categories: { allow: ['spices'], deny: ['spices'] } }).success).toBe(false));
+it('rejects a seller both allowed and denied', () => {
+  const result = MandatePolicy.safeParse({
+    ...demoPolicy,
+    merchants: { allow: ['ravi-spices', 'cumin-co'], deny: ['cumin-co'] },
+  });
+  expect(result.success).toBe(false);
+  expect(result.error?.issues).toEqual([
+    expect.objectContaining({ path: ['merchants'], message: 'a seller cannot be both allowed and denied' }),
+  ]);
+});
+it('accepts a seller allow list and a separate deny list', () =>
+  expect(
+    MandatePolicy.safeParse({ ...demoPolicy, merchants: { allow: ['ravi-spices'], deny: ['bad-shop'] } }).success,
+  ).toBe(true));
 it('rejects non-USD', () => expect(MandatePolicy.safeParse({ ...demoPolicy, currency: 'INR' }).success).toBe(false));
 it('rejects unknown keys', () => expect(MandatePolicy.safeParse({ ...demoPolicy, note: 'x' }).success).toBe(false));
 it('rejects unknown keys inside nested objects', () =>

@@ -34,6 +34,9 @@ const MAX_REPLIES_IN_FLIGHT = 4;
 
 const error = (status: number, message: string) => Response.json({ error: { message } }, { status });
 
+/** Logged when a reply stopped early cannot log its call, which leaves its spend out of the cap. */
+const CANCELLED_REPLY_FAILED = '[analyst] Logging a cancelled reply failed:';
+
 type Json = Record<string, unknown>;
 
 const isObject = (value: unknown): value is Json => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -146,47 +149,77 @@ async function readBody(request: NextRequest): Promise<string | null> {
 }
 
 /**
- * The events as server-sent events. A reader that goes away (a closed tab, or Studio's Stop
- * button) cancels the stream: the reply stops and its call is still logged once, and nothing more
- * is sent or reported as a failure. `release` gives the visitor's slot back however the stream ends.
+ * The events as server-sent events. The reply stops when the reader cancels the stream (a closed
+ * tab, or Studio's Stop button) or when `request`'s signal aborts, which is how Next.js reports a
+ * client that went away even when it never reads or cancels this stream. Either way the reply
+ * still logs its call once, nothing more is sent, and no failure is reported unless logging the
+ * call fails. `release` gives the visitor's slot back once, however the stream ends.
  */
 function serverSentEvents(
   events: AsyncGenerator<LlmStreamEvent, void, undefined>,
   release: Release,
+  request: Request,
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const frame = (event: LlmStreamEvent) => encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-  let cancelled = false;
+  // Whether the reply was stopped, and whether the stream can still take events.
+  let stopped = false;
+  let open = true;
+  let stopping: Promise<void> | undefined;
+
+  const onAbort = () => void stop();
+  /**
+   * Gives the slot back and stops listening for the client. This also keeps `request` reachable
+   * for as long as the stream is: its signal follows Next.js's only while the request is.
+   */
+  const finish = () => {
+    request.signal.removeEventListener('abort', onAbort);
+    release();
+  };
+  /** Stops the reply, once however many ways the reader goes; the reply logs its call as it ends. */
+  const stop = () =>
+    (stopping ??= (async () => {
+      stopped = true;
+      try {
+        await events.return();
+      } catch (failure) {
+        console.error(CANCELLED_REPLY_FAILED, failure);
+      } finally {
+        finish();
+      }
+    })());
+
+  if (request.signal.aborted) void stop();
+  else request.signal.addEventListener('abort', onAbort, { once: true });
+
   return new ReadableStream({
     async pull(controller) {
+      const close = () => {
+        if (!open) return;
+        open = false;
+        controller.close();
+      };
       try {
         const next = await events.next();
-        if (cancelled) return;
+        if (stopped) return close();
         if (next.done) {
-          release();
-          controller.close();
+          finish();
+          close();
         } else {
           controller.enqueue(frame(next.value));
         }
       } catch (failure) {
-        release();
-        if (cancelled) return;
+        finish();
+        if (stopped) return close();
         // Misconfiguration or the database: the details go to the server log, not the browser.
         console.error('[analyst] The reply failed:', failure);
         controller.enqueue(frame({ type: 'error', error: { type: 'api_error', message: 'The analyst failed. Try again later.' } }));
-        controller.close();
+        close();
       }
     },
-    async cancel() {
-      cancelled = true;
-      try {
-        // Stops the reply; the reply logs its call as it ends.
-        await events.return();
-      } catch (failure) {
-        console.error('[analyst] Logging a cancelled reply failed:', failure);
-      } finally {
-        release();
-      }
+    cancel() {
+      open = false;
+      return stop();
     },
   });
 }
@@ -219,7 +252,7 @@ export async function POST(request: NextRequest) {
     { ...read.turn, system: withToday(read.turn.system, now()) },
     { signal: request.signal },
   );
-  return new Response(serverSentEvents(events, release), {
+  return new Response(serverSentEvents(events, release, request), {
     headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' },
   });
 }

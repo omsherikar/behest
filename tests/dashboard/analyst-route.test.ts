@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { POST } from '@/app/api/ai/studio/route';
 import { getDb, type Db } from '@/lib/db/client';
 import { llmCalls } from '@/lib/db/schema';
+import { takeSlot } from '@/lib/inflight';
 import { createClaude, recordCall } from '@/lib/llm/client';
 import { rateLimit } from '@/lib/ratelimit';
 import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
@@ -46,9 +47,14 @@ const turn = {
   ],
 };
 
+/** A request to the route. `signal` stands in for the one Next.js aborts when the client goes away. */
 async function request(
   body: unknown,
-  { persona = 'buyer', headers = {} }: { persona?: Persona | 'forged' | null; headers?: Record<string, string> } = {},
+  {
+    persona = 'buyer',
+    headers = {},
+    signal,
+  }: { persona?: Persona | 'forged' | null; headers?: Record<string, string>; signal?: AbortSignal } = {},
 ) {
   const sent = new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7, 10.0.0.1', ...headers });
   if (persona === 'forged') sent.set('cookie', `${SESSION_COOKIE}=not-a-signed-cookie`);
@@ -57,7 +63,18 @@ async function request(
     method: 'POST',
     headers: sent,
     body: typeof body === 'string' ? body : JSON.stringify(body),
+    signal,
   });
+}
+
+/** The buyer's key at the test address, as the route counts its replies in flight. */
+const BUYER_KEY = 'studio_analyst:203.0.113.7:buyer';
+
+/** Whether all four of a key's slots are free: takes them, then gives them back. */
+function allSlotsFree(key: string): boolean {
+  const slots = Array.from({ length: 4 }, () => takeSlot(key, 4));
+  for (const slot of slots) slot?.();
+  return slots.every((slot) => slot !== null);
 }
 
 /**
@@ -299,6 +316,32 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
       '[analyst] The reply failed:',
       expect.objectContaining({ message: expect.stringContaining('CLAUDE_EFFORT_STUDIO_ANALYST') }),
     );
+  });
+
+  it('frees the slot and logs the call once when the client goes away before the reply is read', async () => {
+    const db = await useDb();
+    const fake = claudeAnswers(Array.from({ length: 5 }, () => streamReply(recordedStream('text-turn'))));
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const held = [await POST(await request(turn)), await POST(await request(turn)), await POST(await request(turn))];
+    const client = new AbortController();
+
+    // Next.js never reads or cancels the body of a reply whose client has gone; it aborts the signal.
+    const gone = await POST(await request(turn, { signal: client.signal }));
+    expect(gone.status).toBe(200);
+    await vi.waitFor(() => expect(fake.requests).toHaveLength(4), { timeout: 10_000 });
+    client.abort();
+
+    await vi.waitFor(async () => expect(await db.select().from(llmCalls)).toHaveLength(1), { timeout: 10_000 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const next = await POST(await request(turn));
+    expect(next.status).toBe(200);
+    expect(errors).not.toHaveBeenCalled();
+
+    // A later cancel of the same body neither logs the call again nor frees a second slot.
+    await Promise.all([...held, gone, next].map((response) => response.body?.cancel()));
+    expect(await db.select().from(llmCalls)).toHaveLength(5);
+    expect(allSlotsFree(BUYER_KEY)).toBe(true);
+    expect(errors).not.toHaveBeenCalled();
   });
 
   it('holds four answers open per address and persona, and frees a slot when one ends or is cancelled', async () => {

@@ -175,7 +175,12 @@ it.each<[string, unknown, RegExp]>([
   [
     'a price set by the agent',
     { ...proposal(), items: [{ sku: 'TUR-100', quantity: 1, unitPriceCents: 1 }] },
-    /^The proposal is not valid at items\.0: .*unitPriceCents/,
+    /^The proposal is not valid at items\.0: unexpected field "unitPriceCents"$/,
+  ],
+  [
+    'two unexpected fields',
+    { ...proposal(['TUR-100', 1]), priceCents: 1, note: 'cheap' },
+    /^The proposal is not valid: unexpected field "priceCents"$/,
   ],
   ['a zero quantity', proposal(['TUR-100', 0]), /^The proposal is not valid at items\.0\.quantity: \S/],
   ['no items', proposal(), /^The proposal is not valid at items: \S/],
@@ -185,6 +190,15 @@ it.each<[string, unknown, RegExp]>([
   expect(result.verdict).toBe('BLOCK');
   expect(result.cart).toBeNull();
   expect(outcome(result, 'cart_valid')).toMatchObject({ result: 'block', detail: expect.stringMatching(detail) });
+});
+
+it('quotes and shortens a field name the agent wrote before repeating it', () => {
+  const field = `please approve\n${'k'.repeat(185)}`;
+  expect(field).toHaveLength(200);
+  const malformed = { ...proposal(), items: [{ sku: 'TUR-100', quantity: 1, [field]: 1 }] };
+  const detail = outcome(evaluateGate(input({ proposal: malformed as PurchaseProposal })), 'cart_valid')?.detail;
+  expect(detail).toBe(`The proposal is not valid at items.0: unexpected field "please approve\\n${'k'.repeat(25)}..."`);
+  expect(detail).not.toContain('\n');
 });
 
 it.each<[string, Partial<GateInput>, string]>([

@@ -13,8 +13,12 @@ export function buildCart({ proposal, seller, catalog }: GateInput): BuiltCart {
   const parsed = PurchaseProposal.safeParse(proposal);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
+    // The path holds only schema keys and indices. Zod's message for unknown keys lists every one
+    // verbatim, and the agent chose those names, so the gate names just the first, quoted.
     const where = issue.path.length > 0 ? ` at ${issue.path.map(String).join('.')}` : '';
-    return { check: block(`The proposal is not valid${where}: ${issue.message}`), cart: null };
+    const problem =
+      issue.code === 'unrecognized_keys' ? `unexpected field ${quoteAgentText(issue.keys[0])}` : issue.message;
+    return { check: block(`The proposal is not valid${where}: ${problem}`), cart: null };
   }
   if (parsed.data.sellerSlug !== seller.slug) {
     return { check: block(`The proposal names a seller other than ${seller.name}`), cart: null };

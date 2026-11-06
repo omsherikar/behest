@@ -67,7 +67,7 @@ function readReply<T>(
 type Outcome<T> = { ok: true; value: T } | { ok: false; error: LlmFailure; detail?: string };
 
 /** Whether a successful response has the fields of a message that the checks and the log read. */
-function isMessage(message: Pick<BetaMessage, 'model' | 'usage'>): boolean {
+export function isMessage(message: Pick<BetaMessage, 'model' | 'usage'>): boolean {
   const usage: Partial<BetaUsage> | null | undefined = message.usage;
   return (
     typeof message.model === 'string' &&

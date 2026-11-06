@@ -1,0 +1,20 @@
+// Everything the purchase flow asks of PayPal. The orchestrator depends on this interface, so tests
+// can pass an in-memory fake instead of reaching the network. Amounts are integer cents in USD.
+
+export interface PaypalPort {
+  createSetupToken(i: { returnUrl: string; cancelUrl: string; description: string }): Promise<{ id: string; approveUrl: string; customerId: string }>;
+  createPaymentToken(setupTokenId: string): Promise<{ id: string; customerId: string }>;
+  chargeSavedWallet(i: { paymentTokenId: string; amountCents: number; description: string; invoiceId: string; requestId: string }): Promise<{ orderId: string; captureId: string; status: 'COMPLETED' | 'PENDING' | 'DECLINED' }>;
+  createApprovalOrder(i: { amountCents: number; description: string; invoiceId: string; returnUrl: string; cancelUrl: string; requestId: string }): Promise<{ orderId: string; approveUrl: string }>;
+  captureOrder(orderId: string, requestId: string): Promise<{ captureId: string; status: 'COMPLETED' | 'PENDING' | 'DECLINED' }>;
+  createPayout(i: { receiverEmail: string; amountCents: number; note: string; senderBatchId: string }): Promise<{ payoutBatchId: string }>;
+  getPayoutBatch(payoutBatchId: string): Promise<{ batchStatus: string; itemStatus: string | null }>;
+  refundCapture(i: { captureId: string; amountCents: number; note: string; requestId: string }): Promise<{ refundId: string; status: string }>;
+  listDisputes(): Promise<DisputeSummary[]>;
+  getDispute(id: string): Promise<DisputeDetail>;
+  provideEvidence(id: string, i: { notes: string }): Promise<void>;
+  verifyWebhook(headers: Headers, rawBody: string): Promise<boolean>;
+}
+
+export type DisputeSummary = { id: string; status: string; reason: string; amountCents: number; captureId: string | null; createTime: string };
+export type DisputeDetail = DisputeSummary & { buyerNotes: string | null };

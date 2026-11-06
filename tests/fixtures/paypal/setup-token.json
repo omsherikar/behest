@@ -1,0 +1,34 @@
+{
+  "id": "4SR36794JN117492X",
+  "customer": {
+    "id": "customer_2471939104"
+  },
+  "status": "PAYER_ACTION_REQUIRED",
+  "payment_source": {
+    "paypal": {
+      "description": "Let my shopping agent pay within my mandate",
+      "usage_pattern": "IMMEDIATE",
+      "permit_multiple_payment_tokens": false,
+      "usage_type": "MERCHANT",
+      "customer_type": "CONSUMER"
+    }
+  },
+  "links": [
+    {
+      "href": "https://www.sandbox.paypal.com/agreements/approve?approval_session_id=4SR36794JN117492X",
+      "rel": "approve",
+      "method": "GET"
+    },
+    {
+      "href": "https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/4SR36794JN117492X/confirm-payment-token",
+      "rel": "confirm",
+      "method": "POST"
+    },
+    {
+      "href": "https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/4SR36794JN117492X",
+      "rel": "self",
+      "method": "GET",
+      "encType": "application/json"
+    }
+  ]
+}

@@ -156,6 +156,8 @@ stateDiagram-v2
   accepted --> settled: payout SUCCESS
   accepted --> refunded: refund issued
   settled --> disputed: dispute opened
+  settled --> refunded: refund issued
+  disputed --> refunded: refund issued
   disputed --> resolved
   blocked --> [*]
   cancelled --> [*]

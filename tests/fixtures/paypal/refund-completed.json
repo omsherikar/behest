@@ -1,0 +1,16 @@
+{
+  "id": "0LT61953WD8340275",
+  "status": "COMPLETED",
+  "links": [
+    {
+      "href": "https://api-m.sandbox.paypal.com/v2/payments/refunds/0LT61953WD8340275",
+      "rel": "self",
+      "method": "GET"
+    },
+    {
+      "href": "https://api-m.sandbox.paypal.com/v2/payments/captures/2FN86302RL1957468",
+      "rel": "up",
+      "method": "GET"
+    }
+  ]
+}

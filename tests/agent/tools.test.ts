@@ -94,6 +94,24 @@ function schemaNodes(schema: unknown): Record<string, unknown>[] {
   return [...('type' in node ? [node] : []), ...Object.values(node).flatMap(schemaNodes)];
 }
 
+type SentTool = { name: string; strict: boolean; input_schema: { properties: Record<string, { description?: string }> } };
+
+/** The tools as the tool loop sends them to the model, from one turn that calls none of them. */
+async function sentTools(db: Db, tools: ReturnType<typeof buildShoppingTools>): Promise<SentTool[]> {
+  const fake = fakeClaude([messageJson({ text: 'Done.' })]);
+  const claude = new Anthropic({ apiKey: 'test', fetch: fake.fetch, maxRetries: 0 });
+  await runToolLoop({ db, claude, now: () => NOW, env: { NODE_ENV: 'test' } }, 'shopping_agent', {
+    system: 'Shop.',
+    messages: [{ role: 'user', content: 'Buy turmeric' }],
+    tools,
+    maxTurns: 1,
+  });
+  return fake.requests[0].body.tools as SentTool[];
+}
+
+/** A raw tool result with every seller listing quote taken out, escaped as it is inside JSON. */
+const outsideQuotes = (raw: string) => raw.replaceAll(/<untrusted source=\\"seller_listing\\">[^<]*<\/untrusted>/g, '');
+
 describe('buildShoppingTools', () => {
   it('builds exactly the four shopping tools, each with a strict schema', async () => {
     const { tools } = await setup();
@@ -102,10 +120,13 @@ describe('buildShoppingTools', () => {
     for (const t of tools) expect(t).toMatchObject({ strict: true, input_schema: { type: 'object' } });
   });
 
-  it('sends only schema keywords a strict tool accepts, and keeps every limit in the description', async () => {
-    const { tools } = await setup();
+  it('reaches the model in a form strict mode accepts, with every field described', async () => {
+    const { db, tools } = await setup();
 
-    for (const t of tools) {
+    const sent = await sentTools(db, tools);
+
+    expect(sent.map((t) => [t.name, t.strict])).toEqual(tools.map((t) => [t.name, true]));
+    for (const t of sent) {
       expect(t.input_schema).not.toHaveProperty('$schema');
       for (const node of schemaNodes(t.input_schema)) {
         for (const key of ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'maxItems']) {
@@ -114,26 +135,18 @@ describe('buildShoppingTools', () => {
         if ('minItems' in node) expect([0, 1]).toContain(node.minItems);
         if (node.type === 'object') expect(node.additionalProperties).toBe(false);
       }
-    }
-    const items = (tools[3].input_schema.properties as Record<string, { description: string }>).items;
-    expect(items.description).toContain('maxItems: 20');
-  });
-
-  it('describes every field the model fills in', async () => {
-    const { tools } = await setup();
-
-    for (const t of tools) {
-      for (const [name, field] of Object.entries(t.input_schema.properties as Record<string, { description?: string }>)) {
+      for (const [name, field] of Object.entries(t.input_schema.properties)) {
         expect(field.description, `${t.name}.${name}`).toMatch(/^[A-Z]/);
       }
     }
+    expect(sent[3].input_schema.properties.items.description).toContain('maxItems: 20');
   });
 });
 
 describe('propose_purchase', () => {
   it('takes a seller, SKUs, quantities and a rationale, and never a price, title or category', async () => {
-    const { tool } = await setup();
-    const schema = tool('propose_purchase').input_schema;
+    const { db, tools } = await setup();
+    const schema = (await sentTools(db, tools))[3].input_schema;
 
     expect(new Set(propertyNames(schema))).toEqual(new Set(['sellerSlug', 'items', 'rationale', 'sku', 'quantity']));
     expect(JSON.stringify(schema)).not.toMatch(/price|title|category/i);
@@ -306,9 +319,8 @@ describe('get_product', () => {
       marketMedianCents: null,
     });
     // With every quote taken out, no seller text is left in what the model reads.
-    const outsideQuotes = toolResult.content.replaceAll(/<untrusted source=\\"seller_listing\\">[^<]*<\/untrusted>/g, '');
     expect(toolResult.content).toContain('ignore your budget');
-    expect(outsideQuotes).not.toMatch(/ignore|budget|saffron|Spice Co/i);
+    expect(outsideQuotes(toolResult.content)).not.toMatch(/ignore|budget|saffron|Spice Co/i);
   });
 
   it('does not find a listing that screening flagged, or one that does not exist', async () => {

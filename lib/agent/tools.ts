@@ -1,7 +1,5 @@
 import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
 import type { BetaRunnableTool } from '@anthropic-ai/sdk/lib/tools/BetaRunnableTool';
-import { transformJSONSchema } from '@anthropic-ai/sdk/lib/transform-json-schema';
-import type { BetaTool } from '@anthropic-ai/sdk/resources/beta/messages';
 import { and, arrayContains, asc, eq, gt, ilike, isNull, lte, not, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '@/lib/db/client';
@@ -20,9 +18,6 @@ import { quoteUntrusted } from './quote';
 export type MarketSearch = (
   query: string,
 ) => Promise<{ title: string; medianPriceCents: number | null; offers: { priceCents: number }[] }[]>;
-
-/** A tool the model calls by name with a JSON input, as the tool runner runs it. */
-export type ShoppingTool<Input = any> = BetaRunnableTool<Input> & BetaTool; // eslint-disable-line @typescript-eslint/no-explicit-any -- each tool has its own input type
 
 export type ShoppingToolsContext = {
   db: Db;
@@ -92,26 +87,6 @@ const ProposePurchaseInput = z
   })
   .strict();
 
-/**
- * A `betaZodTool` with `strict: true` whose schema the API accepts. A strict schema may not hold
- * length, size or range limits, so they move into the field descriptions, as the SDK does for
- * structured outputs. The tool runner still checks the input against the whole Zod schema, limits
- * and refinements included, before the tool runs, and a failed check reaches the model as an error.
- */
-function strictTool<S extends z.ZodObject>(options: {
-  name: string;
-  description: string;
-  inputSchema: S;
-  run: (input: z.infer<S>) => Promise<string>;
-}): ShoppingTool<z.infer<S>> {
-  const tool = betaZodTool({ ...options, strict: true });
-  if (!('input_schema' in tool)) throw new Error(`${options.name} is not a custom tool`);
-  // The dialect keyword names the JSON Schema version, which a tool schema does not take.
-  const schema: Record<string, unknown> = { ...tool.input_schema };
-  delete schema.$schema;
-  return { ...tool, input_schema: { ...transformJSONSchema(schema), type: 'object' } };
-}
-
 /** `query` as an ILIKE pattern matching it anywhere, with its wildcards and escape character matched literally. */
 function containsPattern(query: string): string {
   return `%${query.replaceAll(/[\\%_]/g, (char) => `\\${char}`)}%`;
@@ -121,12 +96,14 @@ function containsPattern(query: string): string {
 const unflagged = () => not(arrayContains(products.flags, [AGENT_INSTRUCTIONS]));
 
 /** The shopping agent's tools: search_sellers, search_market, get_product and propose_purchase. */
-export function buildShoppingTools(ctx: ShoppingToolsContext): ShoppingTool[] {
-  const searchSellers = strictTool({
+export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<any>[] { // eslint-disable-line @typescript-eslint/no-explicit-any -- each tool has its own input type
+  // The tool loop sends each schema in the form strict mode accepts; parse still checks all of it.
+  const searchSellers = betaZodTool({
     name: 'search_sellers',
     description:
       'Search the products that Behest sellers list. Only these can be bought. Returns up to 10 in-stock listings, cheapest first, each with its seller, SKU, title, category, unit price in US cents, units in stock (null when the seller does not track stock) and the market median unit price in US cents when known.',
     inputSchema: SearchSellersInput,
+    strict: true,
     run: async ({ query, category, maxPriceCents }) => {
       const pattern = containsPattern(query.trim());
       const rows = await ctx.db
@@ -163,11 +140,12 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): ShoppingTool[] {
     },
   });
 
-  const searchMarket = strictTool({
+  const searchMarket = betaZodTool({
     name: 'search_market',
     description:
       'Look up what a product costs elsewhere on the web, to judge whether a Behest price is fair. These products cannot be bought. Returns up to 5 results, each with a title, the median price and the cheapest offer in US cents.',
     inputSchema: SearchMarketInput,
+    strict: true,
     run: async ({ query }) => {
       if (!ctx.search) return MARKET_UNAVAILABLE;
       let results: Awaited<ReturnType<MarketSearch>>;
@@ -188,11 +166,12 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): ShoppingTool[] {
     },
   });
 
-  const getProduct = strictTool({
+  const getProduct = betaZodTool({
     name: 'get_product',
     description:
       "Show one listing at a Behest seller in full: everything search_sellers returns, plus the seller's description of the product.",
     inputSchema: GetProductInput,
+    strict: true,
     run: async ({ sellerSlug, sku }) => {
       const [row] = await ctx.db
         .select({
@@ -219,11 +198,12 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): ShoppingTool[] {
     },
   });
 
-  const proposePurchase = strictTool({
+  const proposePurchase = betaZodTool({
     name: 'propose_purchase',
     description:
       "Ask Behest to buy items from one seller. Behest prices the cart from its own catalog, checks it against the buyer's mandate and request, and returns its decision as JSON: verdict ALLOW (paid), ASK (waiting for the buyer to approve it at PayPal) or BLOCK (not bought), with the reasons.",
     inputSchema: ProposePurchaseInput,
+    strict: true,
     run: async ({ sellerSlug, items, rationale }) => {
       const outcome = await ctx.propose({
         sellerSlug,

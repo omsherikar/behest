@@ -110,6 +110,25 @@ it('stores the policy expiry as the mandate expiry and signs the same instant', 
   expect(payload.expiresAt).toBe('2026-12-31T23:59:59.999Z');
 });
 
+it('writes an over-precise expiry one way in the policy, its hash, the payload and the column', async () => {
+  const { db, buyerId, deps } = await setup();
+  const normalized: MandatePolicy = { ...demoPolicy, expiresAt: '2026-12-31T23:59:59.999Z' };
+
+  const { jws } = await confirmMandate(deps, {
+    buyerId,
+    text: TEXT,
+    policy: { ...demoPolicy, expiresAt: '2026-12-31T23:59:59.9999Z' },
+  });
+
+  const [row] = await allMandates(db);
+  const payload = await verifyJws(jws, 'behest-mandate+jws', jwks, MandatePayload);
+  expect(row.policy).toEqual(normalized);
+  expect(row.policyHash).toBe(hashOf(normalized));
+  expect(payload.policyHash).toBe(hashOf(normalized));
+  expect(payload.expiresAt).toBe('2026-12-31T23:59:59.999Z');
+  expect(row.expiresAt).toEqual(new Date('2026-12-31T23:59:59.999Z'));
+});
+
 it('revokes the buyer\'s active mandate when they confirm a new one', async () => {
   const { db, buyerId, deps } = await setup();
 

@@ -29,11 +29,13 @@ export class MandateConfirmError extends Error {
   }
 }
 
-/** The policy, validated. */
+/** The policy, validated, with any expiry written as `toISOString` writes it. */
 function validPolicy(input: MandatePolicy): MandatePolicy {
   const parsed = MandatePolicy.safeParse(input);
   if (!parsed.success) throw new MandateConfirmError('invalid_policy', { cause: parsed.error });
-  return parsed.data;
+  const { expiresAt } = parsed.data;
+  // One spelling of the instant, so the stored policy, its hash, the payload and the column agree.
+  return { ...parsed.data, expiresAt: expiresAt === null ? null : new Date(expiresAt).toISOString() };
 }
 
 /**

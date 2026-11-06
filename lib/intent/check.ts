@@ -13,7 +13,7 @@ import type { IntentInput, IntentResult } from './types';
  * The reply as the model writes it. The limits on reasons are not in the schema, so a reason that
  * runs long is cut here instead of failing the whole check.
  */
-const IntentOutput = z.object({
+export const IntentOutput = z.object({
   verdict: z.enum(['consistent', 'needs_human', 'inconsistent']),
   reasons: z.array(z.string()),
 });

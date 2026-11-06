@@ -1,8 +1,9 @@
 import { expect, it } from 'vitest';
+import { IntentOutput } from '@/lib/intent/check';
 import { INTENT_SYSTEM_PROMPT } from '@/lib/intent/prompts';
 
-it('names each verdict the check can return', () => {
-  for (const verdict of ['consistent', 'needs_human', 'inconsistent']) {
+it('describes each verdict the reply may give', () => {
+  for (const verdict of IntentOutput.shape.verdict.options) {
     expect(INTENT_SYSTEM_PROMPT).toContain(`- ${verdict}: `);
   }
 });

@@ -283,6 +283,24 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
     expect(errors).not.toHaveBeenCalled();
   });
 
+  it('sends a generic error event, and logs the detail, when the reply fails to start', async () => {
+    vi.stubEnv('CLAUDE_EFFORT_STUDIO_ANALYST', 'extreme');
+    claudeAnswers([]);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await POST(await request(turn));
+    const text = await response.text();
+
+    expect(sseEvents(text)).toEqual([
+      { type: 'error', error: { type: 'api_error', message: 'The analyst failed. Try again later.' } },
+    ]);
+    expect(text).not.toContain('CLAUDE_EFFORT_STUDIO_ANALYST');
+    expect(errors).toHaveBeenCalledExactlyOnceWith(
+      '[analyst] The reply failed:',
+      expect.objectContaining({ message: expect.stringContaining('CLAUDE_EFFORT_STUDIO_ANALYST') }),
+    );
+  });
+
   it('holds four answers open per address and persona, and frees a slot when one ends or is cancelled', async () => {
     const db = await useDb();
     claudeAnswers(Array.from({ length: 9 }, () => streamReply(recordedStream('text-turn'))));

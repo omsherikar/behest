@@ -65,7 +65,7 @@ const FLAGGED = 'flagged as text aimed at AI agents';
  * One listing as the model writes it. The JSON schema sent is strict (no other fields, every field
  * required); fields a reply adds anyway, such as a price, are dropped when it is read.
  */
-const CatalogItem = z.object({
+const listingFields = {
   sku: z.string(),
   title: z.string(),
   description: z.string(),
@@ -75,17 +75,27 @@ const CatalogItem = z.object({
    */
   category: z.string(),
   screening: z.object({ suspicious: z.boolean(), reason: z.string().nullable() }),
-});
+};
+
+const CatalogItem = z.object(listingFields);
 type CatalogItem = z.infer<typeof CatalogItem>;
 
 export const CatalogOutput = z.object({ items: z.array(CatalogItem) });
 
+/** A listing for a photo, naming the photo it describes by its label in the request, counting from 0. */
+const PhotoItem = z.object({ photo: z.int(), ...listingFields });
+type PhotoItem = z.infer<typeof PhotoItem>;
+
+export const PhotoOutput = z.object({ items: z.array(PhotoItem) });
+
 /**
  * Listing drafts for a seller's CSV rows and photos: the rows in batches of `BATCH_SIZE`, one model
  * call each, then the photos in one call. Drafts come back in the order given, rows first. A row the
- * model leaves out is drafted from its own text in category `other`. Any failed call fails the
- * build with that call's failure, and no further calls are made; on success `callId` is the last
- * call's. Throws `CatalogInputError` before any call for input it cannot list.
+ * model leaves out is drafted from its own text in category `other`. Listings are matched to rows by
+ * SKU and to photos by the photo number each one names, never by their order in the reply. Any
+ * failed call fails the build with that call's failure, and no further calls are made, as does a
+ * photo reply that does not list each photo exactly once; on success `callId` is the last call's.
+ * Throws `CatalogInputError` before any call for input it cannot list.
  */
 export async function buildListings(deps: LlmDeps, input: BuildInput): Promise<LlmResult<ListingDraft[]>> {
   const rows = input.rows ?? [];
@@ -114,16 +124,13 @@ export async function buildListings(deps: LlmDeps, input: BuildInput): Promise<L
     const reply = await callStructured(deps, 'catalog_build', {
       system: CATALOG_SYSTEM_PROMPT,
       messages: [photosMessage(photos)],
-      schema: CatalogOutput,
+      schema: PhotoOutput,
     });
     if (!reply.ok) return reply;
-    const { items } = reply.value;
-    if (items.length !== photos.length) {
-      const detail = `The reply listed ${items.length} of ${photos.length} photos`;
-      return { ok: false, error: 'invalid_output', callId: reply.callId, detail };
-    }
+    const items = itemsByPhoto(reply.value.items, photos.length);
+    if (typeof items === 'string') return { ok: false, error: 'invalid_output', callId: reply.callId, detail: items };
     const claimed = new Set(rows.map((r) => r.sku.toUpperCase()));
-    drafts.push(...photos.map((photo, index) => photoDraft(photo, index + 1, items[index], claimed)));
+    drafts.push(...photos.map((photo, index) => photoDraft(photo, index, items[index], claimed)));
     callId = reply.callId;
   }
 
@@ -184,17 +191,35 @@ function rowsMessage(batch: CatalogRow[]): BetaMessageParam {
   return { role: 'user', content: `Write one listing for each of the ${batch.length} rows below.\n\n${wrapped}` };
 }
 
-/** Each photo as an image block after its label, so the model can keep them in order. */
+/** Each photo as an image block after a label numbering it from 0, the number each listing names its photo by. */
 function photosMessage(photos: ListingPhoto[]): BetaMessageParam {
   const content: BetaContentBlockParam[] = photos.flatMap((photo, index): BetaContentBlockParam[] => [
-    { type: 'text', text: `Photo ${index + 1}` },
+    { type: 'text', text: `Photo ${index}` },
     { type: 'image', source: { type: 'base64', media_type: photo.mediaType, data: photo.base64 } },
   ]);
   content.push({
     type: 'text',
-    text: `Write one listing for each of the ${photos.length} photos, in the order of the photos.`,
+    text: `Write one listing for each of the ${photos.length} photos, with photo set to the number in its label.`,
   });
   return { role: 'user', content };
+}
+
+/**
+ * The listing for each of `count` photos in photo order, found by the photo number each listing
+ * names, or text naming the first problem: a number outside the photos, a photo listed twice, or a
+ * photo not listed. Between them these also catch a reply with too few or too many listings.
+ */
+function itemsByPhoto(items: PhotoItem[], count: number): PhotoItem[] | string {
+  const byPhoto: (PhotoItem | undefined)[] = Array.from({ length: count }, () => undefined);
+  for (const item of items) {
+    if (item.photo < 0 || item.photo >= count) {
+      return `The reply listed photo ${item.photo}, but the photos are numbered 0 to ${count - 1}`;
+    }
+    if (byPhoto[item.photo] !== undefined) return `The reply listed photo ${item.photo} more than once`;
+    byPhoto[item.photo] = item;
+  }
+  const missing = byPhoto.indexOf(undefined);
+  return missing === -1 ? (byPhoto as PhotoItem[]) : `The reply did not list photo ${missing}`;
 }
 
 /** A draft for each row in the batch: from the first listing whose SKU matches it in any case, or from the row alone. */
@@ -242,7 +267,12 @@ function sourceText(row: CatalogRow): string {
   return `${row.name}\n${row.description}`;
 }
 
-function photoDraft(photo: ListingPhoto, number: number, item: CatalogItem, claimed: Set<string>): ListingDraft {
+/**
+ * The draft for the photo at `index`, with that photo's price and stock. Sellers count photos from 1,
+ * so the fallback title and SKU do too.
+ */
+function photoDraft(photo: ListingPhoto, index: number, item: PhotoItem, claimed: Set<string>): ListingDraft {
+  const number = index + 1;
   const title = oneLine(item.title, TITLE_MAX) || `Photo ${number}`;
   const description = multiLine(item.description, DESCRIPTION_MAX);
   return {

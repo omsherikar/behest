@@ -409,7 +409,25 @@ describe('listings from photos', () => {
     { mediaType: 'image/jpeg', base64: JPEG, priceCents: 1450 },
   ];
 
-  it('sends each photo as a labelled image block under the catalog prompt', async () => {
+  /** A reply item for the photo at `photo`, counting from 0, with a plain listing for `sku`. */
+  const photoItem = (photo: number, sku: string, changes: Partial<ReplyItem> = {}) => ({ photo, ...item(sku, changes) });
+
+  const GHEE = {
+    sku: 'GHEE-500ML',
+    title: 'Cow Ghee, 500 ml',
+    description: 'A glass jar of cow ghee labelled 500 ml.',
+    category: 'groceries',
+    screening: CLEAN,
+  };
+  const DIYA = {
+    sku: 'BRASS-DIYA',
+    title: 'Brass Diya Oil Lamp',
+    description: 'A small brass oil lamp with a single wick.',
+    category: 'home_decor',
+    screening: CLEAN,
+  };
+
+  it('sends each photo as an image block after a label numbering it from 0, under the catalog prompt', async () => {
     const { requests } = await build([photosReply], { images: photos });
 
     expect(requests).toHaveLength(1);
@@ -420,11 +438,11 @@ describe('listings from photos', () => {
       {
         role: 'user',
         content: [
-          { type: 'text', text: 'Photo 1' },
+          { type: 'text', text: 'Photo 0' },
           { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
-          { type: 'text', text: 'Photo 2' },
+          { type: 'text', text: 'Photo 1' },
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: JPEG } },
-          { type: 'text', text: 'Write one listing for each of the 2 photos, in the order of the photos.' },
+          { type: 'text', text: 'Write one listing for each of the 2 photos, with photo set to the number in its label.' },
         ],
       },
     ]);
@@ -432,24 +450,17 @@ describe('listings from photos', () => {
 
   it('lists each photo at the price and stock the seller gave, with the details the reply proposes', async () => {
     expect(await draftsOf([photosReply], { images: photos })).toEqual([
-      {
-        sku: 'GHEE-500ML',
-        title: 'Cow Ghee, 500 ml',
-        description: 'A glass jar of cow ghee labelled 500 ml.',
-        category: 'groceries',
-        priceCents: 899,
-        stock: 12,
-        screening: CLEAN,
-      },
-      {
-        sku: 'BRASS-DIYA',
-        title: 'Brass Diya Oil Lamp',
-        description: 'A small brass oil lamp with a single wick.',
-        category: 'home_decor',
-        priceCents: 1450,
-        stock: null,
-        screening: CLEAN,
-      },
+      { ...GHEE, priceCents: 899, stock: 12 },
+      { ...DIYA, priceCents: 1450, stock: null },
+    ]);
+  });
+
+  it('matches listings to photos by the number the reply gives, not by their order in it', async () => {
+    const reversed = replyWith([{ photo: 1, ...DIYA }, { photo: 0, ...GHEE }]);
+
+    expect(await draftsOf([reversed], { images: photos })).toEqual([
+      { ...GHEE, priceCents: 899, stock: 12 },
+      { ...DIYA, priceCents: 1450, stock: null },
     ]);
   });
 
@@ -457,7 +468,7 @@ describe('listings from photos', () => {
     const three = [photos[0], photos[1], photos[0]];
     const replies = [
       replyWith([item('GHEE-1'), item('PHOTO-1')]),
-      replyWith([item('bad sku!'), item('ghee-1'), item('PHOTO-2')]),
+      replyWith([photoItem(0, 'bad sku!'), photoItem(1, 'ghee-1'), photoItem(2, 'PHOTO-2')]),
     ];
 
     const drafts = await draftsOf(replies, { rows: [row('GHEE-1'), row('PHOTO-1')], images: three });
@@ -465,15 +476,21 @@ describe('listings from photos', () => {
     expect(drafts.map((draft) => draft.sku)).toEqual(['GHEE-1', 'PHOTO-1', 'PHOTO-1-2', 'PHOTO-2', 'PHOTO-3']);
   });
 
-  it('fails when the reply does not list every photo', async () => {
-    const { result } = await build([replyWith([item('GHEE-500ML')])], { images: photos });
+  it.each<[string, object[], string]>([
+    ['names one photo twice', [photoItem(0, 'A'), photoItem(0, 'B')], 'The reply listed photo 0 more than once'],
+    ['leaves a photo out', [photoItem(1, 'B')], 'The reply did not list photo 0'],
+    ['names a photo that was not sent', [photoItem(0, 'A'), photoItem(2, 'C')], 'The reply listed photo 2, but the photos are numbered 0 to 1'],
+    ['names a photo below 0', [photoItem(-1, 'Z'), photoItem(1, 'B')], 'The reply listed photo -1, but the photos are numbered 0 to 1'],
+  ])('fails when the reply %s', async (_, items, detail) => {
+    const { result } = await build([replyWith(items)], { images: photos });
 
-    expect(result).toEqual({
-      ok: false,
-      error: 'invalid_output',
-      callId: expect.any(String),
-      detail: 'The reply listed 1 of 2 photos',
-    });
+    expect(result).toEqual({ ok: false, error: 'invalid_output', callId: expect.any(String), detail });
+  });
+
+  it('fails when a listing has no photo number', async () => {
+    const { result } = await build([replyWith([item('A'), item('B')])], { images: photos });
+
+    expect(result).toMatchObject({ ok: false, error: 'invalid_output', callId: expect.any(String) });
   });
 });
 

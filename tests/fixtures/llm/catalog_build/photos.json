@@ -6,7 +6,7 @@
   "content": [
     {
       "type": "text",
-      "text": "{\"items\":[{\"sku\":\"GHEE-500ML\",\"title\":\"Cow Ghee, 500 ml\",\"description\":\"A glass jar of cow ghee labelled 500 ml.\",\"category\":\"groceries\",\"screening\":{\"suspicious\":false,\"reason\":null}},{\"sku\":\"BRASS-DIYA\",\"title\":\"Brass Diya Oil Lamp\",\"description\":\"A small brass oil lamp with a single wick.\",\"category\":\"home_decor\",\"screening\":{\"suspicious\":false,\"reason\":null}}]}",
+      "text": "{\"items\":[{\"photo\":0,\"sku\":\"GHEE-500ML\",\"title\":\"Cow Ghee, 500 ml\",\"description\":\"A glass jar of cow ghee labelled 500 ml.\",\"category\":\"groceries\",\"screening\":{\"suspicious\":false,\"reason\":null}},{\"photo\":1,\"sku\":\"BRASS-DIYA\",\"title\":\"Brass Diya Oil Lamp\",\"description\":\"A small brass oil lamp with a single wick.\",\"category\":\"home_decor\",\"screening\":{\"suspicious\":false,\"reason\":null}}]}",
       "citations": null
     }
   ],

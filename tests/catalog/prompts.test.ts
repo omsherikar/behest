@@ -21,3 +21,8 @@ it('says how the wrapper writes a less-than sign', () => expect(CATALOG_SYSTEM_P
 
 it('holds no calendar date, so every request sends the same prompt', () =>
   expect(CATALOG_SYSTEM_PROMPT).not.toMatch(/\d{4}-\d{2}-\d{2}/));
+
+it('numbers photos from 0 and asks for that number on each photo listing', () => {
+  expect(CATALOG_SYSTEM_PROMPT).toContain('labelled Photo 0, Photo 1 and so on');
+  expect(CATALOG_SYSTEM_PROMPT).toContain('with photo set to the number in its label');
+});

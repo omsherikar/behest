@@ -315,13 +315,22 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
       {
         id: 'purchaseEvents',
         name: 'Purchase events',
-        description: 'The append-only log of each purchase: state transitions and agent steps.',
-        data: data.purchaseEvents.map((e) => ({ ...e, kind: words(e.kind) })),
+        description:
+          'The append-only log of each purchase. Status events record a status change, with the status before and after; ' +
+          'the seller sees only those.',
+        data: data.purchaseEvents.map((e) => ({
+          ...e,
+          kind: words(e.kind),
+          from: e.from && words(e.from),
+          to: e.to && words(e.to),
+        })),
         fields: fields([
           ['id', 'Event ID', 'textFormat', true],
           ['purchaseId', 'Purchase ID', 'textFormat', true],
           ['seq', 'Event order', 'integerFormat', true],
           ['kind', 'Event', 'textFormat'],
+          ['from', 'Status before', 'textFormat'],
+          ['to', 'Status after', 'textFormat'],
           ['createdAt', 'Event time', 'dateTimeFormat'],
         ]),
       },

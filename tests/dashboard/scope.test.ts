@@ -102,10 +102,10 @@ async function seed(db: Db) {
       })
       .returning();
     ids[p.label] = row.id;
-    // A status transition (its kind is the new status) and an agent step, which is buyer-private.
+    // A status transition, and a gate event that is between the buyer and Behest.
     await db.insert(purchaseEvents).values([
-      { purchaseId: row.id, kind: 'settled', data: { note: p.label } },
-      { purchaseId: row.id, kind: 'agent_step', data: { thought: `searched for ${p.label}` } },
+      { purchaseId: row.id, kind: 'status', data: { from: 'accepted', to: 'settled', note: p.label } },
+      { purchaseId: row.id, kind: 'gate', data: { verdict: 'ALLOW', reasons: [`checked ${p.label}`] } },
     ]);
     await db.insert(receipts).values({ purchaseId: row.id, jws: `receipt.${p.label}.sig`, payloadHash: HASH, keyId: 'k1' });
     await db.insert(payouts).values({
@@ -155,7 +155,7 @@ describe('loadDashboardData for the buyer', () => {
   it('sees its purchases in full: the request, the gate outcomes and every event', async () => {
     const data = await loadDashboardData(db, 'buyer', noTransactions());
     expect(data.purchases[0]).toMatchObject({ request: expect.any(String), gateOutcomes: expect.any(Array) });
-    expect(new Set(data.purchaseEvents.map((e) => e.kind))).toEqual(new Set(['settled', 'agent_step']));
+    expect(new Set(data.purchaseEvents.map((e) => e.kind))).toEqual(new Set(['status', 'gate']));
   });
 
   it('sees every seller catalogue, which is public', async () => {
@@ -217,10 +217,13 @@ describe('loadDashboardData for the seller', () => {
     expect(data.purchases[0]).toMatchObject({ verdict: 'ALLOW', status: 'settled', totalCents: expect.any(Number) });
   });
 
-  it("sees only status transitions in the event log, never the agent's steps", async () => {
+  it('sees only status transitions in the event log, with just their from, to and time', async () => {
     const data = await loadDashboardData(db, 'seller', noTransactions());
     expect(data.purchaseEvents.length).toBeGreaterThan(0);
-    expect(data.purchaseEvents.every((e) => e.kind === 'settled')).toBe(true);
+    for (const event of data.purchaseEvents) {
+      expect(Object.keys(event).sort()).toEqual(['createdAt', 'from', 'id', 'kind', 'purchaseId', 'seq', 'to']);
+      expect(event).toMatchObject({ kind: 'status', from: 'accepted', to: 'settled' });
+    }
   });
 
   it('sees only its own seller record and catalogue, and no mandates', async () => {
@@ -322,6 +325,8 @@ describe('dashboard rows', () => {
     expect(data.sellers[0]).not.toHaveProperty('payoutEmail');
     expect(data.purchases[0]).not.toHaveProperty('approveUrl');
     expect(data.purchaseEvents[0]).not.toHaveProperty('data');
+    const gate = data.purchaseEvents.find((e) => e.kind === 'gate');
+    expect(gate).toMatchObject({ from: null, to: null });
   });
 
   it('carry what the dashboard draws from: verdicts, rule outcomes, cart and receipt', async () => {

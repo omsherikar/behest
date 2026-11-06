@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, type SQL } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import {
   buyers,
@@ -65,7 +65,20 @@ export type DashboardPurchase = SellerPurchase & {
   approver: 'policy' | 'human' | null;
 };
 
-export type DashboardPurchaseEvent = { id: string; purchaseId: string; seq: number; kind: string; createdAt: string };
+/**
+ * One entry of a purchase's event log. A status transition has kind `status` and carries the
+ * statuses it moved between; every other kind (gate, intent, charge, capture and so on) has null
+ * `from` and `to`, and its payload is never sent.
+ */
+export type DashboardPurchaseEvent = {
+  id: string;
+  purchaseId: string;
+  seq: number;
+  kind: string;
+  from: PurchaseStatus | null;
+  to: PurchaseStatus | null;
+  createdAt: string;
+};
 
 export type DashboardReceipt = { id: string; purchaseId: string; jws: string; keyId: string; createdAt: string };
 
@@ -231,9 +244,12 @@ export async function loadDashboardData(db: Db, persona: Persona, deps: Dashboar
   return { ...common, persona, purchases: purchaseRows, mandates: mandateRows };
 }
 
-// A status transition is logged under the status it moves the purchase into; anything else in
-// the log (the agent's steps, the gate's and the intent check's work) is between buyer and Behest.
-const STATUS_TRANSITIONS: string[] = purchaseStatus.enumValues;
+// Every status transition is logged as kind `status` with data `{ from, to }`. The seller sees only
+// those, and only their statuses and time: every other event is between the buyer and Behest.
+const STATUS_EVENT = 'status';
+
+const asStatus = (value: unknown): PurchaseStatus | null =>
+  (purchaseStatus.enumValues as readonly unknown[]).includes(value) ? (value as PurchaseStatus) : null;
 
 async function purchaseTables(
   db: Db,
@@ -274,11 +290,12 @@ async function purchaseTables(
       purchaseId: purchaseEvents.purchaseId,
       seq: purchaseEvents.seq,
       kind: purchaseEvents.kind,
+      data: purchaseEvents.data,
       createdAt: purchaseEvents.createdAt,
     })
     .from(purchaseEvents)
     .innerJoin(purchases, eq(purchaseEvents.purchaseId, purchases.id))
-    .where(persona === 'seller' ? and(inScope, inArray(purchaseEvents.kind, STATUS_TRANSITIONS)) : inScope)
+    .where(persona === 'seller' ? and(inScope, eq(purchaseEvents.kind, STATUS_EVENT)) : inScope)
     .orderBy(asc(purchaseEvents.seq));
 
   const receiptRows = await db
@@ -320,7 +337,15 @@ async function purchaseTables(
       capturedAt: isoOrNull(p.capturedAt),
       createdAt: iso(p.createdAt),
     })),
-    eventRows.map((e) => ({ ...e, createdAt: iso(e.createdAt) })),
+    eventRows.map(({ data, ...e }) => {
+      const status = e.kind === STATUS_EVENT;
+      return {
+        ...e,
+        from: status ? asStatus(data.from) : null,
+        to: status ? asStatus(data.to) : null,
+        createdAt: iso(e.createdAt),
+      };
+    }),
     receiptRows.map((r) => ({ ...r, createdAt: iso(r.createdAt) })),
     payoutRows.map((p) => ({ ...p, createdAt: iso(p.createdAt), updatedAt: iso(p.updatedAt) })),
   ];

@@ -459,6 +459,17 @@ it('hands each reply to onMessage as it arrives', async () => {
   expect(onMessage.mock.calls.map(([message]) => message.stop_reason)).toEqual(['tool_use', 'end_turn']);
 });
 
+it('lets an error thrown by onMessage propagate once the turn is logged, without running its tools', async () => {
+  const { db, run, loop } = await setup([messageJson({ toolUses: [searchCall] }), messageJson({ text: 'Done.' })]);
+  const onMessage = () => {
+    throw new Error('The trace could not be saved');
+  };
+
+  await expect(loop({ onMessage })).rejects.toThrow('The trace could not be saved');
+  expect(run).not.toHaveBeenCalled();
+  expect(await db.select().from(llmCalls)).toEqual([expect.objectContaining({ ok: true, stopReason: 'tool_use' })]);
+});
+
 it('refuses a maxTurns that is not a whole number of turns, 1 or more', async () => {
   const { fake, loop } = await setup([]);
 

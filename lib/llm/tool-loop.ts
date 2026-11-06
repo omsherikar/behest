@@ -40,7 +40,7 @@ export type ToolLoopRequest = {
   tools: BetaRunnableTool<any>[]; // eslint-disable-line @typescript-eslint/no-explicit-any -- each tool has its own input type
   /** The most requests the loop makes. */
   maxTurns: number;
-  /** Called with each reply as it arrives, after it is logged. */
+  /** Called with each reply as it arrives, after it is logged. What it throws propagates. */
   onMessage?: (message: BetaMessage) => void;
 };
 
@@ -54,7 +54,8 @@ export type ToolLoopRequest = {
  * Every failure of a request comes back as an LlmResult failure, with the turns before it logged. A
  * refused or cut-off turn ends the loop without running its tool calls, and so does a reply holding
  * a tool call from a model that declined the request (api_error). Only misconfiguration (an
- * override, cap, turn limit or tool it cannot use) and database errors throw.
+ * override, cap, turn limit or tool it cannot use), database errors and an error thrown by
+ * `onMessage` throw; the last stops the loop after the reply is logged and before its tools run.
  */
 export async function runToolLoop(
   deps: LlmDeps,

@@ -242,7 +242,9 @@ async function recordSuccess(db: Db, purchaseId: string): Promise<void> {
   await db.transaction(async (tx) => {
     const status = await lockPurchase(tx, purchaseId);
     const firstSeen = await setPayoutStatus(tx, purchaseId, 'SUCCESS');
-    if (status === 'accepted') await transition(tx, purchaseId, 'accepted', 'settled');
+    // Settle only when this call stored SUCCESS: a late answer from an abandoned run must not settle a
+    // purchase whose payout is already recorded as failed.
+    if (status === 'accepted' && firstSeen) await transition(tx, purchaseId, 'accepted', 'settled');
     else if (status === 'refunded' && firstSeen) await appendEvent(tx, purchaseId, 'payout_after_refund', { status });
   });
 }

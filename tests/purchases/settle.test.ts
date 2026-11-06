@@ -477,6 +477,20 @@ describe('pollPayout', () => {
       expect(await statusOf(db, purchaseId)).toBe('accepted');
       expect((await eventsOf(db, purchaseId)).map((e) => e.kind)).toEqual(['payout_failed']);
     });
+
+    it('cannot settle a purchase with a late paid answer once the payout is recorded as failed', async () => {
+      const setup = await sent();
+      const { db, paypal, purchaseId, deps, batchId } = setup;
+      const abandoned = await abandonedPoll(setup);
+      paypal.setPayoutStatus(batchId, { batchStatus: 'SUCCESS', itemStatus: 'REVERSED' });
+      expect(await pollPayout(deps, purchaseId)).toBe('done');
+
+      await abandoned.answer({ batchStatus: 'SUCCESS', itemStatus: 'SUCCESS' });
+
+      expect(await payoutRows(db)).toEqual([expect.objectContaining({ status: 'REVERSED' })]);
+      expect(await statusOf(db, purchaseId)).toBe('accepted');
+      expect((await eventsOf(db, purchaseId)).map((e) => e.kind)).toEqual(['payout_failed']);
+    });
   });
 
   describe('when PayPal cannot answer the status check', () => {

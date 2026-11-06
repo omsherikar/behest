@@ -223,6 +223,17 @@ describe('POST /api/mandates/confirm', () => {
     expect(await db.select().from(wallets)).toEqual([]);
   });
 
+  it('refuses a body over 64 KiB with 413, signing nothing', async () => {
+    await addDemoBuyer();
+
+    expect(await answer(await POST(await request({ ...confirmed(), padding: 'a'.repeat(64 * 1024) })))).toEqual({
+      status: 413,
+      body: { error: { message: 'This request is too large.' } },
+    });
+    expect(await db.select().from(mandates)).toEqual([]);
+    expect(paypal.calls).toEqual([]);
+  });
+
   it('counts confirms per address and persona against the model route limit, and answers 429 past it', async () => {
     await addDemoBuyer();
     vi.mocked(rateLimit).mockReturnValueOnce(false);

@@ -1,6 +1,7 @@
 import { connection, type NextRequest } from 'next/server';
 import { appDb, appPaypal, appSigner, appUrl, demoBuyerId } from '@/lib/app-deps';
 import { wallets } from '@/lib/db/schema';
+import { FORM_BODY_BYTES, readBody } from '@/lib/http/read-body';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { confirmMandate, MandateConfirmError, type MandateConfirmErrorCode } from '@/lib/mandate/confirm';
 import { isConfirmToken } from '@/lib/mandate/confirm-token';
@@ -32,7 +33,14 @@ export async function POST(request: NextRequest) {
     return error(429, 'Too many requests at once. Try again in a minute.');
   }
 
-  const body: unknown = await request.json().catch(() => undefined);
+  const raw = await readBody(request, FORM_BODY_BYTES);
+  if (raw === null) return error(413, 'This request is too large.');
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    body = undefined;
+  }
   if (!isObject(body) || typeof body.text !== 'string' || !isObject(body.policy)) {
     return error(400, 'Send the mandate text and the policy compiled from it.');
   }

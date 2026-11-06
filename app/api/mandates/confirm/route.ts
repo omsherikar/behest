@@ -1,3 +1,4 @@
+import { eq, ne } from 'drizzle-orm';
 import { connection, type NextRequest } from 'next/server';
 import { appDb, appPaypal, appSigner, appUrl, demoBuyerId } from '@/lib/app-deps';
 import { wallets } from '@/lib/db/schema';
@@ -8,10 +9,11 @@ import { isConfirmToken } from '@/lib/mandate/confirm-token';
 import { clientAddress, MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { personaRefusal } from '@/lib/session';
 
-// Signs the buyer's mandate, then starts linking their PayPal wallet: it creates a vault setup token
-// for the buyer to approve at PayPal and keeps it on the buyer's one wallet row, as pending, for the
-// wallet return route to finish. Only a policy from a compile that left no question open is signed,
-// which the confirm token from that compile proves.
+// Signs the buyer's mandate, then starts linking their PayPal wallet unless one is already linked: it
+// creates a vault setup token for the buyer to approve at PayPal and keeps it on the buyer's one wallet
+// row, as pending, for the wallet return route to finish. A linked wallet stays linked and pays within
+// the new mandate. Only a policy from a compile that left no question open is signed, which the
+// confirm token from that compile proves.
 
 const ROUTE = 'mandate_confirm';
 
@@ -22,7 +24,10 @@ const error = (status: number, message: string) => Response.json({ error: { mess
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** `POST { text, policy, confirmToken }`: signs the mandate and returns `{ mandateId, approveUrl }`. */
+/**
+ * `POST { text, policy, confirmToken }`: signs the mandate and returns `{ mandateId, approveUrl }`,
+ * where `approveUrl` is null when the buyer's wallet is already linked.
+ */
 export async function POST(request: NextRequest) {
   // Writes to the database on every request, never at build time.
   await connection();
@@ -67,6 +72,9 @@ export async function POST(request: NextRequest) {
     throw failure;
   }
 
+  const [wallet] = await db.select({ status: wallets.status }).from(wallets).where(eq(wallets.buyerId, buyerId));
+  if (wallet?.status === 'linked') return Response.json({ mandateId, approveUrl: null });
+
   let setup: { id: string; approveUrl: string; customerId: string };
   try {
     setup = await paypal.createSetupToken({
@@ -79,7 +87,8 @@ export async function POST(request: NextRequest) {
     return error(502, 'Your mandate is signed, but PayPal could not start linking your wallet. Confirm again to retry.');
   }
 
-  // A buyer has one wallet row, so a new link replaces the last one until the buyer approves it.
+  // A buyer has one wallet row: a new link replaces a pending or revoked one, never a linked one, so
+  // a wallet linked while PayPal answered stays linked and this setup token goes unused.
   const pending = {
     status: 'pending' as const,
     setupTokenId: setup.id,
@@ -87,10 +96,11 @@ export async function POST(request: NextRequest) {
     paymentTokenId: null,
     linkedAt: null,
   };
-  await db
+  const stored = await db
     .insert(wallets)
     .values({ buyerId, ...pending })
-    .onConflictDoUpdate({ target: wallets.buyerId, set: pending });
+    .onConflictDoUpdate({ target: wallets.buyerId, set: pending, setWhere: ne(wallets.status, 'linked') })
+    .returning({ id: wallets.id });
 
-  return Response.json({ mandateId, approveUrl: setup.approveUrl });
+  return Response.json({ mandateId, approveUrl: stored.length > 0 ? setup.approveUrl : null });
 }

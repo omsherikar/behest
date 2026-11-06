@@ -129,19 +129,37 @@ describe('POST /api/mandates/confirm', () => {
     expect(await db.select().from(wallets)).toEqual([expect.objectContaining({ buyerId: buyer.id, status: 'pending' })]);
   });
 
-  it("replaces the buyer's linked wallet with a pending one for the new setup token", async () => {
+  /** A wallet the buyer linked earlier. */
+  const linkedWallet = (buyerId: string) => ({
+    buyerId,
+    status: 'linked' as const,
+    setupTokenId: 'SETUP-OLD',
+    paypalCustomerId: 'CUSTOMER-OLD',
+    paymentTokenId: 'TOKEN-OLD',
+    linkedAt: new Date('2026-11-01T10:00:00Z'),
+  });
+
+  it("signs the mandate but keeps the buyer's linked wallet linked, with no PayPal call and no approve URL", async () => {
     const buyerId = await addDemoBuyer();
-    await db.insert(wallets).values({
-      buyerId,
-      status: 'linked',
-      setupTokenId: 'SETUP-OLD',
-      paypalCustomerId: 'CUSTOMER-OLD',
-      paymentTokenId: 'TOKEN-OLD',
-      linkedAt: new Date('2026-11-01T10:00:00Z'),
+    await db.insert(wallets).values(linkedWallet(buyerId));
+
+    const { status, body } = await answer(await POST(await request(confirmed())));
+
+    expect(status).toBe(200);
+    expect(body).toEqual({ mandateId: expect.any(String), approveUrl: null });
+    expect(await db.select().from(mandates)).toEqual([expect.objectContaining({ id: body.mandateId, status: 'active' })]);
+    expect(paypal.calls).toEqual([]);
+    expect(await db.select().from(wallets)).toEqual([expect.objectContaining(linkedWallet(buyerId))]);
+  });
+
+  it.each(['pending', 'revoked'] as const)('replaces a %s wallet with one pending on the new setup token', async (walletStatus) => {
+    const buyerId = await addDemoBuyer();
+    await db.insert(wallets).values({ buyerId, status: walletStatus, setupTokenId: 'SETUP-OLD', paypalCustomerId: 'CUSTOMER-OLD' });
+
+    expect(await answer(await POST(await request(confirmed())))).toEqual({
+      status: 200,
+      body: { mandateId: expect.any(String), approveUrl: APPROVE_URL },
     });
-
-    expect((await POST(await request(confirmed()))).status).toBe(200);
-
     expect(await db.select().from(wallets)).toEqual([
       expect.objectContaining({
         buyerId,
@@ -152,6 +170,21 @@ describe('POST /api/mandates/confirm', () => {
         linkedAt: null,
       }),
     ]);
+  });
+
+  it('keeps a wallet that was linked while PayPal answered linked, and gives no approve URL', async () => {
+    const buyerId = await addDemoBuyer();
+    const createSetupToken = paypal.createSetupToken.bind(paypal);
+    vi.spyOn(paypal, 'createSetupToken').mockImplementation(async (i) => {
+      await db.insert(wallets).values(linkedWallet(buyerId));
+      return createSetupToken(i);
+    });
+
+    expect(await answer(await POST(await request(confirmed())))).toEqual({
+      status: 200,
+      body: { mandateId: expect.any(String), approveUrl: null },
+    });
+    expect(await db.select().from(wallets)).toEqual([expect.objectContaining(linkedWallet(buyerId))]);
   });
 
   const wider: MandatePolicy = { ...demoPolicy, budget: { amountCents: 600_000, period: 'month' }, perPurchaseMaxCents: 600_000 };

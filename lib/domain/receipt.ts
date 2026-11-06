@@ -48,7 +48,8 @@ export const ReceiptPayload = z
               result: z.enum(['pass', 'ask', 'block', 'skip']),
             })
             .strict(),
-        ),
+        )
+        .min(1),
       })
       .strict(),
     payment: z

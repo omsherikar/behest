@@ -48,6 +48,7 @@ it.each([
   ['a capture time that is not ISO', { ...receipt, payment: { ...receipt.payment, capturedAt: 'yesterday' } }],
   ['a cart hash that is not sha256 hex', { ...receipt, cart: { ...receipt.cart, hash: 'abc' } }],
   ['an outcome with extra fields', { ...receipt, decision: { ...receipt.decision, outcomes: [{ rule: 'velocity', result: 'pass', detail: 'x' }] } }],
+  ['no rule outcomes', { ...receipt, decision: { ...receipt.decision, outcomes: [] } }],
   ['unknown keys', { ...receipt, note: 'x' }],
 ])('rejects a receipt with %s', (_, input) => expect(ReceiptPayload.safeParse(input).success).toBe(false));
 

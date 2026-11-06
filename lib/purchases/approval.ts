@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import { purchases } from '@/lib/db/schema';
-import { enqueue } from '@/lib/jobs/queue';
+import { enqueue, type JobOutcome } from '@/lib/jobs/queue';
 import type { PaypalPort } from '@/lib/paypal/port';
 import { purchaseOutcome, recordCharge, takePayment, type PaymentRequest } from './charge';
 import type { ProposalOutcome, PurchaseDeps } from './deps';
@@ -82,6 +82,31 @@ export async function completeApproval(deps: CaptureDeps, orderId: string): Prom
   const request = await enterCharging(deps, purchase.id, orderId);
   if (!request) return purchaseOutcome(db, purchase.id);
   return takePayment(deps, purchase.id, request);
+}
+
+/**
+ * Cancels a purchase its buyer has not approved in time, releasing its budget: the handler of the
+ * `approval_expiry` job queued with every approval. With the purchase locked, it moves it from
+ * `awaiting_approval` to `cancelled` and logs `approval_expired`, so of an expiry and an approval
+ * that race exactly one moves the purchase, and a cancelled purchase is never captured. `done`, and
+ * nothing else changes, for a purchase in any other status, except one `charging` with no capture
+ * recorded: its capture is still in flight and PayPal may yet send it back for approval, so `retry`
+ * checks again after a backoff. Throws for a purchase that does not exist.
+ */
+export async function expireApproval({ db }: Pick<PurchaseDeps, 'db'>, purchaseId: string): Promise<JobOutcome> {
+  return db.transaction(async (tx) => {
+    const [purchase] = await tx
+      .select({ status: purchases.status, captureId: purchases.paypalCaptureId })
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId))
+      .for('update');
+    if (!purchase) throw new Error(`there is no purchase ${purchaseId}`);
+    if (purchase.status === 'charging' && purchase.captureId === null) return 'retry';
+    if (purchase.status !== 'awaiting_approval') return 'done';
+    await appendEvent(tx, purchaseId, 'approval_expired', {});
+    await transition(tx, purchaseId, 'awaiting_approval', 'cancelled');
+    return 'done';
+  });
 }
 
 /**

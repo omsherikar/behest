@@ -1,13 +1,16 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { jobs, mandates, purchases, receipts } from '@/lib/db/schema';
 import { runDueJobs } from '@/lib/jobs/queue';
-import { completeApproval, startApproval } from '@/lib/purchases/approval';
+import { evaluateGate, type CatalogEntry } from '@/lib/gate/evaluate';
+import { completeApproval, expireApproval, startApproval } from '@/lib/purchases/approval';
 import { retryCharge } from '@/lib/purchases/charge';
 import type { PurchaseDeps } from '@/lib/purchases/deps';
+import { COUNTS_AGAINST_BUDGET } from '@/lib/purchases/transitions';
 import { hashOf } from '@/lib/receipts/canonical';
 import { verifyReceipt } from '@/lib/receipts/verify-receipt';
 import type { FakePaypal } from '@/tests/helpers/fake-paypal';
+import { demoPolicy } from '@/tests/helpers/fixtures';
 import { jwks, NOW, PASSED, setUp } from '@/tests/helpers/purchase-deps';
 import { eventsOf, purchaseRow, SEEDED_SELLER, seededCart, statusOf } from '@/tests/helpers/seed-purchase';
 import { createTestDb } from '@/tests/helpers/test-db';
@@ -40,6 +43,36 @@ function captureCalls(paypal: FakePaypal): [string, string][] {
 /** The kinds of the purchase's events other than status changes, in order. */
 async function stepsOf(db: PurchaseDeps['db'], purchaseId: string): Promise<string[]> {
   return (await eventsOf(db, purchaseId)).filter((e) => e.kind !== 'status').map((e) => e.kind);
+}
+
+/** Runs the jobs due by the clock, with expireApproval as the `approval_expiry` handler. */
+function runExpiryJobs(deps: PurchaseDeps, clock: { now: Date }): Promise<number> {
+  return runDueJobs(deps.db, { approval_expiry: (payload, d) => expireApproval(d, String(payload.purchaseId)) }, deps, () => clock.now);
+}
+
+/**
+ * The gate's budget check of the buyer's next proposal, ten jars of turmeric for $45.00, with the
+ * spend a proposal reserves against the $60.00 monthly budget: every purchase of the buyer in a
+ * status that counts against it. All of them were made this month.
+ */
+async function budgetCheckOfNextProposal(db: PurchaseDeps['db'], buyerId: string) {
+  const held = await db
+    .select({ totalCents: purchases.totalCents })
+    .from(purchases)
+    .where(and(eq(purchases.buyerId, buyerId), inArray(purchases.status, [...COUNTS_AGAINST_BUDGET])));
+  const turmeric: CatalogEntry = { sku: 'TUR-100', title: 'Turmeric, 100 g', category: 'spices', priceCents: 450, stock: null, flags: [], marketMedianCents: null };
+  const { outcomes } = evaluateGate({
+    policy: demoPolicy,
+    mandate: { status: 'active', expiresAt: null },
+    walletLinked: true,
+    seller: { slug: SEEDED_SELLER.slug, name: SEEDED_SELLER.name },
+    proposal: { sellerSlug: SEEDED_SELLER.slug, items: [{ sku: 'TUR-100', quantity: 10 }], rationale: 'More turmeric' },
+    catalog: new Map([[turmeric.sku, turmeric]]),
+    spentInPeriodCents: held.reduce((sum, p) => sum + (p.totalCents ?? 0), 0),
+    recentPurchaseTimes: [],
+    now: NOW,
+  });
+  return outcomes.find((o) => o.rule === 'budget_remaining');
 }
 
 /** Runs the jobs due by the clock, with retryCharge as the `charge_retry` handler. */
@@ -458,5 +491,123 @@ describe('retrying the capture of an approved order', () => {
 
     expect(captureCalls(paypal)).toHaveLength(2);
     expect(await statusOf(db, purchaseId)).toBe('charging');
+  });
+});
+
+describe('expireApproval', () => {
+  it('cancels a purchase left unapproved for three hours from its job, releasing its budget for the next proposal', async () => {
+    const { db, deps, clock, paypal, buyerId, purchaseId } = await setUpAwaiting({ approve: false });
+    expect(await budgetCheckOfNextProposal(db, buyerId)).toMatchObject({ result: 'block' });
+    clock.now = new Date(EXPIRES_AT.getTime() - 1);
+    expect(await runExpiryJobs(deps, clock)).toBe(0);
+    clock.now = EXPIRES_AT;
+
+    expect(await runExpiryJobs(deps, clock)).toBe(1);
+
+    expect(await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.kind, 'approval_expiry'))).toEqual([{ status: 'done' }]);
+    expect(await statusOf(db, purchaseId)).toBe('cancelled');
+    expect((await eventsOf(db, purchaseId)).slice(2)).toEqual([
+      { kind: 'approval_expired', data: {} },
+      { kind: 'status', data: { from: 'awaiting_approval', to: 'cancelled' } },
+    ]);
+    expect(captureCalls(paypal)).toEqual([]);
+    expect(await budgetCheckOfNextProposal(db, buyerId)).toMatchObject({ result: 'pass' });
+  });
+
+  it('does nothing once the buyer has approved and the order is captured', async () => {
+    const { db, deps, purchaseId, orderId } = await setUpAwaiting();
+    await completeApproval(deps, orderId);
+    const before = await eventsOf(db, purchaseId);
+
+    expect(await expireApproval(deps, purchaseId)).toBe('done');
+
+    expect(await statusOf(db, purchaseId)).toBe('accepted');
+    expect(await eventsOf(db, purchaseId)).toEqual(before);
+  });
+
+  it('never captures a purchase it cancelled, even if the buyer approves the order later', async () => {
+    const { db, deps, paypal, seller, purchaseId, orderId } = await setUpAwaiting({ approve: false });
+    await expireApproval(deps, purchaseId);
+    paypal.approve(orderId);
+
+    const outcome = await completeApproval(deps, orderId);
+
+    expect(outcome).toMatchObject({ status: 'cancelled', receiptId: null });
+    expect(captureCalls(paypal)).toEqual([]);
+    expect(await db.select().from(receipts)).toEqual([]);
+    expect(seller.orders).toEqual([]);
+    expect(await stepsOf(db, purchaseId)).toEqual(['approval_order', 'approval_expired']);
+  });
+
+  it.each(['expiry first', 'approval first'])('lets exactly one of an expiry and an approval through when both are called at once, %s', async (order) => {
+    const { db, deps, paypal, purchaseId, orderId } = await setUpAwaiting();
+    const expire = () => expireApproval(deps, purchaseId);
+    const approve = () => completeApproval(deps, orderId);
+
+    await Promise.all(order === 'expiry first' ? [expire(), approve()] : [approve(), expire()]);
+
+    const steps = await stepsOf(db, purchaseId);
+    const winners = steps.filter((kind) => kind === 'approval_expired' || kind === 'charge');
+    expect(winners).toHaveLength(1);
+    const [winner] = winners;
+    const ended = {
+      status: await statusOf(db, purchaseId),
+      captureCalls: captureCalls(paypal).length,
+      captures: paypal.captures.length,
+      receipts: (await db.select().from(receipts)).length,
+    };
+    expect(ended).toEqual(
+      winner === 'approval_expired'
+        ? { status: 'cancelled', captureCalls: 0, captures: 0, receipts: 0 }
+        : { status: 'accepted', captureCalls: 1, captures: 1, receipts: 1 },
+    );
+  });
+
+  it('leaves a purchase alone while its approval is being captured, so the approval completes', async () => {
+    const { db, deps, paypal, purchaseId, orderId } = await setUpAwaiting();
+    const capture = paypal.captureOrder.bind(paypal);
+    const expiries: string[] = [];
+    paypal.captureOrder = async (id, requestId) => {
+      expiries.push(await expireApproval(deps, purchaseId));
+      return capture(id, requestId);
+    };
+
+    const outcome = await completeApproval(deps, orderId);
+
+    expect(expiries).toEqual(['retry']);
+    expect(outcome.status).toBe('accepted');
+    expect(paypal.captures).toHaveLength(1);
+    expect(await stepsOf(db, purchaseId)).not.toContain('approval_expired');
+    expect(await expireApproval(deps, purchaseId)).toBe('done');
+  });
+
+  it('waits for a capture still in flight, then cancels the purchase if PayPal sends it back for approval', async () => {
+    const { db, deps, clock, purchaseId } = await setUpUnknownCapture({ lost: false, approve: false });
+    clock.now = EXPIRES_AT;
+
+    expect(await expireApproval(deps, purchaseId)).toBe('retry');
+    expect(await statusOf(db, purchaseId)).toBe('charging');
+
+    await retryCharge(deps, purchaseId);
+    expect(await statusOf(db, purchaseId)).toBe('awaiting_approval');
+    expect(await expireApproval(deps, purchaseId)).toBe('done');
+
+    expect(await statusOf(db, purchaseId)).toBe('cancelled');
+  });
+
+  it('leaves a purchase whose capture is pending to the webhook that reports it', async () => {
+    const { db, deps, paypal, purchaseId, orderId } = await setUpAwaiting();
+    paypal.failNext('captureOrder', { status: 'PENDING' });
+    await completeApproval(deps, orderId);
+
+    expect(await expireApproval(deps, purchaseId)).toBe('done');
+
+    expect(await statusOf(db, purchaseId)).toBe('charging');
+  });
+
+  it('throws for a purchase that does not exist', async () => {
+    const { deps } = await setUpAwaiting();
+
+    await expect(expireApproval(deps, crypto.randomUUID())).rejects.toThrow('there is no purchase');
   });
 });

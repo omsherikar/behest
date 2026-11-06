@@ -266,6 +266,21 @@ describe('pollPayout', () => {
     },
   );
 
+  it.each(['DENIED', 'CANCELED'])('takes a batch PayPal %s before reporting an item as a failed payout', async (batchStatus) => {
+    const { db, paypal, purchaseId, deps, batchId } = await sent();
+    paypal.setPayoutStatus(batchId, { batchStatus, itemStatus: null });
+
+    expect(await pollPayout(deps, purchaseId)).toBe('done');
+    expect(await pollPayout(deps, purchaseId)).toBe('done');
+
+    expect(await statusOf(db, purchaseId)).toBe('accepted');
+    expect(await payoutRows(db)).toEqual([expect.objectContaining({ status: batchStatus })]);
+    expect(await eventsOf(db, purchaseId)).toEqual([
+      { kind: 'payout_failed', data: { payoutBatchId: batchId, batchStatus, itemStatus: null } },
+    ]);
+    expect(paypal.callsTo('getPayoutBatch')).toHaveLength(1);
+  });
+
   it('records a failed payout once, without asking PayPal again', async () => {
     const { db, paypal, purchaseId, deps, batchId } = await sent();
     paypal.setPayoutStatus(batchId, { batchStatus: 'SUCCESS', itemStatus: 'RETURNED' });

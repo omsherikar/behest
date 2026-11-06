@@ -1,5 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
-import type { Middleware } from '@anthropic-ai/sdk';
+import Anthropic, { type Middleware } from '@anthropic-ai/sdk';
 import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
 import type { BetaMessageParam, BetaRefusalStopDetails } from '@anthropic-ai/sdk/resources/beta/messages';
 import { z } from 'zod';
@@ -42,6 +41,11 @@ function refusalDetail(details: BetaRefusalStopDetails | null): string | undefin
   return details?.explanation ?? details?.category ?? undefined;
 }
 
+/**
+ * Asks the route's model for a reply matching `req.schema`, unless today's spend has reached the
+ * cap, and logs the call. Every failure of the call itself is returned; only misconfiguration
+ * (an override or cap it cannot honour) and database errors throw.
+ */
 export async function callStructured<T>(
   deps: LlmDeps,
   route: LlmRoute,

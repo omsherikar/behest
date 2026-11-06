@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   bigint,
   boolean,
@@ -9,6 +10,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import type { Cart } from '../domain/cart';
@@ -238,7 +240,13 @@ export const sellerOrders = pgTable(
     receiptJws: text('receipt_jws').notNull(),
     createdAt: createdAt(),
   },
-  (t) => [unique('seller_orders_receipt_seller_unique').on(t.receiptId, t.sellerId)],
+  // A receipt id is spent only by an accepted order, so a rejected attempt (even a forged one
+  // carrying a genuine receipt id) can never block the real order.
+  (t) => [
+    uniqueIndex('seller_orders_accepted_receipt_unique')
+      .on(t.receiptId, t.sellerId)
+      .where(sql`${t.status} = 'accepted'`),
+  ],
 );
 
 // Payouts, refunds and disputes

@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { expect, it } from 'vitest';
 import type { Db } from '@/lib/db/client';
-import { buyers, mandates, products, purchases, sellers, webhookEvents } from '@/lib/db/schema';
+import { buyers, mandates, products, purchases, sellerOrders, sellers, webhookEvents } from '@/lib/db/schema';
 import type { Cart } from '@/lib/domain/cart';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import type { PurchaseProposal } from '@/lib/domain/proposal';
@@ -153,4 +153,33 @@ it('rejects a duplicate webhook event id', async () => {
   };
   await db.insert(webhookEvents).values(event);
   await expect(db.insert(webhookEvents).values(event).execute()).rejects.toMatchObject(UNIQUE_VIOLATION);
+});
+
+function sellerOrderRow(sellerId: string, status: 'accepted' | 'rejected') {
+  return {
+    sellerId,
+    receiptId: '0b6a7c1e-3f52-4d8e-9a41-5c2e8f7d6b90',
+    status,
+    reason: status === 'rejected' ? 'cart_mismatch' : null,
+    cart,
+    receiptJws: 'header.payload.signature',
+  };
+}
+
+it('never lets a rejected order occupy a receipt id', async () => {
+  const db = await createTestDb();
+  const seller = await addSeller(db);
+  await db.insert(sellerOrders).values(sellerOrderRow(seller.id, 'rejected'));
+  await db.insert(sellerOrders).values(sellerOrderRow(seller.id, 'rejected'));
+  await db.insert(sellerOrders).values(sellerOrderRow(seller.id, 'accepted'));
+  expect(await db.select().from(sellerOrders)).toHaveLength(3);
+});
+
+it('rejects a second accepted order for one receipt at one seller', async () => {
+  const db = await createTestDb();
+  const seller = await addSeller(db);
+  await db.insert(sellerOrders).values(sellerOrderRow(seller.id, 'accepted'));
+  await expect(db.insert(sellerOrders).values(sellerOrderRow(seller.id, 'accepted')).execute()).rejects.toMatchObject(
+    UNIQUE_VIOLATION,
+  );
 });

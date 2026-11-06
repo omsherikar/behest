@@ -1,5 +1,5 @@
 {
-  "id": "a047b626-4e90-4bf3-91a7-527a69764587",
+  "id": "6e427079-784a-4f24-8747-5e9898e52b1e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1204,7 +1204,30 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "seller_orders_accepted_receipt_unique": {
+          "name": "seller_orders_accepted_receipt_unique",
+          "columns": [
+            {
+              "expression": "receipt_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "seller_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"seller_orders\".\"status\" = 'accepted'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "seller_orders_seller_id_sellers_id_fk": {
           "name": "seller_orders_seller_id_sellers_id_fk",
@@ -1221,16 +1244,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "seller_orders_receipt_seller_unique": {
-          "name": "seller_orders_receipt_seller_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "receipt_id",
-            "seller_id"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

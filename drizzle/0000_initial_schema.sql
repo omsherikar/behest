@@ -174,8 +174,7 @@ CREATE TABLE "seller_orders" (
 	"reason" text,
 	"cart" jsonb NOT NULL,
 	"receipt_jws" text NOT NULL,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "seller_orders_receipt_seller_unique" UNIQUE("receipt_id","seller_id")
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "sellers" (
@@ -222,4 +221,5 @@ ALTER TABLE "purchases" ADD CONSTRAINT "purchases_seller_id_sellers_id_fk" FOREI
 ALTER TABLE "receipts" ADD CONSTRAINT "receipts_purchase_id_purchases_id_fk" FOREIGN KEY ("purchase_id") REFERENCES "public"."purchases"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "refunds" ADD CONSTRAINT "refunds_purchase_id_purchases_id_fk" FOREIGN KEY ("purchase_id") REFERENCES "public"."purchases"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "seller_orders" ADD CONSTRAINT "seller_orders_seller_id_sellers_id_fk" FOREIGN KEY ("seller_id") REFERENCES "public"."sellers"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "wallets" ADD CONSTRAINT "wallets_buyer_id_buyers_id_fk" FOREIGN KEY ("buyer_id") REFERENCES "public"."buyers"("id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "wallets" ADD CONSTRAINT "wallets_buyer_id_buyers_id_fk" FOREIGN KEY ("buyer_id") REFERENCES "public"."buyers"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "seller_orders_accepted_receipt_unique" ON "seller_orders" USING btree ("receipt_id","seller_id") WHERE "seller_orders"."status" = 'accepted';

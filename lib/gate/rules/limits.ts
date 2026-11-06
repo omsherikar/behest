@@ -1,10 +1,10 @@
 import { formatUsd } from '@/lib/domain/money';
 import type { BudgetPeriod } from '@/lib/domain/policy';
+import { plural } from '@/lib/domain/words';
 import { atOrBelow, block, pass, type CartContext, type Check } from './check';
 
 // Hard limits: breaking any of them blocks the purchase.
 
-const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 const HOUR_MS = 60 * 60 * 1000;
 
 export function perPurchaseMax({ cart, policy }: CartContext): Check {

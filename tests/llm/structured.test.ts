@@ -253,6 +253,30 @@ it('maps a successful response that is not a message to api_error and logs it', 
   ]);
 });
 
+it('maps a reply with malformed usage iterations to api_error and logs it', async () => {
+  const withIterations = (iterations: unknown) => ({
+    ...messageJson({ json: { answer: 'yes' } }),
+    usage: { input_tokens: 10, output_tokens: 5, iterations },
+  });
+  const { db, call } = await setup([
+    withIterations([null]),
+    withIterations([{ type: 'message', model: 'claude-opus-5-5' }]),
+    withIterations('all of them'),
+  ]);
+
+  const results = [await call(), await call(), await call()];
+
+  for (const result of results) {
+    expect(result).toEqual({ ok: false, error: 'api_error', callId: expect.any(String), detail: expect.any(String) });
+  }
+  const rows = await db.select().from(llmCalls);
+  expect(rows.map((row) => [row.ok, row.requestId, row.costUsd, row.error?.split(':')[0]])).toEqual([
+    [false, 'req_fake_1', 0, 'api_error'],
+    [false, 'req_fake_2', 0, 'api_error'],
+    [false, 'req_fake_3', 0, 'api_error'],
+  ]);
+});
+
 it('honours CLAUDE_MODEL_ and CLAUDE_EFFORT_ overrides', async () => {
   const { db, fake, call } = await setup(
     [

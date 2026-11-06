@@ -176,6 +176,7 @@ export async function callStructured<T>(
   });
 
   let message;
+  let billed: BilledUsage;
   try {
     message = await deps.claude.beta.messages.parse(
       {
@@ -190,9 +191,10 @@ export async function callStructured<T>(
       { headers: { [ROUTE_HEADER]: route }, middleware: [captureRequestId] },
     );
     if (!isMessage(message)) throw new Error('The response was not a message');
+    billed = billedUsage(message, model);
   } catch (error) {
     // The SDK's errors, and anything a malformed response breaks while it is read, such as a 200
-    // carrying an HTML page.
+    // carrying an HTML page or usage that cannot be priced.
     const detail = error instanceof Error ? error.message : String(error);
     const callId = await recordCall(deps.db, { ...logged(deps.now()), ok: false, error: `api_error: ${detail}` });
     return { ok: false, error: 'api_error', callId, detail };
@@ -214,7 +216,7 @@ export async function callStructured<T>(
 
   const callId = await recordCall(deps.db, {
     ...logged(deps.now()),
-    ...billedUsage(message, model),
+    ...billed,
     stopReason: message.stop_reason,
     ok: outcome.ok,
     error: outcome.ok ? null : [outcome.error, outcome.detail].filter(Boolean).join(': '),

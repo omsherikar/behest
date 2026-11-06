@@ -1,5 +1,6 @@
-// Taking payment with Orders v2. A purchase over the approval limit becomes an order the buyer
-// approves on PayPal, captured once they return.
+// Taking payment with Orders v2. A purchase within the buyer's mandate charges their saved wallet
+// with no buyer present. A purchase over the approval limit becomes an order the buyer approves on
+// PayPal, captured once they return.
 //
 // Statuses are reported honestly: DECLINED only when PayPal says no money moved. Any other failure
 // is rethrown untouched, because the caller must treat it as a payment that may have gone through.
@@ -45,6 +46,30 @@ function isInstrumentDeclined(error: unknown): boolean {
 function purchaseUnit(amountCents: number, description: string, invoiceId: string) {
   return { amount: { currency_code: 'USD', value: toValue(amountCents) }, description, invoice_id: invoiceId };
 }
+
+export const chargeSavedWallet: PaypalPort['chargeSavedWallet'] = async (i) => {
+  let order: Order;
+  try {
+    order = await paypalRequest<Order>('POST', ORDERS, {
+      body: {
+        intent: 'CAPTURE',
+        purchase_units: [purchaseUnit(i.amountCents, i.description, i.invoiceId)],
+        payment_source: { paypal: { vault_id: i.paymentTokenId } },
+      },
+      requestId: i.requestId,
+    });
+  } catch (error) {
+    if (isInstrumentDeclined(error)) return { orderId: '', captureId: '', status: 'DECLINED' };
+    throw error;
+  }
+
+  // PayPal normally captures a saved-wallet order as it creates it. When it only approves the order,
+  // the capture is keyed on the charge's request id, so repeating the charge repeats this capture too.
+  if (order.status === 'APPROVED' || order.status === 'CREATED') {
+    return { orderId: order.id, ...(await captureOrder(order.id, `${i.requestId}-capture`)) };
+  }
+  return { orderId: order.id, ...readCapture(order) };
+};
 
 export const createApprovalOrder: PaypalPort['createApprovalOrder'] = async (i) => {
   const order = await paypalRequest<Order>('POST', ORDERS, {

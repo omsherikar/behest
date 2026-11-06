@@ -1,28 +1,15 @@
 import type { Db } from '@/lib/db/client';
 import type { Cart } from '@/lib/domain/cart';
 import type { Verdict } from '@/lib/domain/verdict';
+import type { IntentInput, IntentResult } from '@/lib/intent/types';
 import type { PaypalPort } from '@/lib/paypal/port';
 import type { Signer } from '@/lib/receipts/sign';
 import type { PurchaseStatus } from './transitions';
 
+export type { IntentInput, IntentResult };
+
 // What the purchase orchestrator needs from the outside world, passed in so that tests can swap
 // PayPal, the intent check and the sellers for fakes, and fix the clock.
-
-/** What the intent check reads: the buyer's own words, what they confirmed, and what the agent wants to buy. */
-export type IntentInput = {
-  mandateText: string;
-  readback: string[];
-  request: string;
-  cart: Cart;
-  /** The agent's own claim about why the cart fits the request. Unverified. */
-  agentRationale: string;
-};
-
-/** The intent check's opinion. It can only tighten a verdict, never loosen it. */
-export type IntentResult = {
-  verdict: 'consistent' | 'needs_human' | 'inconsistent' | 'unavailable';
-  reasons: string[];
-};
 
 /** How Behest hands an agent order to a seller, who verifies the receipt before accepting it. */
 export type SellerPort = {

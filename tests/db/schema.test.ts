@@ -183,3 +183,20 @@ it('rejects a second accepted order for one receipt at one seller', async () => 
     UNIQUE_VIOLATION,
   );
 });
+
+it('rejects a second active mandate for a buyer', async () => {
+  const db = await createTestDb();
+  const buyer = await addBuyer(db);
+  await db.insert(mandates).values(mandateRow(buyer.id, 'active'));
+  await expect(db.insert(mandates).values(mandateRow(buyer.id, 'active')).execute()).rejects.toMatchObject(
+    UNIQUE_VIOLATION,
+  );
+});
+
+it('allows an active mandate alongside a revoked one', async () => {
+  const db = await createTestDb();
+  const buyer = await addBuyer(db);
+  await db.insert(mandates).values(mandateRow(buyer.id, 'revoked'));
+  await db.insert(mandates).values(mandateRow(buyer.id, 'active'));
+  expect(await db.select().from(mandates)).toHaveLength(2);
+});

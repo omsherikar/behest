@@ -58,28 +58,35 @@ export const wallets = pgTable('wallets', {
   updatedAt: updatedAt(),
 });
 
-/** A signed spending mandate. The policy is what the gate enforces; the readback is what the buyer confirmed. */
-export const mandates = pgTable('mandates', {
-  id: id(),
-  buyerId: uuid('buyer_id')
-    .notNull()
-    .references(() => buyers.id),
-  /** The buyer's own words, kept verbatim. */
-  sourceText: text('source_text').notNull(),
-  policy: jsonb('policy').$type<MandatePolicy>().notNull(),
-  policyHash: text('policy_hash').notNull(),
-  /** The plain-English lines rendered from the policy, in order. */
-  readback: jsonb('readback').$type<string[]>().notNull(),
-  readbackHash: text('readback_hash').notNull(),
-  /** The signed mandate, a compact JWS. */
-  jws: text('jws').notNull(),
-  status: mandateStatus('status').notNull().default('active'),
-  /** When the buyer confirmed; the start of a `once` budget period. */
-  confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
-  expiresAt: timestamp('expires_at', { withTimezone: true }),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+/**
+ * A signed spending mandate. The policy is what the gate enforces; the readback is what the buyer
+ * confirmed. A buyer has at most one active mandate, so revoke the old one before inserting the new.
+ */
+export const mandates = pgTable(
+  'mandates',
+  {
+    id: id(),
+    buyerId: uuid('buyer_id')
+      .notNull()
+      .references(() => buyers.id),
+    /** The buyer's own words, kept verbatim. */
+    sourceText: text('source_text').notNull(),
+    policy: jsonb('policy').$type<MandatePolicy>().notNull(),
+    policyHash: text('policy_hash').notNull(),
+    /** The plain-English lines rendered from the policy, in order. */
+    readback: jsonb('readback').$type<string[]>().notNull(),
+    readbackHash: text('readback_hash').notNull(),
+    /** The signed mandate, a compact JWS. */
+    jws: text('jws').notNull(),
+    status: mandateStatus('status').notNull().default('active'),
+    /** When the buyer confirmed; the start of a `once` budget period. */
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('mandates_one_active_per_buyer').on(t.buyerId).where(sql`${t.status} = 'active'`)],
+);
 
 // Sellers and products
 

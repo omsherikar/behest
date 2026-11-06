@@ -1,5 +1,5 @@
 {
-  "id": "6e427079-784a-4f24-8747-5e9898e52b1e",
+  "id": "02c8a338-9ceb-4c97-86c3-4f4cad7ebc0c",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -432,7 +432,24 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "mandates_one_active_per_buyer": {
+          "name": "mandates_one_active_per_buyer",
+          "columns": [
+            {
+              "expression": "buyer_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"mandates\".\"status\" = 'active'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "mandates_buyer_id_buyers_id_fk": {
           "name": "mandates_buyer_id_buyers_id_fk",

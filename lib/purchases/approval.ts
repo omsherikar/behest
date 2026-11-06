@@ -31,9 +31,9 @@ const APPROVAL_WINDOW_MS = 3 * 60 * 60 * 1000;
  * throws, and stores the order's id and approval link on the purchase. Creating the order moves no
  * money, so if PayPal cannot answer either time the purchase is cancelled at once, releasing its
  * budget: no buyer can approve an order whose link they never saw. A purchase that could not be
- * given its receipt once captured fails with a `charge_refused` event, PayPal never asked. A purchase
- * another call has already moved on from `proposed` is returned as it stands. Throws, changing
- * nothing, for a purchase whose final verdict is not ASK.
+ * given its receipt once captured fails with a `charge_refused` event, and PayPal is never asked.
+ * A purchase another call has already moved on from `proposed` is returned as it stands. Throws,
+ * changing nothing, for a purchase whose final verdict is not ASK.
  */
 export async function startApproval(deps: ApprovalDeps, purchaseId: string): Promise<ProposalOutcome> {
   const { db } = deps;
@@ -67,12 +67,12 @@ export async function startApproval(deps: ApprovalDeps, purchaseId: string): Pro
  * Captures the order of a purchase its buyer approved at PayPal and carries the purchase on to its
  * receipt, delivery and payout as for an allowed purchase. Both the buyer's return from PayPal and
  * PayPal's approval webhook call it, so it may run twice, even at once, and still captures once.
- * With the purchase locked, it moves it from `awaiting_approval` to `charging` with the buyer as its
- * approver, logs the capture request as a `charge` event and queues the `charge_retry` job that
+ * With the purchase locked, it moves it from `awaiting_approval` to `charging` with the buyer as
+ * its approver, logs the capture request as a `charge` event and queues the `charge_retry` job that
  * replays it, all in one transaction. Only the call that made that move asks PayPal, through
- * takePayment, which also sends the purchase back to `awaiting_approval` if the buyer has not in fact
- * approved the order. Any other purchase, one already past `awaiting_approval` or cancelled, is
- * returned as it stands and nothing is called. Throws for an order no purchase was sent with.
+ * takePayment, which also sends the purchase back to `awaiting_approval` if the buyer has not in
+ * fact approved the order. Any other purchase, one already past `awaiting_approval` or cancelled,
+ * is returned as it stands and nothing is called. Throws for an order no purchase was sent with.
  */
 export async function completeApproval(deps: CaptureDeps, orderId: string): Promise<ProposalOutcome> {
   const { db } = deps;

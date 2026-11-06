@@ -4,18 +4,22 @@
 //
 // AG Studio keeps a conversation as a flat list of items (messages, reasoning, tool calls and
 // their results); Claude takes alternating user and assistant messages. encodeRequest turns the
-// first into the second.
+// first into the second, and decodeStream turns Claude's stream events into the events and
+// response Studio reads.
 
 import type {
   BetaContentBlockParam,
   BetaMessageParam,
+  BetaRawContentBlockDeltaEvent,
+  BetaRawContentBlockStartEvent,
+  BetaRefusalStopDetails,
   BetaTextBlockParam,
   BetaTool,
   BetaToolResultBlockParam,
   BetaToolUseBlockParam,
 } from '@anthropic-ai/sdk/resources/beta/messages';
-import type { AgLlmRequest } from 'ag-studio';
-import type { StreamRequest } from '@/lib/llm/stream';
+import type { AgAiEvent, AgAiOutputItem, AgLlmRequest, AgLlmResponse } from 'ag-studio';
+import type { LlmStreamEvent, StreamRequest } from '@/lib/llm/stream';
 
 // --- Turn ids ---------------------------------------------------------------------
 
@@ -148,4 +152,275 @@ export function encodeRequest(request: AgLlmRequest): StreamRequest {
     }));
 
   return { system: system.join('\n\n'), messages, tools };
+}
+
+// --- Decoding: Claude to AG Studio --------------------------------------------------
+
+/** What a turn produced besides its events: the response, or the failure that ended it. */
+export interface TurnOutcome {
+  response?: AgLlmResponse;
+  error?: Error;
+}
+
+/** The events of the route's stream, read from its server-sent events. */
+export async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator<LlmStreamEvent> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let done = false;
+  try {
+    while (!done) {
+      const chunk = await reader.read();
+      done = chunk.done;
+      buffer += done ? decoder.decode() : decoder.decode(chunk.value, { stream: true });
+      const frames = buffer.split('\n\n');
+      buffer = done ? '' : (frames.pop() ?? '');
+      for (const frame of frames) {
+        const data = frame
+          .split('\n')
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice('data:'.length).replace(/^ /, ''))
+          .join('\n');
+        if (data) yield JSON.parse(data) as LlmStreamEvent;
+      }
+    }
+  } finally {
+    // A reader that stops early stops the response too.
+    if (!done) await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
+type Block =
+  | { kind: 'text' | 'thinking'; itemId: string; text: string; open: boolean }
+  | { kind: 'tool_use'; itemId: string; callId: string; name: string; args: string; open: boolean };
+
+type Usage = {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+};
+
+/** Stop reasons of a reply that was cut off. */
+const CUT_OFF = new Set(['max_tokens', 'model_context_window_exceeded']);
+
+/** Follows one reply's stream events, as Studio events, and builds the response they add up to. */
+class ReplyDecoder {
+  private message: { id: string; model: string; createdAt: number } | null = null;
+  private readonly usage: Usage = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+  };
+  private readonly blocks = new Map<number, Block>();
+  /** The index of the last fallback block: what comes before it is from a model that declined. */
+  private lastFallback = -1;
+  private stopReason: string | null = null;
+  private stopDetails: BetaRefusalStopDetails | null = null;
+  private stopped = false;
+  private error: Error | undefined;
+
+  constructor(
+    private readonly turnId: string,
+    private readonly now: () => number,
+  ) {}
+
+  /** The Studio events one stream event maps to. Anything not recognised is ignored. */
+  read(event: LlmStreamEvent): AgAiEvent[] {
+    switch (event.type) {
+      case 'message_start':
+        this.message = { id: event.message.id, model: event.message.model, createdAt: this.now() };
+        this.takeUsage(event.message.usage);
+        return [];
+      case 'content_block_start':
+        return this.open(event.index, event.content_block);
+      case 'content_block_delta':
+        return this.write(event.index, event.delta);
+      case 'content_block_stop':
+        return this.close(event.index);
+      case 'message_delta':
+        this.stopReason = event.delta.stop_reason;
+        this.stopDetails = event.delta.stop_details ?? null;
+        this.takeUsage(event.usage);
+        return [];
+      case 'message_stop':
+        this.stopped = true;
+        return [];
+      case 'error':
+        this.error ??= new Error(event.error.message);
+        return [];
+      default:
+        return [];
+    }
+  }
+
+  /**
+   * Ends the turn: closes whatever is still open and settles `outcome`. A refused turn fails, so
+   * none of its tool calls run; a cut-off turn is incomplete and keeps its text but not its calls,
+   * whose input may be cut off too.
+   */
+  finish(outcome: TurnOutcome, failure?: unknown): AgAiEvent[] {
+    const closing = [...this.blocks.keys()].flatMap((index) => this.close(index));
+    if (failure !== undefined) this.error ??= failure instanceof Error ? failure : new Error(String(failure));
+    if (this.error) {
+      outcome.error = this.error;
+    } else if (!this.message || !this.stopped) {
+      outcome.error = new Error('The reply ended before it was complete.');
+    } else if (this.stopReason === 'refusal') {
+      const why = this.stopDetails?.explanation ?? this.stopDetails?.category;
+      outcome.error = new Error(`The analyst declined this request${why ? `: ${why}` : '.'}`);
+    } else {
+      outcome.response = this.response(this.message);
+    }
+    return closing;
+  }
+
+  private takeUsage(usage: Partial<Record<keyof Usage, number | null>>) {
+    for (const key of Object.keys(this.usage) as (keyof Usage)[]) {
+      const count = usage[key];
+      if (typeof count === 'number') this.usage[key] = count;
+    }
+  }
+
+  private open(index: number, block: BetaRawContentBlockStartEvent['content_block']): AgAiEvent[] {
+    const itemId = `${this.turnId}_${index}`;
+    switch (block.type) {
+      case 'text': {
+        const opened: Block = { kind: 'text', itemId, text: '', open: true };
+        this.blocks.set(index, opened);
+        return [{ type: 'TEXT_MESSAGE_START', messageId: itemId, role: 'assistant' }, ...this.append(opened, block.text)];
+      }
+      case 'thinking': {
+        const opened: Block = { kind: 'thinking', itemId, text: '', open: true };
+        this.blocks.set(index, opened);
+        return [{ type: 'REASONING_MESSAGE_START', messageId: itemId, role: 'reasoning' }, ...this.append(opened, block.thinking)];
+      }
+      case 'tool_use': {
+        const opened: Block = { kind: 'tool_use', itemId, callId: block.id, name: block.name, args: '', open: true };
+        this.blocks.set(index, opened);
+        // A streamed call's input arrives in deltas; this start carries `{}`.
+        const input = block.input as Record<string, unknown> | null;
+        const written = input && Object.keys(input).length > 0 ? JSON.stringify(input) : '';
+        return [{ type: 'TOOL_CALL_START', toolCallId: block.id, toolCallName: block.name }, ...this.append(opened, written)];
+      }
+      case 'fallback':
+        this.lastFallback = index;
+        if (this.message) this.message.model = block.to.model;
+        return [];
+      default:
+        return [];
+    }
+  }
+
+  private write(index: number, delta: BetaRawContentBlockDeltaEvent['delta']): AgAiEvent[] {
+    const block = this.blocks.get(index);
+    if (!block?.open) return [];
+    if (delta.type === 'text_delta' && block.kind === 'text') return this.append(block, delta.text);
+    if (delta.type === 'thinking_delta' && block.kind === 'thinking') return this.append(block, delta.thinking);
+    if (delta.type === 'input_json_delta' && block.kind === 'tool_use') return this.append(block, delta.partial_json);
+    return [];
+  }
+
+  /** Adds what Claude wrote to an open block. */
+  private append(block: Block, written: string): AgAiEvent[] {
+    if (!written) return [];
+    switch (block.kind) {
+      case 'text':
+        block.text += written;
+        return [{ type: 'TEXT_MESSAGE_CONTENT', messageId: block.itemId, delta: written }];
+      case 'thinking':
+        block.text += written;
+        return [{ type: 'REASONING_MESSAGE_CONTENT', messageId: block.itemId, delta: written }];
+      case 'tool_use':
+        block.args += written;
+        return [{ type: 'TOOL_CALL_ARGS', toolCallId: block.callId, delta: written }];
+    }
+  }
+
+  private close(index: number): AgAiEvent[] {
+    const block = this.blocks.get(index);
+    if (!block?.open) return [];
+    block.open = false;
+    switch (block.kind) {
+      case 'text':
+        return [{ type: 'TEXT_MESSAGE_END', messageId: block.itemId }];
+      case 'thinking':
+        return [{ type: 'REASONING_MESSAGE_END', messageId: block.itemId }];
+      case 'tool_use':
+        return [{ type: 'TOOL_CALL_END', toolCallId: block.callId }];
+    }
+  }
+
+  /**
+   * The reply's text, reasoning and tool calls in the order Claude wrote them. Tool calls from a
+   * model that declined before a fallback are left out, so they never run.
+   */
+  private response(message: { id: string; model: string; createdAt: number }): AgLlmResponse {
+    const cutOff = CUT_OFF.has(this.stopReason ?? '');
+    const output: AgAiOutputItem[] = [];
+    for (const [index, block] of [...this.blocks].sort(([a], [b]) => a - b)) {
+      if (block.kind === 'text' && block.text) {
+        output.push({
+          id: block.itemId,
+          kind: 'output',
+          type: 'message',
+          role: 'assistant',
+          status: 'completed',
+          content: [{ type: 'text', text: block.text, annotations: [] }],
+        });
+      } else if (block.kind === 'thinking' && block.text) {
+        output.push({ id: block.itemId, kind: 'output', type: 'reasoning', summary: [{ type: 'summary', text: block.text }] });
+      } else if (block.kind === 'tool_use' && !cutOff && index > this.lastFallback) {
+        output.push({
+          id: block.itemId,
+          kind: 'output',
+          type: 'function_call',
+          callId: block.callId,
+          name: block.name,
+          arguments: block.args || '{}',
+          status: 'completed',
+        });
+      }
+    }
+    // Claude counts cached input apart from input_tokens; Studio counts it as part of the input.
+    const { input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens } = this.usage;
+    const inputTokens = input_tokens + cache_read_input_tokens + cache_creation_input_tokens;
+    return {
+      id: message.id,
+      createdAt: message.createdAt,
+      model: message.model,
+      status: cutOff ? 'incomplete' : 'completed',
+      ...(cutOff && { incompleteDetails: { reason: 'max_output_tokens' as const } }),
+      output,
+      usage: {
+        inputTokens,
+        outputTokens: output_tokens,
+        totalTokens: inputTokens + output_tokens,
+        cachedInputTokens: cache_read_input_tokens,
+        cacheWriteTokens: cache_creation_input_tokens,
+      },
+    };
+  }
+}
+
+/**
+ * Studio's events for one reply, read from the route's stream events, as they arrive. When the
+ * stream ends, `outcome` holds the response, or the error that ended the turn: an error event,
+ * a refusal, a stream that stopped early, or a failure to read the stream at all.
+ */
+export async function* decodeStream(
+  events: AsyncIterable<LlmStreamEvent>,
+  outcome: TurnOutcome,
+  opts: { turnId?: string; now?: () => number } = {},
+): AsyncGenerator<AgAiEvent, void, undefined> {
+  const decoder = new ReplyDecoder(opts.turnId ?? `turn_${crypto.randomUUID()}`, opts.now ?? Date.now);
+  let failure: unknown;
+  try {
+    for await (const event of events) yield* decoder.read(event);
+  } catch (error) {
+    failure = error;
+  }
+  yield* decoder.finish(outcome, failure);
 }

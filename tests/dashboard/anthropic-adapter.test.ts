@@ -9,7 +9,9 @@ import type {
   AgLlmRequest,
 } from 'ag-studio';
 import { describe, expect, it } from 'vitest';
-import { encodeRequest } from '@/app/dashboard/studio/anthropic-adapter';
+import { decodeStream, encodeRequest, readSse, type TurnOutcome } from '@/app/dashboard/studio/anthropic-adapter';
+import type { LlmStreamEvent } from '@/lib/llm/stream';
+import { recordedStream, sseEvents } from '@/tests/helpers/sse';
 
 // --- Conversation items, as AG Studio holds them ----------------------------------
 
@@ -272,5 +274,239 @@ describe('encodeRequest', () => {
         eager_input_streaming: true,
       },
     ]);
+  });
+});
+
+// --- Decoding ---------------------------------------------------------------------
+
+/** `text` as a response body, sent in chunks of `size` bytes. */
+function body(text: string, size = 7): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(text);
+  return new ReadableStream({
+    start(controller) {
+      for (let at = 0; at < bytes.length; at += size) controller.enqueue(bytes.slice(at, at + size));
+      controller.close();
+    },
+  });
+}
+
+async function* each<T>(items: T[]): AsyncGenerator<T> {
+  yield* items;
+}
+
+/** The recorded stream `name`, as the events the analyst route sends. */
+const recorded = (name: string) => sseEvents(recordedStream(name)) as LlmStreamEvent[];
+
+async function decode(events: LlmStreamEvent[]) {
+  const outcome: TurnOutcome = {};
+  const decoded = [];
+  for await (const event of decodeStream(each(events), outcome, { turnId: 'turn_t', now: () => 1000 })) {
+    decoded.push(event);
+  }
+  return { events: decoded, outcome };
+}
+
+const THINKING = 'Two rows came back, both asked because the total was over the ask threshold.';
+const ANSWER = 'Two purchases needed approval this week. Both were over the $50 amount above which the agent asks.';
+const QUERY_ARGS = '{"query": {"fields": ["purchases.id", "purchases.request"]}}';
+
+/** `events` with the reply's stop reason, and its stop details, changed. */
+const stoppedWith = (events: LlmStreamEvent[], stop_reason: string, stop_details: object | null = null) =>
+  events.map((event) =>
+    event.type === 'message_delta' ? { ...event, delta: { ...event.delta, stop_reason, stop_details } } : event,
+  ) as LlmStreamEvent[];
+
+describe('readSse', () => {
+  it('reads every event of the stream, however the body is split', async () => {
+    const stream = recordedStream('tool-turn');
+    for (const size of [1, 5, 64, stream.length]) {
+      const events = [];
+      for await (const event of readSse(body(stream, size))) events.push(event);
+      expect(events).toEqual(sseEvents(stream));
+    }
+  });
+
+  it('keeps characters whose bytes are split between chunks', async () => {
+    const events = [];
+    for await (const event of readSse(body('data: {"type":"note","text":"Café ₹"}\n\n', 1))) events.push(event);
+    expect(events).toEqual([{ type: 'note', text: 'Café ₹' }]);
+  });
+});
+
+describe('decodeStream', () => {
+  it('turns a text reply into reasoning and message events and a completed response', async () => {
+    const { events, outcome } = await decode(recorded('text-turn'));
+
+    expect(events).toEqual([
+      { type: 'REASONING_MESSAGE_START', messageId: 'turn_t_0', role: 'reasoning' },
+      { type: 'REASONING_MESSAGE_CONTENT', messageId: 'turn_t_0', delta: THINKING },
+      { type: 'REASONING_MESSAGE_END', messageId: 'turn_t_0' },
+      { type: 'TEXT_MESSAGE_START', messageId: 'turn_t_1', role: 'assistant' },
+      { type: 'TEXT_MESSAGE_CONTENT', messageId: 'turn_t_1', delta: 'Two purchases needed approval this week. ' },
+      {
+        type: 'TEXT_MESSAGE_CONTENT',
+        messageId: 'turn_t_1',
+        delta: 'Both were over the $50 amount above which the agent asks.',
+      },
+      { type: 'TEXT_MESSAGE_END', messageId: 'turn_t_1' },
+    ]);
+    expect(outcome).toEqual({
+      response: {
+        id: 'msg_text_turn',
+        createdAt: 1000,
+        model: 'claude-opus-5-5',
+        status: 'completed',
+        output: [
+          { id: 'turn_t_0', kind: 'output', type: 'reasoning', summary: [{ type: 'summary', text: THINKING }] },
+          {
+            id: 'turn_t_1',
+            kind: 'output',
+            type: 'message',
+            role: 'assistant',
+            status: 'completed',
+            content: [{ type: 'text', text: ANSWER, annotations: [] }],
+          },
+        ],
+        usage: { inputTokens: 1800, outputTokens: 62, totalTokens: 1862, cachedInputTokens: 0, cacheWriteTokens: 0 },
+      },
+    });
+  });
+
+  it('streams a tool call as its input is written and returns it as a call for Studio to run', async () => {
+    const { events, outcome } = await decode(recorded('tool-turn'));
+
+    expect(events).toEqual([
+      { type: 'TEXT_MESSAGE_START', messageId: 'turn_t_0', role: 'assistant' },
+      { type: 'TEXT_MESSAGE_CONTENT', messageId: 'turn_t_0', delta: "I'll look up this week's purchases that needed approval." },
+      { type: 'TEXT_MESSAGE_END', messageId: 'turn_t_0' },
+      { type: 'TOOL_CALL_START', toolCallId: 'toolu_query', toolCallName: 'execute_query' },
+      { type: 'TOOL_CALL_ARGS', toolCallId: 'toolu_query', delta: '{"query": {"fields": ["purchases.id"' },
+      { type: 'TOOL_CALL_ARGS', toolCallId: 'toolu_query', delta: ', "purchases.request"]}}' },
+      { type: 'TOOL_CALL_END', toolCallId: 'toolu_query' },
+    ]);
+    expect(outcome.response?.status).toBe('completed');
+    expect(outcome.response?.output).toEqual([
+      expect.objectContaining({ id: 'turn_t_0', type: 'message' }),
+      {
+        id: 'turn_t_1',
+        kind: 'output',
+        type: 'function_call',
+        callId: 'toolu_query',
+        name: 'execute_query',
+        arguments: QUERY_ARGS,
+        status: 'completed',
+      },
+    ]);
+  });
+
+  it('decodes a turn that encodes back to the reply Claude sent', async () => {
+    const { outcome } = await decode(recorded('tool-turn'));
+    const output = outcome.response?.output ?? [];
+
+    const { messages } = encodeRequest({
+      input: [user('Which purchases needed approval this week and why?'), ...output, answered('toolu_query', 'Returned 2 rows.')],
+      responseFormat: { type: 'text' },
+    });
+
+    expect(messages.slice(1)).toEqual([
+      {
+        role: 'assistant',
+        content: [text("I'll look up this week's purchases that needed approval."), toolUse('toolu_query', JSON.parse(QUERY_ARGS))],
+      },
+      { role: 'user', content: [toolResult('toolu_query', 'Returned 2 rows.')] },
+    ]);
+  });
+
+  it('ends the turn with the error an error event carries, closing what was open', async () => {
+    const { events, outcome } = await decode([
+      ...recorded('error-turn').slice(0, -1),
+      { type: 'error', error: { type: 'api_error', message: 'Overloaded' } },
+    ]);
+
+    expect(events).toEqual([
+      { type: 'TEXT_MESSAGE_START', messageId: 'turn_t_0', role: 'assistant' },
+      { type: 'TEXT_MESSAGE_CONTENT', messageId: 'turn_t_0', delta: 'Looking at' },
+      { type: 'TEXT_MESSAGE_END', messageId: 'turn_t_0' },
+    ]);
+    expect(outcome).toEqual({ error: new Error('Overloaded') });
+  });
+
+  it('ends the turn with the spend cap when the route sends nothing else', async () => {
+    const { events, outcome } = await decode([
+      { type: 'error', error: { type: 'spend_cap', message: 'Spent $5 of the $5 daily model budget' } },
+    ]);
+
+    expect(events).toEqual([]);
+    expect(outcome).toEqual({ error: new Error('Spent $5 of the $5 daily model budget') });
+  });
+
+  it('fails a refused turn, so none of its tool calls run', async () => {
+    const refused = stoppedWith(recorded('tool-turn'), 'refusal', {
+      type: 'refusal',
+      category: 'cyber',
+      explanation: 'The request was declined.',
+    });
+
+    expect((await decode(refused)).outcome).toEqual({
+      error: new Error('The analyst declined this request: The request was declined.'),
+    });
+  });
+
+  it('returns a cut-off turn as incomplete, without the tool call it was writing', async () => {
+    const { outcome } = await decode(stoppedWith(recorded('tool-turn'), 'max_tokens'));
+
+    expect(outcome.response).toMatchObject({ status: 'incomplete', incompleteDetails: { reason: 'max_output_tokens' } });
+    expect(outcome.response?.output.map((item) => item.type)).toEqual(['message']);
+  });
+
+  it('fails a turn whose stream stops before the reply is complete', async () => {
+    const { events, outcome } = await decode(recorded('text-turn').slice(0, 7));
+
+    expect(events.at(-1)).toEqual({ type: 'TEXT_MESSAGE_END', messageId: 'turn_t_1' });
+    expect(outcome).toEqual({ error: new Error('The reply ended before it was complete.') });
+  });
+
+  it('keeps only the tool calls made after a fallback, and names the model that took over', async () => {
+    const all = recorded('tool-turn');
+    const [start, textStart, textDelta, textStop, ...call] = all;
+    const at = (index: number, events: LlmStreamEvent[]) => events.map((event) => ({ ...event, index }));
+    const events = [
+      start,
+      ...at(0, call.slice(0, 5)),
+      {
+        type: 'content_block_start',
+        index: 1,
+        content_block: {
+          type: 'fallback',
+          from: { model: 'claude-opus-5-5' },
+          to: { model: 'claude-opus-4-8' },
+          trigger: { type: 'refusal' },
+        },
+      },
+      { type: 'content_block_stop', index: 1 },
+      ...at(2, [textStart, textDelta, textStop]),
+      ...all.slice(-2),
+    ] as LlmStreamEvent[];
+
+    const { outcome } = await decode(events);
+
+    expect(outcome.response?.model).toBe('claude-opus-4-8');
+    expect(outcome.response?.output).toEqual([expect.objectContaining({ id: 'turn_t_2', type: 'message' })]);
+  });
+
+  it('counts cached input in the turn\'s input tokens', async () => {
+    const events = recorded('text-turn').map((event) =>
+      event.type === 'message_delta'
+        ? { ...event, usage: { output_tokens: 62, input_tokens: 300, cache_read_input_tokens: 1200, cache_creation_input_tokens: 300 } }
+        : event,
+    ) as LlmStreamEvent[];
+
+    expect((await decode(events)).outcome.response?.usage).toEqual({
+      inputTokens: 1800,
+      outputTokens: 62,
+      totalTokens: 1862,
+      cachedInputTokens: 1200,
+      cacheWriteTokens: 300,
+    });
   });
 });

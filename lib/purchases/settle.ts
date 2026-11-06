@@ -129,6 +129,11 @@ export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<
  * Sends again, under the same sender batch id, a payout whose first request brought back no batch.
  * Only while the purchase is accepted, so a refunded order is never paid out afresh, and only
  * within the window in which PayPal still refuses a repeated sender batch id.
+ *
+ * One window stays open by design. A refund that commits after the poll read `accepted` and before
+ * this call reaches PayPal lets a payout PayPal never received go out for a refunded order. The poll
+ * then records it as `payout_after_refund`. Closing the window would mean holding the purchase lock
+ * across a network call.
  */
 async function resendPayout(deps: SettleDeps, payout: Payout, purchaseStatus: PurchaseStatus): Promise<string> {
   if (purchaseStatus !== 'accepted') {

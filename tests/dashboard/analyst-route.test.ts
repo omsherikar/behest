@@ -153,11 +153,15 @@ function heldClaude() {
       fail = (reason) => controller.error(reason);
     },
   });
+  // A Request's signal only follows the caller's signal while the Request itself is reachable, so
+  // each one is kept here for as long as the fake lives.
+  const requests: Request[] = [];
   const reply: typeof fetch = async (input, init) => {
     // As with a real response, aborting the request fails its body. The client's middleware
     // sends a Request, which carries the signal.
-    const signal = new Request(input, init).signal;
-    signal.addEventListener('abort', () => fail(signal.reason));
+    const request = new Request(input, init);
+    requests.push(request);
+    request.signal.addEventListener('abort', () => fail(request.signal.reason));
     return new Response(body, { headers: { 'content-type': 'text/event-stream', 'request-id': 'req_held' } });
   };
   vi.mocked(createClaude).mockReturnValue(new Anthropic({ apiKey: API_KEY, fetch: reply, maxRetries: 0 }));

@@ -48,6 +48,23 @@ function stubFetch(routes: FakeRoute[]): RecordedCall[] {
   return f.calls;
 }
 
+/** Like stubFetch, but PayPal receives the first request to `path` and its response never arrives. */
+function stubFetchLosingFirstResponse(routes: FakeRoute[], path: string): { calls: RecordedCall[]; lost: TypeError } {
+  const f = fakeFetch([oauth, ...routes]);
+  const lost = new TypeError('fetch failed');
+  let dropNext = true;
+  const flaky: typeof fetch = async (input, init) => {
+    const response = await f.fetch(input, init);
+    if (dropNext && new URL(String(input)).pathname === path) {
+      dropNext = false;
+      throw lost;
+    }
+    return response;
+  };
+  vi.stubGlobal('fetch', flaky);
+  return { calls: f.calls, lost };
+}
+
 const apiCalls = (calls: RecordedCall[]) => calls.filter((c) => new URL(c.url).pathname !== TOKEN_PATH);
 
 beforeEach(() => {
@@ -344,25 +361,38 @@ describe('chargeSavedWallet', () => {
   });
 
   it('repeats a charge whose response was lost with the same PayPal-Request-Id and body', async () => {
-    const f = fakeFetch([oauth, { method: 'POST', path: ORDERS, status: 201, body: chargeCompleted }]);
-    const lost = new TypeError('fetch failed');
-    let dropNextCharge = true;
-    // PayPal receives the first charge, but its response never arrives.
-    const flaky: typeof fetch = async (input, init) => {
-      const response = await f.fetch(input, init);
-      if (dropNextCharge && String(input).endsWith(ORDERS)) {
-        dropNextCharge = false;
-        throw lost;
-      }
-      return response;
-    };
-    vi.stubGlobal('fetch', flaky);
+    const { calls, lost } = stubFetchLosingFirstResponse([{ method: 'POST', path: ORDERS, status: 201, body: chargeCompleted }], ORDERS);
 
     await expect(chargeSavedWallet(chargeInput)).rejects.toBe(lost);
     expect(await chargeSavedWallet(chargeInput)).toEqual(charged);
 
-    const posts = apiCalls(f.calls);
+    const posts = apiCalls(calls);
     expect(posts.map((c) => c.headers['paypal-request-id'])).toEqual([`${CHARGE_PURCHASE}:charge`, `${CHARGE_PURCHASE}:charge`]);
     expect(posts[1].body).toBe(posts[0].body);
+  });
+
+  it('repeats a charge whose capture response was lost, replaying both request ids unchanged', async () => {
+    // PayPal answers a repeated request id with its first result, so the order comes back APPROVED again.
+    const approved = { id: CHARGE_ORDER_ID, status: 'APPROVED', links: chargeCompleted.links };
+    const { calls, lost } = stubFetchLosingFirstResponse(
+      [
+        { method: 'POST', path: ORDERS, status: 201, body: approved },
+        { method: 'POST', path: CHARGE_CAPTURE, status: 201, body: chargeCompleted },
+      ],
+      CHARGE_CAPTURE,
+    );
+
+    await expect(chargeSavedWallet(chargeInput)).rejects.toBe(lost);
+    expect(await chargeSavedWallet(chargeInput)).toEqual(charged);
+
+    const posts = apiCalls(calls);
+    expect(posts.map((c) => [new URL(c.url).pathname, c.headers['paypal-request-id']])).toEqual([
+      [ORDERS, `${CHARGE_PURCHASE}:charge`],
+      [CHARGE_CAPTURE, `${CHARGE_PURCHASE}:charge-capture`],
+      [ORDERS, `${CHARGE_PURCHASE}:charge`],
+      [CHARGE_CAPTURE, `${CHARGE_PURCHASE}:charge-capture`],
+    ]);
+    expect(posts[2].body).toBe(posts[0].body);
+    expect(posts[3].body).toBe(posts[1].body);
   });
 });

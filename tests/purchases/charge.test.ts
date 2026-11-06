@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { jobs, purchases, receipts, wallets } from '@/lib/db/schema';
+import { jobs, mandates, purchases, receipts, wallets } from '@/lib/db/schema';
 import { runDueJobs } from '@/lib/jobs/queue';
 import { chargeAllowed, completeCapture, retryCharge } from '@/lib/purchases/charge';
 import type { PurchaseDeps } from '@/lib/purchases/deps';
@@ -222,6 +222,41 @@ describe('chargeAllowed', () => {
     expect(await eventsOf(db, purchaseId)).toEqual([
       { kind: 'status', data: { from: 'proposed', to: 'charging' } },
       { kind: 'charge_failed', data: { reason: 'The buyer has no linked PayPal wallet.' } },
+      { kind: 'status', data: { from: 'charging', to: 'failed' } },
+    ]);
+  });
+
+  it.each([
+    [
+      'no gate outcomes',
+      (db: PurchaseDeps['db'], { purchaseId }: { purchaseId: string; mandateId: string }) =>
+        db.update(purchases).set({ gateOutcomes: [] }).where(eq(purchases.id, purchaseId)),
+      'The purchase has no gate outcomes to put on its receipt.',
+    ],
+    [
+      'an unsigned mandate',
+      (db: PurchaseDeps['db'], { mandateId }: { purchaseId: string; mandateId: string }) =>
+        db.update(mandates).set({ jws: '' }).where(eq(mandates.id, mandateId)),
+      "The purchase's mandate has no signature to cite on its receipt.",
+    ],
+    [
+      'a malformed policy hash',
+      (db: PurchaseDeps['db'], { mandateId }: { purchaseId: string; mandateId: string }) =>
+        db.update(mandates).set({ policyHash: 'not-a-hash' }).where(eq(mandates.id, mandateId)),
+      'The purchase could not be given a valid receipt.',
+    ],
+  ])('fails without asking PayPal when its receipt would have %s', async (_, breakReceipt, reason) => {
+    const s = await setUp();
+    await breakReceipt(s.db, s);
+
+    const outcome = await chargeAllowed(s.deps, s.purchaseId);
+
+    expect(outcome).toMatchObject({ status: 'failed', receiptId: null });
+    expect(s.paypal.calls).toEqual([]);
+    expect(await jobKinds(s.db)).toEqual([]);
+    expect(await eventsOf(s.db, s.purchaseId)).toEqual([
+      { kind: 'status', data: { from: 'proposed', to: 'charging' } },
+      { kind: 'charge_refused', data: { reason } },
       { kind: 'status', data: { from: 'charging', to: 'failed' } },
     ]);
   });

@@ -7,7 +7,7 @@ import type { PaypalPort } from '@/lib/paypal/port';
 import { deliverToSeller } from './deliver';
 import type { ProposalOutcome, PurchaseDeps } from './deps';
 import { appendEvent, StaleTransition, transition } from './events';
-import { issueReceipt } from './receipt';
+import { issueReceipt, receiptBlocker } from './receipt';
 import { describeFailure } from './settle';
 
 // Charging an allowed purchase (architecture section 6.2). The gate allowed it, so Behest charges
@@ -67,8 +67,9 @@ const REPLAY_WINDOW_MS = 5 * 60 * 60 * 1000;
  * - DECLINED: a `charge_declined` event, and the purchase ends `failed`;
  * - a second thrown error: a `charge_unknown` event, with the purchase left `charging` for the
  *   queued job to replay.
- * A buyer with no linked wallet fails the purchase with a `charge_failed` event saying so, and
- * PayPal is never asked. A purchase another call has already moved on from `proposed` is returned
+ * A purchase that could not be given its receipt once captured fails with a `charge_refused` event,
+ * and one whose buyer has no linked wallet with a `charge_failed` event, each saying why; PayPal is
+ * never asked. A purchase another call has already moved on from `proposed` is returned
  * as it stands. Throws, changing nothing, for a purchase whose final verdict is not ALLOW.
  */
 export async function chargeAllowed(deps: ChargeDeps, purchaseId: string): Promise<ProposalOutcome> {
@@ -212,9 +213,9 @@ export async function purchaseOutcome(db: Db, purchaseId: string): Promise<Propo
 
 /**
  * Moves the purchase from `proposed` to `charging`, with the policy as its approver, logs the
- * charge and queues its `charge_retry` job, and returns the charge to send. With no linked wallet
- * it fails the purchase instead, and returns null; it also returns null for a purchase another call
- * has already moved on.
+ * charge and queues its `charge_retry` job, and returns the charge to send. If the purchase could
+ * not be given its receipt, or its buyer has no linked wallet, it fails the purchase instead, and
+ * returns null; it also returns null for a purchase another call has already moved on.
  */
 async function startCharge(
   { db, now }: ChargeDeps,
@@ -225,6 +226,12 @@ async function startCharge(
   try {
     return await db.transaction(async (tx) => {
       await transition(tx, purchaseId, 'proposed', 'charging', { approver: 'policy' });
+      const refusal = await receiptBlocker(tx, purchaseId, now());
+      if (refusal) {
+        await appendEvent(tx, purchaseId, 'charge_refused', { reason: refusal });
+        await transition(tx, purchaseId, 'charging', 'failed');
+        return null;
+      }
       const paymentTokenId = await linkedPaymentToken(tx, buyerId);
       if (!paymentTokenId) {
         await appendEvent(tx, purchaseId, 'charge_failed', { reason: NO_WALLET });

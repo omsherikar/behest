@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { decodeProtectedHeader } from 'jose';
 import type { Db } from '@/lib/db/client';
 import { mandates, purchases, receipts, sellers } from '@/lib/db/schema';
+import type { Cart } from '@/lib/domain/cart';
 import { ReceiptPayload } from '@/lib/domain/receipt';
 import { hashOf, sha256Hex } from '@/lib/receipts/canonical';
 import { cartClaims } from '@/lib/receipts/verify-receipt';
@@ -56,11 +57,14 @@ async function storedReceipt(db: Db, purchaseId: string): Promise<IssuedReceipt 
   return row;
 }
 
-/**
- * Builds a new receipt's claims from the stored purchase, its mandate and its seller, and checks
- * them against the strict schema, so a malformed receipt is never signed.
- */
-async function receiptPayload({ db, now }: ReceiptDeps, purchaseId: string): Promise<ReceiptPayload> {
+/** What a receipt is built from: the purchase, its mandate and its seller. */
+type ReceiptSource = {
+  purchase: typeof purchases.$inferSelect;
+  mandate: { id: string; policyHash: string; jws: string };
+  sellerSlug: string;
+};
+
+async function receiptSource(db: Db, purchaseId: string): Promise<ReceiptSource | undefined> {
   const [row] = await db
     .select({
       purchase: purchases,
@@ -71,9 +75,42 @@ async function receiptPayload({ db, now }: ReceiptDeps, purchaseId: string): Pro
     .innerJoin(mandates, eq(mandates.id, purchases.mandateId))
     .innerJoin(sellers, eq(sellers.id, purchases.sellerId))
     .where(eq(purchases.id, purchaseId));
-  if (!row) throw new Error(`there is no purchase ${purchaseId} with a seller`);
-  const { purchase, mandate, sellerSlug } = row;
+  return row;
+}
 
+/**
+ * Why a purchase could not be given a receipt once its payment is captured, or null if it could.
+ * The charge asks this before PayPal is, so money never moves for a purchase whose receipt would
+ * then fail. Beyond the named checks, every claim is checked against the strict schema, with
+ * stand-ins for the payment PayPal has yet to make.
+ */
+export async function receiptBlocker(db: Db, purchaseId: string, now: Date): Promise<string | null> {
+  const source = await receiptSource(db, purchaseId);
+  if (!source) return 'The purchase has no seller to name on its receipt.';
+  const { purchase, mandate } = source;
+  if (!purchase.cart || purchase.totalCents === null) return 'The purchase has no cart to put on its receipt.';
+  if (purchase.gateOutcomes.length === 0) return 'The purchase has no gate outcomes to put on its receipt.';
+  if (!mandate.jws) return "The purchase's mandate has no signature to cite on its receipt.";
+  const verdict = purchase.finalVerdict;
+  if (verdict !== 'ALLOW' && verdict !== 'ASK') return 'The purchase has no verdict a receipt can carry.';
+  const draft = receiptClaims(source, purchase.cart, verdict, now, {
+    processor: 'paypal',
+    orderId: 'pending',
+    captureId: 'pending',
+    amountCents: purchase.totalCents,
+    capturedAt: now.toISOString(),
+  });
+  return ReceiptPayload.safeParse(draft).success ? null : 'The purchase could not be given a valid receipt.';
+}
+
+/**
+ * Builds a new receipt's claims for the captured purchase and checks them against the strict
+ * schema, so a malformed receipt is never signed.
+ */
+async function receiptPayload({ db, now }: ReceiptDeps, purchaseId: string): Promise<ReceiptPayload> {
+  const source = await receiptSource(db, purchaseId);
+  if (!source) throw new Error(`there is no purchase ${purchaseId} with a seller`);
+  const { purchase } = source;
   if (purchase.status !== 'captured') {
     throw new Error(`purchase ${purchaseId} is ${purchase.status}, and a receipt is issued only once its payment is captured`);
   }
@@ -84,28 +121,40 @@ async function receiptPayload({ db, now }: ReceiptDeps, purchaseId: string): Pro
   if (finalVerdict !== 'ALLOW' && finalVerdict !== 'ASK') {
     throw new Error(`purchase ${purchaseId} has the final verdict ${finalVerdict}, and only an allowed or approved purchase gets a receipt`);
   }
-
-  return ReceiptPayload.parse({
-    v: 1,
-    id: crypto.randomUUID(),
-    iss: 'behest',
-    iat: Math.floor(now().getTime() / 1000),
-    mandate: { id: mandate.id, policyHash: mandate.policyHash, jwsHash: sha256Hex(mandate.jws) },
-    seller: { slug: sellerSlug },
-    cart: cartClaims(cart),
-    decision: {
-      purchaseId,
-      verdict: finalVerdict,
-      approver: finalVerdict === 'ALLOW' ? 'policy' : 'human',
-      rulesetVersion: purchase.rulesetVersion,
-      outcomes: purchase.gateOutcomes.map(({ rule, result }) => ({ rule, result })),
-    },
-    payment: {
+  return ReceiptPayload.parse(
+    receiptClaims(source, cart, finalVerdict, now(), {
       processor: 'paypal',
       orderId: paypalOrderId,
       captureId: paypalCaptureId,
       amountCents: totalCents,
       capturedAt: capturedAt.toISOString(),
+    }),
+  );
+}
+
+/** A receipt's claims, before they are checked: everything but the payment comes from `source`. */
+function receiptClaims(
+  { purchase, mandate, sellerSlug }: ReceiptSource,
+  cart: Cart,
+  verdict: 'ALLOW' | 'ASK',
+  issuedAt: Date,
+  payment: ReceiptPayload['payment'],
+): ReceiptPayload {
+  return {
+    v: 1,
+    id: crypto.randomUUID(),
+    iss: 'behest',
+    iat: Math.floor(issuedAt.getTime() / 1000),
+    mandate: { id: mandate.id, policyHash: mandate.policyHash, jwsHash: sha256Hex(mandate.jws) },
+    seller: { slug: sellerSlug },
+    cart: cartClaims(cart),
+    decision: {
+      purchaseId: purchase.id,
+      verdict,
+      approver: verdict === 'ALLOW' ? 'policy' : 'human',
+      rulesetVersion: purchase.rulesetVersion,
+      outcomes: purchase.gateOutcomes.map(({ rule, result }) => ({ rule, result })),
     },
-  } satisfies ReceiptPayload);
+    payment,
+  };
 }

@@ -101,6 +101,12 @@ describe('verdicts', () => {
     });
   });
 
+  it.each(['needs_human', 'inconsistent'])('supplies a fixed reason for a %s verdict that gives none', async (verdict) => {
+    const { result } = await checkWith(messageJson({ json: { verdict, reasons: [] } }));
+
+    expect(result).toEqual({ verdict, reasons: ['The intent check flagged this purchase without giving a reason.'] });
+  });
+
   it('keeps at most five reasons of at most 200 characters each', async () => {
     const long = `The cart ${'is not what you asked for '.repeat(10)}`;
     const reasons = [long, 'Two.', 'Three.', 'Four.', 'Five.', 'Six.', 'Seven.'];

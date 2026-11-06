@@ -20,6 +20,8 @@ export const IntentOutput = z.object({
 
 const MAX_REASONS = 5;
 const MAX_REASON_CHARS = 200;
+/** The reason shown for a verdict that flags the purchase when the model gives none. */
+const NO_REASON = 'The intent check flagged this purchase without giving a reason.';
 /** How much of the cart's JSON and of the rationale the model reads. The prompt says what a cut means. */
 const MAX_CART_CHARS = 20_000;
 const MAX_RATIONALE_CHARS = 4_000;
@@ -55,5 +57,6 @@ export async function checkIntent(deps: LlmDeps, input: IntentInput): Promise<In
   if (!reply.ok) return { verdict: 'unavailable', reasons: [reply.error] };
 
   const { verdict, reasons } = reply.value;
+  if (verdict !== 'consistent' && reasons.length === 0) return { verdict, reasons: [NO_REASON] };
   return { verdict, reasons: reasons.slice(0, MAX_REASONS).map((reason) => clip(reason, MAX_REASON_CHARS)) };
 }

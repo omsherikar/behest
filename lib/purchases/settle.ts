@@ -17,8 +17,8 @@ import { appendEvent, StaleTransition, transition } from './events';
 // call of payoutSeller sends the payout. PayPal refuses a sender batch id it has seen in the last 30
 // days, so when the poll resends a payout whose answer was lost, the worst it can get is
 // PayoutAlreadyExists naming the batch already sent. After 30 days PayPal would take the same sender
-// batch id as a new payout and pay the seller again, so the poll never resends a payout older than
-// RESEND_WINDOW_MS.
+// batch id as a new payout and pay the seller again, so the poll never resends a payout more than 29
+// days old.
 
 type SettleDeps = Pick<PurchaseDeps, 'db' | 'paypal' | 'now'>;
 type Payout = typeof payouts.$inferSelect;
@@ -93,8 +93,8 @@ export async function payoutSeller(deps: SettleDeps, purchaseId: string): Promis
  * the purchase has moved on some other way, such as a refund. A payout that succeeds for a purchase
  * refunded while PayPal was asked is logged as a `payout_after_refund` event.
  * `retry` while the item is pending, unclaimed, on hold, missing or in a status not known here.
- * Throws, to be retried, if PayPal cannot be asked, or has the payout but did not name its batch, and
- * without asking PayPal if the payout was never answered and is too old to resend safely.
+ * Throws, so the job is retried, if PayPal cannot be asked or has the payout but did not name its
+ * batch; and, without asking PayPal, if the payout was never answered and is too old to resend safely.
  */
 export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<'done' | 'retry'> {
   const { db, paypal } = deps;
@@ -130,7 +130,10 @@ export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<
     // The purchase moved on while PayPal was asked. Unless an overlapping poll settled it, it was
     // refunded, and the seller has been paid for an order whose buyer got the money back. The poll
     // that first recorded the payout's success logs that, once.
-    const [{ status: current }] = await db.select({ status: purchases.status }).from(purchases).where(eq(purchases.id, purchaseId));
+    const [{ status: current }] = await db
+      .select({ status: purchases.status })
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId));
     if (firstToRecord && !SETTLED_OR_LATER.has(current)) {
       await appendEvent(db, purchaseId, 'payout_after_refund', { status: current });
     }

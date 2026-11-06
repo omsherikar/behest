@@ -76,6 +76,9 @@ function claudeTool(toolkit: ToolkitLike, name: string, definition: ToolkitFunct
     // Sent to Claude as the toolkit wrote it. The cast only tells betaTool it describes an object.
     inputSchema: (definition.parameters ?? { type: 'object' }) as { type: 'object' },
     run: async (input) => {
+      const invalid = invalidArgument(definition.parameters, input);
+      if (invalid) throw new Error(`${name} was given an invalid ${invalid}`);
+
       let result;
       try {
         result = await toolkit.handleToolCall({
@@ -89,6 +92,21 @@ function claudeTool(toolkit: ToolkitLike, name: string, definition: ToolkitFunct
       }
       return asUntrusted(textOf(result.content));
     },
+  });
+}
+
+/**
+ * The first argument that breaks the toolkit's own schema by not being a string where the schema asks for
+ * one, or by missing the schema's pattern. The toolkit does not check arguments and puts ids straight into
+ * request URLs, so a value such as `../../v1/reporting/transactions` would reach other PayPal endpoints.
+ */
+function invalidArgument(schema: Record<string, unknown> | undefined, input: Record<string, unknown>): string | undefined {
+  const properties = (schema?.properties ?? {}) as Record<string, { type?: unknown; pattern?: unknown }>;
+  return Object.keys(properties).find((key) => {
+    const { type, pattern } = properties[key];
+    if (type !== 'string' || !Object.hasOwn(input, key)) return false;
+    const value = input[key];
+    return typeof value !== 'string' || (typeof pattern === 'string' && !new RegExp(pattern).test(value));
   });
 }
 

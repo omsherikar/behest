@@ -194,6 +194,18 @@ describe('a read-only tool', () => {
     expect(await resultFor('a'.repeat(8000))).toBe(`<untrusted source="paypal">${'a'.repeat(8000)}</untrusted>`);
   });
 
+  it.each([
+    ["a value outside the toolkit's pattern", '../../v1/reporting/transactions'],
+    ['a value that is not a string', ['../../v1/reporting/transactions']],
+  ])('refuses %s without calling PayPal, since the toolkit puts ids into the URL unchecked', async (_, disputeId) => {
+    const { toolkit, calls } = fakeToolkit(['get_dispute']);
+
+    await expect(toolNamed(toolkit, 'get_dispute').run({ dispute_id: disputeId })).rejects.toThrow(
+      new Error('get_dispute was given an invalid dispute_id'),
+    );
+    expect(calls).toEqual([]);
+  });
+
   it('turns a toolkit failure into a short message for the model and logs the cause', async () => {
     const { toolkit } = fakeToolkit(['get_dispute'], () => {
       throw new Error('Failed to fetch access token: invalid_client for client-id');

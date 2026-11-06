@@ -549,3 +549,22 @@ it('returns the full decision when nothing throws', () => {
   expect(evaluateGateSafely(input({ walletLinked: false }))).toEqual(evaluateGate(input({ walletLinked: false })));
   expect(errors).not.toHaveBeenCalled();
 });
+
+/** A policy as it might come out of a corrupt row: not what the type promises. */
+const corruptPolicy = (changes: Record<string, unknown>) => ({ ...demoPolicy, ...changes }) as unknown as MandatePolicy;
+
+it.each<[string, Partial<GateInput>]>([
+  ['a policy missing its expiry', { policy: corruptPolicy({ expiresAt: undefined }) }],
+  ['a policy with an allow list that is not a list', { policy: corruptPolicy({ categories: { allow: 'spices', deny: [] } }) }],
+  ['a policy whose per-purchase maximum exceeds its budget', { policy: corruptPolicy({ perPurchaseMaxCents: 7000 }) }],
+  ['a negative period spend', { spentInPeriodCents: -5000 }],
+  ['a fractional period spend', { spentInPeriodCents: 0.5 }],
+  ['a period spend that is not a number', { spentInPeriodCents: Number.NaN }],
+  ['an invalid current time', { now: new Date('not a date') }],
+  ['an invalid recent purchase time', { recentPurchaseTimes: [new Date('not a date')] }],
+  ['an invalid mandate expiry', { mandate: { status: 'active', expiresAt: new Date('not a date') } }],
+])('fails closed on %s', (_, overrides) => {
+  captureErrors();
+  expect(() => evaluateGate(input(overrides))).toThrow();
+  expect(evaluateGateSafely(input(overrides))).toEqual(FAILED_CLOSED);
+});

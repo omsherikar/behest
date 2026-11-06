@@ -1,6 +1,6 @@
 import type { Cart } from '@/lib/domain/cart';
 import type { Category } from '@/lib/domain/categories';
-import type { MandatePolicy } from '@/lib/domain/policy';
+import { MandatePolicy } from '@/lib/domain/policy';
 import type { PurchaseProposal } from '@/lib/domain/proposal';
 import { maxVerdict, type Verdict } from '@/lib/domain/verdict';
 import { RULESET_VERSION, type RuleId, type RuleOutcome } from '@/lib/gate/rules';
@@ -74,7 +74,7 @@ const NOT_CHECKED = skip('Not checked because the cart is not valid');
 
 /** Evaluates every rule in order and returns the most severe result with all the reasons. */
 export function evaluateGate(input: GateInput): GateResult {
-  const { policy } = input;
+  const policy = checkedPolicy(input);
   const built = buildCart(input);
   const outcomes: RuleOutcome[] = [
     { rule: 'mandate_active', ...mandateActive(input, policy) },
@@ -89,6 +89,22 @@ export function evaluateGate(input: GateInput): GateResult {
     cart: built.cart,
     rulesetVersion: RULESET_VERSION,
   };
+}
+
+const isValidDate = (value: unknown) => value instanceof Date && !Number.isNaN(value.getTime());
+
+/**
+ * Re-checks the inputs whose bad values would otherwise slip past a rule: a policy missing its
+ * expiry never expires, a negative spend adds to the budget, and an invalid date compares false.
+ * Throws instead, so the purchase is blocked. Returns the policy as parsed.
+ */
+function checkedPolicy({ policy, mandate, spentInPeriodCents, recentPurchaseTimes, now }: GateInput): MandatePolicy {
+  const dates = [now, ...recentPurchaseTimes, ...(mandate.expiresAt === null ? [] : [mandate.expiresAt])];
+  if (!dates.every(isValidDate)) throw new Error('the gate was given an invalid date');
+  if (!Number.isSafeInteger(spentInPeriodCents) || spentInPeriodCents < 0) {
+    throw new Error('the gate was given an invalid period spend');
+  }
+  return MandatePolicy.parse(policy);
 }
 
 const FAILED_CLOSED: RuleOutcome = {

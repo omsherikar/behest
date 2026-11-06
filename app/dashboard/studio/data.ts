@@ -102,7 +102,7 @@ const purchaseRow = (p: SellerPurchase) => ({
   allowed: flag(p.verdict === 'ALLOW'),
   asked: flag(p.verdict === 'ASK'),
   blocked: flag(p.verdict === 'BLOCK'),
-  captureId: p.paypalCaptureId,
+  captureId: p.paypalCaptureId ?? 'None',
 });
 
 /** A purchase as the buyer and the operator see it, with how it was decided. */

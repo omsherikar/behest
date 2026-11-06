@@ -174,6 +174,17 @@ it('treats a reply that did not end its turn as invalid output', async () => {
   });
 });
 
+it('throws before sending anything when the schema has no JSON Schema form', async () => {
+  const { db, fake, deps } = await setup([messageJson({ json: { answer: 'yes' } })]);
+  const Dated = z.object({ on: z.date() });
+
+  await expect(callStructured(deps, 'mandate_compile', { ...request, schema: Dated })).rejects.toThrow(
+    'Date cannot be represented in JSON Schema',
+  );
+  expect(fake.requests).toHaveLength(0);
+  expect(await db.select().from(llmCalls)).toHaveLength(0);
+});
+
 it('refuses to call once the daily cap is spent', async () => {
   const { db, fake, call } = await setup([messageJson({ json: { answer: 'yes' } })]);
   await recordCall(db, { route: 'intent_check', model: 'claude-opus-5-5', effort: 'low', ok: true, costUsd: 5, createdAt: NOW });

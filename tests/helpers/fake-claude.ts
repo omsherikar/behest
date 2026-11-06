@@ -75,9 +75,14 @@ export function iteration(type: 'message' | 'fallback_message', model: string | 
 
 const textBlock = (text: string) => ({ type: 'text', text, citations: null });
 
+/** A tool call the model makes. */
+export type FakeToolUse = { id: string; name: string; input: unknown };
+
 /**
  * A Messages API response body from `model`. `json` is serialized into the text block; `text` is
- * used as is. Without either the reply has no text. Usage defaults to zero tokens.
+ * used as is. Without either the reply has no text. `toolUses` follow the text as `tool_use`
+ * blocks, and the stop reason then defaults to `tool_use` instead of `end_turn`. Usage defaults to
+ * zero tokens.
  *
  * `fallbackFrom` makes it a reply rescued by server-side fallback: the declining model's `text`
  * (if any), then a `fallback` block handing over to `model`, then the reply. Unless `usage` gives
@@ -87,20 +92,25 @@ const textBlock = (text: string) => ({ type: 'text', text, citations: null });
 export function messageJson({
   text,
   json,
-  stop_reason = 'end_turn',
+  toolUses = [],
+  stop_reason = toolUses.length > 0 ? 'tool_use' : 'end_turn',
   usage,
   model = 'claude-opus-5-5',
   fallbackFrom,
 }: {
   text?: string;
   json?: unknown;
+  toolUses?: FakeToolUse[];
   stop_reason?: BetaStopReason;
   usage?: Partial<Usage> & { iterations?: object[] };
   model?: string;
   fallbackFrom?: { model: string; text?: string };
 } = {}) {
   const body = text ?? (json === undefined ? undefined : JSON.stringify(json));
-  const reply = body === undefined ? [] : [textBlock(body)];
+  const reply = [
+    ...(body === undefined ? [] : [textBlock(body)]),
+    ...toolUses.map(({ id, name, input }) => ({ type: 'tool_use', id, name, input })),
+  ];
   const { iterations, ...counts } = usage ?? {};
   const tokens = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, ...counts };
 

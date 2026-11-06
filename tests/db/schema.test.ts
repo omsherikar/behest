@@ -6,13 +6,16 @@ import {
   type JobStatus,
   mandates,
   type MandateStatus,
+  payouts,
   products,
   purchases,
   purchaseStatus,
   type PurchaseStatus,
+  receipts,
   sellerOrders,
   sellers,
   type WalletStatus,
+  wallets,
   webhookEvents,
 } from '@/lib/db/schema';
 import type { Cart } from '@/lib/domain/cart';
@@ -264,4 +267,40 @@ it('exports one status type per lifecycle enum', () => {
   expectTypeOf<WalletStatus>().toEqualTypeOf<'pending' | 'linked' | 'revoked'>();
   expectTypeOf<JobStatus>().toEqualTypeOf<'queued' | 'running' | 'done' | 'dead'>();
   expect(purchaseStatus.enumValues).toHaveLength(12);
+});
+
+it('rejects a second payout for a purchase', async () => {
+  const db = await createTestDb();
+  const parties = await seedParties(db);
+  const [purchase] = await db.insert(purchases).values(purchaseRow(parties)).returning();
+  const payout = {
+    purchaseId: purchase.id,
+    sellerId: parties.sellerId,
+    amountCents: cart.totalCents,
+    senderBatchId: `${purchase.id}:payout`,
+  };
+  await db.insert(payouts).values(payout);
+  await expect(db.insert(payouts).values(payout).execute()).rejects.toMatchObject(UNIQUE_VIOLATION);
+});
+
+it('rejects a second receipt for a purchase', async () => {
+  const db = await createTestDb();
+  const [purchase] = await db.insert(purchases).values(purchaseRow(await seedParties(db))).returning();
+  const receipt = () => ({
+    purchaseId: purchase.id,
+    jws: 'header.payload.signature',
+    payloadHash: HASH,
+    keyId: 'behest-1',
+  });
+  await db.insert(receipts).values(receipt());
+  await expect(db.insert(receipts).values(receipt()).execute()).rejects.toMatchObject(UNIQUE_VIOLATION);
+});
+
+it('rejects a second wallet for a buyer', async () => {
+  const db = await createTestDb();
+  const buyer = await addBuyer(db);
+  await db.insert(wallets).values({ buyerId: buyer.id, setupTokenId: '5C991763VB2771612' });
+  await expect(
+    db.insert(wallets).values({ buyerId: buyer.id, setupTokenId: '1V6Y4398YJ095012V' }).execute(),
+  ).rejects.toMatchObject(UNIQUE_VIOLATION);
 });

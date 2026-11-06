@@ -49,6 +49,12 @@ it('refuses to load without RECEIPT_SIGNING_KEY', async () => {
   await expect(loadSigningKey({ RECEIPT_SIGNING_KEY: '' })).rejects.toThrow('missing RECEIPT_SIGNING_KEY');
 });
 
+it('treats a blank RECEIPT_SIGNING_KEY as missing', async () => {
+  for (const value of ['   ', ' \n\t ', '\\n\\n']) {
+    await expect(loadSigningKey({ RECEIPT_SIGNING_KEY: value })).rejects.toThrow('missing RECEIPT_SIGNING_KEY');
+  }
+});
+
 it('loads a PEM whose newlines are written as literal \\n, as in a .env file', async () => {
   const { pem, kid } = await generateSigningKey();
   const escaped = pem.replaceAll('\n', '\\n');

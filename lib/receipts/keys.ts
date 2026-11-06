@@ -25,8 +25,8 @@ export async function loadSigningKey(env: {
   RECEIPT_SIGNING_KEY?: string;
   RECEIPT_KEY_ID?: string;
 }): Promise<{ kid: string; privateKey: CryptoKey; publicJwk: JWK }> {
-  if (!env.RECEIPT_SIGNING_KEY) throw new Error('missing RECEIPT_SIGNING_KEY');
-  const pem = env.RECEIPT_SIGNING_KEY.replaceAll('\\n', '\n').trim();
+  const pem = (env.RECEIPT_SIGNING_KEY ?? '').replaceAll('\\n', '\n').trim();
+  if (!pem) throw new Error('missing RECEIPT_SIGNING_KEY');
 
   let privateKey: CryptoKey;
   try {

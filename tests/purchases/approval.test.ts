@@ -1,10 +1,15 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { jobs, mandates, purchases } from '@/lib/db/schema';
-import { startApproval } from '@/lib/purchases/approval';
+import { jobs, mandates, purchases, receipts } from '@/lib/db/schema';
+import { runDueJobs } from '@/lib/jobs/queue';
+import { completeApproval, startApproval } from '@/lib/purchases/approval';
+import { retryCharge } from '@/lib/purchases/charge';
 import type { PurchaseDeps } from '@/lib/purchases/deps';
-import { NOW, PASSED, setUp } from '@/tests/helpers/purchase-deps';
-import { eventsOf, purchaseRow, seededCart, statusOf } from '@/tests/helpers/seed-purchase';
+import { hashOf } from '@/lib/receipts/canonical';
+import { verifyReceipt } from '@/lib/receipts/verify-receipt';
+import type { FakePaypal } from '@/tests/helpers/fake-paypal';
+import { jwks, NOW, PASSED, setUp } from '@/tests/helpers/purchase-deps';
+import { eventsOf, purchaseRow, SEEDED_SELLER, seededCart, statusOf } from '@/tests/helpers/seed-purchase';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 // The first createTestDb() call in a file migrates a template database, which can take several
@@ -16,6 +21,8 @@ beforeAll(async () => {
 const HOUR_MS = 60 * 60 * 1000;
 /** When the `approval_expiry` job queued with an approval first runs. */
 const EXPIRES_AT = new Date(NOW.getTime() + 3 * HOUR_MS);
+/** When the `charge_retry` job queued with an approval's capture first runs. */
+const RETRY_AT = new Date(NOW.getTime() + 2 * 60 * 1000);
 const APP_URL = 'https://behest.example.com';
 
 const NO_WALLET = 'No saved PayPal wallet is linked';
@@ -23,6 +30,22 @@ const NO_WALLET = 'No saved PayPal wallet is linked';
 const ASKED = PASSED.map((o) => (o.rule === 'wallet_linked' ? { ...o, result: 'ask' as const, detail: NO_WALLET } : o));
 
 const approvalRequestId = (purchaseId: string) => `${purchaseId}:approval`;
+const captureRequestId = (purchaseId: string) => `${purchaseId}:capture`;
+
+/** The order id and request id of every capture PayPal was asked for, in order. */
+function captureCalls(paypal: FakePaypal): [string, string][] {
+  return paypal.callsTo('captureOrder');
+}
+
+/** The kinds of the purchase's events other than status changes, in order. */
+async function stepsOf(db: PurchaseDeps['db'], purchaseId: string): Promise<string[]> {
+  return (await eventsOf(db, purchaseId)).filter((e) => e.kind !== 'status').map((e) => e.kind);
+}
+
+/** Runs the jobs due by the clock, with retryCharge as the `charge_retry` handler. */
+function runRetryJobs(deps: PurchaseDeps, clock: { now: Date }): Promise<number> {
+  return runDueJobs(deps.db, { charge_retry: (payload, d) => retryCharge(d, String(payload.purchaseId)) }, deps, () => clock.now);
+}
 
 /** The kinds of the queued and finished jobs, sorted. */
 async function jobKinds(db: PurchaseDeps['db']): Promise<string[]> {
@@ -36,6 +59,26 @@ async function setUpAsk() {
     .update(purchases)
     .set({ gateVerdict: 'ASK', finalVerdict: 'ASK', approver: null, gateOutcomes: ASKED })
     .where(eq(purchases.id, s.purchaseId));
+  return s;
+}
+
+/** A purchase awaiting approval whose order the buyer has approved at PayPal, when `approve` says so. */
+async function setUpAwaiting({ approve = true }: { approve?: boolean } = {}) {
+  const s = await setUpAsk();
+  const { approveUrl } = await startApproval(s.deps, s.purchaseId);
+  const { paypalOrderId: orderId } = await purchaseRow(s.db, s.purchaseId);
+  if (!orderId || !approveUrl) throw new Error('the approval was not started');
+  if (approve) s.paypal.approve(orderId);
+  return { ...s, orderId, approveUrl };
+}
+
+/** An approved purchase left charging by two thrown capture attempts, PayPal having captured the first when `lost` says so. */
+async function setUpUnknownCapture({ lost, approve = true }: { lost: boolean; approve?: boolean }) {
+  const s = await setUpAwaiting({ approve });
+  const failure = lost ? 'lost_response' : 'network';
+  s.paypal.failNext('captureOrder', failure);
+  s.paypal.failNext('captureOrder', failure);
+  await completeApproval(s.deps, s.orderId);
   return s;
 }
 
@@ -169,5 +212,251 @@ describe('startApproval', () => {
 
     expect(second).toEqual(first);
     expect(paypal.callsTo('createApprovalOrder')).toHaveLength(1);
+  });
+});
+
+describe('completeApproval', () => {
+  it('captures the approved order, signs a receipt naming the buyer as approver and ends accepted with the seller paid', async () => {
+    const { db, deps, paypal, seller, purchaseId, orderId, approveUrl } = await setUpAwaiting();
+
+    const outcome = await completeApproval(deps, orderId);
+
+    const [receipt] = await db.select().from(receipts);
+    expect(outcome).toEqual({ purchaseId, verdict: 'ASK', status: 'accepted', reasons: [NO_WALLET], approveUrl, receiptId: receipt.id });
+    expect(captureCalls(paypal)).toEqual([[orderId, captureRequestId(purchaseId)]]);
+    expect(paypal.captures).toHaveLength(1);
+    const [{ captureId }] = paypal.captures;
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({
+      status: 'accepted',
+      approver: 'human',
+      paypalOrderId: orderId,
+      paypalCaptureId: captureId,
+      capturedAt: NOW,
+    });
+
+    // The receipt passes every check an outside seller runs, and says the buyer approved the payment.
+    const verified = await verifyReceipt({
+      jws: receipt.jws,
+      cart: seededCart,
+      sellerSlug: SEEDED_SELLER.slug,
+      jwks,
+      now: NOW,
+      seen: async () => false,
+    });
+    expect(verified).toMatchObject({
+      ok: true,
+      payload: {
+        id: receipt.id,
+        cart: { hash: hashOf(seededCart) },
+        decision: { purchaseId, verdict: 'ASK', approver: 'human' },
+        payment: { orderId, captureId, amountCents: seededCart.totalCents, capturedAt: NOW.toISOString() },
+      },
+    });
+    expect(seller.orders).toEqual([{ sellerSlug: SEEDED_SELLER.slug, cart: seededCart, receiptJws: receipt.jws }]);
+    expect(paypal.payouts).toHaveLength(1);
+    expect(await jobKinds(db)).toEqual(['approval_expiry', 'charge_retry', 'payout_poll']);
+  });
+
+  it('logs the capture request and queues its retry before asking PayPal, then logs the capture, receipt and acceptance', async () => {
+    const { db, deps, paypal, purchaseId, orderId } = await setUpAwaiting();
+
+    const { receiptId } = await completeApproval(deps, orderId);
+
+    const [{ captureId }] = paypal.captures;
+    expect((await eventsOf(db, purchaseId)).slice(2)).toEqual([
+      { kind: 'status', data: { from: 'awaiting_approval', to: 'charging' } },
+      { kind: 'charge', data: { orderId, requestId: captureRequestId(purchaseId), startedAt: NOW.toISOString() } },
+      { kind: 'capture', data: { orderId, captureId } },
+      { kind: 'status', data: { from: 'charging', to: 'captured' } },
+      { kind: 'receipt', data: { receiptId } },
+      { kind: 'seller_accepted', data: { receiptId } },
+      { kind: 'status', data: { from: 'captured', to: 'accepted' } },
+    ]);
+    expect(await db.select({ payload: jobs.payload, runAt: jobs.runAt }).from(jobs).where(eq(jobs.kind, 'charge_retry'))).toEqual([
+      { payload: { purchaseId }, runAt: RETRY_AT },
+    ]);
+  });
+
+  it('returns where the purchase stands, calling nothing, when the webhook completes an approval the return already completed', async () => {
+    const { db, deps, paypal, seller, purchaseId, orderId } = await setUpAwaiting();
+    const fromReturn = await completeApproval(deps, orderId);
+    const callsBefore = paypal.calls.length;
+
+    const fromWebhook = await completeApproval(deps, orderId);
+
+    expect(fromWebhook).toEqual(fromReturn);
+    expect(paypal.calls).toHaveLength(callsBefore);
+    expect(paypal.captures).toHaveLength(1);
+    expect(await db.select().from(receipts)).toHaveLength(1);
+    expect(seller.orders).toHaveLength(1);
+    expect(paypal.payouts).toHaveLength(1);
+    expect(await stepsOf(db, purchaseId)).toEqual(['approval_order', 'charge', 'capture', 'receipt', 'seller_accepted']);
+  });
+
+  it('captures, receipts, delivers and pays once when the return and the webhook arrive together', async () => {
+    const { db, deps, paypal, seller, purchaseId, orderId } = await setUpAwaiting();
+
+    await Promise.all([completeApproval(deps, orderId), completeApproval(deps, orderId)]);
+
+    expect(captureCalls(paypal)).toHaveLength(1);
+    expect(paypal.captures).toHaveLength(1);
+    expect(await db.select().from(receipts)).toHaveLength(1);
+    expect(seller.orders).toHaveLength(1);
+    expect(paypal.payouts).toHaveLength(1);
+    expect(await statusOf(db, purchaseId)).toBe('accepted');
+    expect(await jobKinds(db)).toEqual(['approval_expiry', 'charge_retry', 'payout_poll']);
+  });
+
+  it('sends the purchase back for approval, its link kept, when the buyer has not approved the order', async () => {
+    const { db, deps, paypal, seller, purchaseId, orderId, approveUrl } = await setUpAwaiting({ approve: false });
+
+    const outcome = await completeApproval(deps, orderId);
+
+    expect(outcome).toMatchObject({ status: 'awaiting_approval', approveUrl, receiptId: null });
+    // PayPal's refusal is final, so it is not asked again.
+    expect(captureCalls(paypal)).toEqual([[orderId, captureRequestId(purchaseId)]]);
+    expect(paypal.captures).toEqual([]);
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({
+      status: 'awaiting_approval',
+      approver: null,
+      paypalOrderId: orderId,
+      paypalCaptureId: null,
+      approveUrl,
+    });
+    expect(seller.orders).toEqual([]);
+    expect((await eventsOf(db, purchaseId)).slice(3)).toEqual([
+      expect.objectContaining({ kind: 'charge' }),
+      { kind: 'approval_pending', data: { orderId, requestId: captureRequestId(purchaseId) } },
+      { kind: 'status', data: { from: 'charging', to: 'awaiting_approval' } },
+    ]);
+
+    // The buyer approves after all, and the next return captures the order.
+    paypal.approve(orderId);
+    expect(await completeApproval(deps, orderId)).toMatchObject({ status: 'accepted', approveUrl });
+    expect(paypal.captures).toHaveLength(1);
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({ approver: 'human' });
+  });
+
+  it('asks again with the same request id when the answer is lost after PayPal captured, capturing once', async () => {
+    const { db, deps, paypal, purchaseId, orderId } = await setUpAwaiting();
+    paypal.failNext('captureOrder', 'lost_response');
+
+    const outcome = await completeApproval(deps, orderId);
+
+    expect(captureCalls(paypal)).toEqual([
+      [orderId, captureRequestId(purchaseId)],
+      [orderId, captureRequestId(purchaseId)],
+    ]);
+    expect(paypal.captures).toHaveLength(1);
+    expect(outcome.status).toBe('accepted');
+    expect(await db.select().from(receipts)).toHaveLength(1);
+  });
+
+  it('ends failed with no receipt, releasing the budget, when PayPal declines the capture', async () => {
+    const { db, deps, paypal, seller, purchaseId, orderId } = await setUpAwaiting();
+    paypal.failNext('captureOrder', { status: 'DECLINED' });
+
+    const outcome = await completeApproval(deps, orderId);
+
+    expect(outcome).toMatchObject({ status: 'failed', receiptId: null });
+    expect(paypal.captures).toEqual([]);
+    expect(await db.select().from(receipts)).toEqual([]);
+    expect(seller.orders).toEqual([]);
+    expect((await eventsOf(db, purchaseId)).slice(4)).toEqual([
+      { kind: 'charge_declined', data: { requestId: captureRequestId(purchaseId) } },
+      { kind: 'status', data: { from: 'charging', to: 'failed' } },
+    ]);
+  });
+
+  it('keeps a pending capture charging with its PayPal ids, issuing no receipt and calling no seller', async () => {
+    const { db, deps, paypal, seller, purchaseId, orderId } = await setUpAwaiting();
+    paypal.failNext('captureOrder', { status: 'PENDING' });
+
+    const outcome = await completeApproval(deps, orderId);
+
+    const [{ captureId }] = paypal.captures;
+    expect(outcome).toMatchObject({ status: 'charging', receiptId: null });
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({ status: 'charging', paypalOrderId: orderId, paypalCaptureId: captureId });
+    expect(await db.select().from(receipts)).toEqual([]);
+    expect(seller.orders).toEqual([]);
+    expect(await stepsOf(db, purchaseId)).toEqual(['approval_order', 'charge', 'capture_pending']);
+  });
+
+  it('leaves the purchase charging, its budget reserved and its retry queued, when PayPal fails twice', async () => {
+    const { db, deps, paypal, seller, purchaseId, orderId } = await setUpAwaiting();
+    paypal.failNext('captureOrder', 'network');
+    paypal.failNext('captureOrder', 'network');
+
+    const outcome = await completeApproval(deps, orderId);
+
+    expect(captureCalls(paypal)).toHaveLength(2);
+    expect(outcome).toMatchObject({ status: 'charging', receiptId: null });
+    expect(await jobKinds(db)).toEqual(['approval_expiry', 'charge_retry']);
+    expect(seller.orders).toEqual([]);
+    expect((await eventsOf(db, purchaseId)).at(-1)).toEqual({
+      kind: 'charge_unknown',
+      data: { requestId: captureRequestId(purchaseId), error: 'fetch failed', errorClass: 'TypeError' },
+    });
+  });
+
+  it('throws for an order no purchase was sent to PayPal with', async () => {
+    const { deps, paypal } = await setUpAwaiting();
+
+    await expect(completeApproval(deps, 'ORDER-9')).rejects.toThrow('there is no purchase with PayPal order ORDER-9');
+
+    expect(captureCalls(paypal)).toEqual([]);
+  });
+});
+
+describe('retrying the capture of an approved order', () => {
+  it('runs from its job, replays exactly the capture request and ends accepted with one capture', async () => {
+    const { db, deps, paypal, clock, purchaseId, orderId } = await setUpUnknownCapture({ lost: true });
+    clock.now = RETRY_AT;
+
+    expect(await runRetryJobs(deps, clock)).toBe(1);
+
+    expect(captureCalls(paypal)).toEqual(Array(3).fill([orderId, captureRequestId(purchaseId)]));
+    expect(paypal.captures).toHaveLength(1);
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({ status: 'accepted', approver: 'human' });
+    expect(await db.select().from(receipts)).toHaveLength(1);
+    expect(await stepsOf(db, purchaseId)).toEqual(['approval_order', 'charge', 'charge_unknown', 'capture', 'receipt', 'seller_accepted']);
+  });
+
+  it('captures once when PayPal never received the first two attempts', async () => {
+    const { db, deps, paypal, purchaseId } = await setUpUnknownCapture({ lost: false });
+
+    expect(await retryCharge(deps, purchaseId)).toBe('done');
+
+    expect(paypal.captures).toHaveLength(1);
+    expect(await statusOf(db, purchaseId)).toBe('accepted');
+  });
+
+  it('sends the purchase back for approval when the replay finds the order unapproved', async () => {
+    const { db, deps, paypal, purchaseId, orderId, approveUrl } = await setUpUnknownCapture({ lost: false, approve: false });
+
+    expect(await retryCharge(deps, purchaseId)).toBe('done');
+
+    expect(captureCalls(paypal)).toHaveLength(3);
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({ status: 'awaiting_approval', approveUrl, paypalOrderId: orderId });
+    expect(await stepsOf(db, purchaseId)).toEqual(['approval_order', 'charge', 'charge_unknown', 'approval_pending']);
+  });
+
+  it('does nothing for a purchase already sent back for approval', async () => {
+    const { deps, paypal, purchaseId, orderId } = await setUpAwaiting({ approve: false });
+    await completeApproval(deps, orderId);
+
+    expect(await retryCharge(deps, purchaseId)).toBe('done');
+
+    expect(captureCalls(paypal)).toHaveLength(1);
+  });
+
+  it('refuses to replay a capture older than the replay window', async () => {
+    const { db, deps, paypal, clock, purchaseId } = await setUpUnknownCapture({ lost: false });
+    clock.now = new Date(NOW.getTime() + 5 * HOUR_MS + 1);
+
+    await expect(retryCharge(deps, purchaseId)).rejects.toThrow('too old to replay');
+
+    expect(captureCalls(paypal)).toHaveLength(2);
+    expect(await statusOf(db, purchaseId)).toBe('charging');
   });
 });

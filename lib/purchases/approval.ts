@@ -3,7 +3,7 @@ import type { Db } from '@/lib/db/client';
 import { purchases } from '@/lib/db/schema';
 import { enqueue } from '@/lib/jobs/queue';
 import type { PaypalPort } from '@/lib/paypal/port';
-import { purchaseOutcome } from './charge';
+import { purchaseOutcome, recordCharge, takePayment, type PaymentRequest } from './charge';
 import type { ProposalOutcome, PurchaseDeps } from './deps';
 import { appendEvent, StaleTransition, transition } from './events';
 import { receiptBlocker } from './receipt';
@@ -11,10 +11,13 @@ import { describeFailure } from './settle';
 
 // Purchases the buyer approves themselves (architecture section 6.3). The gate sent the purchase to
 // its buyer, so Behest creates a PayPal order and the buyer approves it on PayPal: that approval is
-// PayPal's evidence that a human was present. An order left unapproved for three hours is
-// cancelled, which releases its budget.
+// PayPal's evidence that a human was present. Behest then captures the order, with the same safety
+// as a saved-wallet charge (see charge.ts), and issues the receipt, delivers the order and pays the
+// seller exactly as for an allowed purchase. An order left unapproved for three hours is cancelled,
+// which releases its budget. No database lock is held while PayPal is asked.
 
 type ApprovalDeps = Pick<PurchaseDeps, 'db' | 'paypal' | 'appUrl' | 'now'>;
+type CaptureDeps = Pick<PurchaseDeps, 'db' | 'paypal' | 'signer' | 'sellers' | 'now'>;
 type ApprovalRequest = Parameters<PaypalPort['createApprovalOrder']>[0];
 type ApprovalOrder = Awaited<ReturnType<PaypalPort['createApprovalOrder']>>;
 
@@ -61,6 +64,27 @@ export async function startApproval(deps: ApprovalDeps, purchaseId: string): Pro
 }
 
 /**
+ * Captures the order of a purchase its buyer approved at PayPal and carries the purchase on to its
+ * receipt, delivery and payout as for an allowed purchase. Both the buyer's return from PayPal and
+ * PayPal's approval webhook call it, so it may run twice, even at once, and still captures once.
+ * With the purchase locked, it moves it from `awaiting_approval` to `charging` with the buyer as its
+ * approver, logs the capture request as a `charge` event and queues the `charge_retry` job that
+ * replays it, all in one transaction. Only the call that made that move asks PayPal, through
+ * takePayment, which also sends the purchase back to `awaiting_approval` if the buyer has not in fact
+ * approved the order. Any other purchase, one already past `awaiting_approval` or cancelled, is
+ * returned as it stands and nothing is called. Throws for an order no purchase was sent with.
+ */
+export async function completeApproval(deps: CaptureDeps, orderId: string): Promise<ProposalOutcome> {
+  const { db } = deps;
+  const [purchase] = await db.select({ id: purchases.id }).from(purchases).where(eq(purchases.paypalOrderId, orderId));
+  if (!purchase) throw new Error(`there is no purchase with PayPal order ${orderId}`);
+
+  const request = await enterCharging(deps, purchase.id, orderId);
+  if (!request) return purchaseOutcome(db, purchase.id);
+  return takePayment(deps, purchase.id, request);
+}
+
+/**
  * Moves the purchase from `proposed` to `awaiting_approval` and queues its `approval_expiry` job,
  * and returns the order to ask PayPal for. If the purchase could not be given its receipt, it fails
  * the purchase instead, through `charging` as a refused charge does, and returns null; it also
@@ -95,6 +119,26 @@ async function openApproval(
     if (error instanceof StaleTransition) return null;
     throw error;
   }
+}
+
+/**
+ * With the purchase locked, moves it from `awaiting_approval` to `charging`, approved by the buyer,
+ * and records the capture with recordCharge. Returns the capture to send, or null, changing
+ * nothing, for a purchase in any other status.
+ */
+async function enterCharging({ db, now }: CaptureDeps, purchaseId: string, orderId: string): Promise<PaymentRequest | null> {
+  return db.transaction(async (tx) => {
+    const [purchase] = await tx
+      .select({ status: purchases.status })
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId))
+      .for('update');
+    if (purchase?.status !== 'awaiting_approval') return null;
+    await transition(tx, purchaseId, 'awaiting_approval', 'charging', { approver: 'human' });
+    const request = { orderId, requestId: `${purchaseId}:capture` };
+    await recordCharge(tx, purchaseId, request, now());
+    return request;
+  });
 }
 
 /** Asks PayPal for the approval order, and once more if that throws. Both carry the same request id, so PayPal creates one order. */

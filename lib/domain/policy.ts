@@ -16,24 +16,29 @@ export const MandatePolicy = z
     version: z.literal(1),
     currency: z.literal('USD'),
     /** Total the agent may spend per period. */
-    budget: z.object({ amountCents: cents.positive(), period: BudgetPeriod }),
+    budget: z.object({ amountCents: cents.positive(), period: BudgetPeriod }).strict(),
     /** Any single purchase above this is blocked outright. */
     perPurchaseMaxCents: cents.positive(),
     /** Purchases above this need the buyer's approval. Null means never ask on amount alone. */
     askAboveCents: cents.nullable(),
-    categories: z.object({
-      /** Null means any category not denied. */
-      allow: z.array(category).nullable(),
-      deny: z.array(category),
-    }),
-    merchants: z.object({
-      /** Merchant slugs. Null means any merchant not denied. */
-      allow: z.array(z.string().min(1)).nullable(),
-      deny: z.array(z.string().min(1)),
-    }),
+    categories: z
+      .object({
+        /** Null means any category not denied. */
+        allow: z.array(category).nullable(),
+        deny: z.array(category),
+      })
+      .strict(),
+    merchants: z
+      .object({
+        /** Merchant slugs. Null means any merchant not denied. */
+        allow: z.array(z.string().min(1)).nullable(),
+        deny: z.array(z.string().min(1)),
+      })
+      .strict(),
     /** At most this many purchases in a rolling window. Null means no limit. */
     velocity: z
       .object({ maxPurchases: z.number().int().positive(), windowHours: z.number().int().positive() })
+      .strict()
       .nullable(),
     /** ISO timestamp after which the mandate no longer authorizes anything. */
     expiresAt: z.iso.datetime().nullable(),

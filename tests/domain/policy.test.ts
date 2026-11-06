@@ -22,3 +22,5 @@ it('rejects a category both allowed and denied', () =>
   expect(MandatePolicy.safeParse({ ...demo, categories: { allow: ['spices'], deny: ['spices'] } }).success).toBe(false));
 it('rejects non-USD', () => expect(MandatePolicy.safeParse({ ...demo, currency: 'INR' }).success).toBe(false));
 it('rejects unknown keys', () => expect(MandatePolicy.safeParse({ ...demo, note: 'x' }).success).toBe(false));
+it('rejects unknown keys inside nested objects', () =>
+  expect(MandatePolicy.safeParse({ ...demo, budget: { ...demo.budget, rollover: true } }).success).toBe(false));

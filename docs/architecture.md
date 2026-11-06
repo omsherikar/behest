@@ -176,7 +176,7 @@ Mandates and receipts are JSON Web Signatures in compact form, signed with Ed255
 
 | Field | Contents |
 |---|---|
-| `id`, `iat`, `iss`, `kid` | Receipt id, issue time, issuer, signing key id |
+| `id`, `iat`, `iss` | Receipt id, issue time, issuer. The signing key id travels in the JWS header as `kid`. |
 | `mandate` | Mandate id, policy hash, hash of the signed mandate JWS |
 | `seller` | Seller slug |
 | `cart` | Cart hash, total in cents, currency, item count |

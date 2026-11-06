@@ -1,0 +1,21 @@
+import { PGlite } from '@electric-sql/pglite';
+import { migrateDb, pgliteDb, type Db } from '@/lib/db/client';
+
+// Migrating a fresh PGlite takes over a second, so each test file migrates one template database
+// once and every createTestDb() call starts a new instance from a copy of its data directory.
+
+let template: Promise<File | Blob> | undefined;
+
+async function migratedTemplate(): Promise<File | Blob> {
+  const client = new PGlite();
+  await migrateDb(pgliteDb(client));
+  const dump = await client.dumpDataDir('none');
+  await client.close();
+  return dump;
+}
+
+/** A fresh in-memory database with every migration applied. Each call is fully isolated. */
+export async function createTestDb(): Promise<Db> {
+  template ??= migratedTemplate();
+  return pgliteDb(new PGlite({ loadDataDir: await template }));
+}

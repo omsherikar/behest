@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import { buyers, mandates, payouts, products, purchaseEvents, purchases, receipts, sellers } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME, DEMO_SELLER_SLUG } from '@/lib/demo/personas';
@@ -121,13 +121,17 @@ function noTransactions(): DashboardDeps & { loadTransactions: ReturnType<typeof
   return { now: NOW, loadTransactions: vi.fn(async () => []) };
 }
 
+// Reading never changes the data, so every test shares one seeded database. The first
+// createTestDb() in a file also migrates the template database, which is slow on a busy machine.
+const SETUP_TIMEOUT_MS = 30_000;
+
 let db: Db;
 let seeded: Awaited<ReturnType<typeof seed>>;
 
-beforeEach(async () => {
+beforeAll(async () => {
   db = await createTestDb();
   seeded = await seed(db);
-});
+}, SETUP_TIMEOUT_MS);
 
 describe('loadDashboardData for the buyer', () => {
   it('shows only the demo buyer purchases and what hangs off them', async () => {

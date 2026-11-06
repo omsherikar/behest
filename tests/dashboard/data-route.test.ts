@@ -1,5 +1,5 @@
 import { connection, NextRequest } from 'next/server';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GET } from '@/app/api/dashboard/data/route';
 import { getDb, type Db } from '@/lib/db/client';
 import { buyers, mandates } from '@/lib/db/schema';
@@ -33,6 +33,9 @@ async function request(persona?: Persona | 'forged') {
 }
 
 let db: Db;
+
+// The first createTestDb() in a file migrates the template database, which is slow on a busy machine.
+beforeAll(() => createTestDb(), 30_000);
 
 beforeEach(async () => {
   vi.stubEnv('SESSION_SECRET', SECRET);

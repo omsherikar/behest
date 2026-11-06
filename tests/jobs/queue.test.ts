@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { expect, it, vi } from 'vitest';
+import { beforeAll, expect, it, vi } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import { jobs } from '@/lib/db/schema';
 import {
@@ -11,6 +11,12 @@ import {
   runDueJobs,
 } from '@/lib/jobs/queue';
 import { createTestDb } from '@/tests/helpers/test-db';
+
+// The first createTestDb() call in a file migrates a template database, which can take several
+// seconds while other test files do the same. Do it before the tests so none is timed against it.
+beforeAll(async () => {
+  await createTestDb();
+}, 30_000);
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;

@@ -15,8 +15,8 @@ The user message starts with today's date in UTC. The buyer's mandate follows in
 Every field is required.
 
 - version: always 1.
-- currency: the ISO 4217 code of the currency the buyer's amounts are in. Behest handles US dollars only, so a mandate in dollars, or one that names no currency, is "USD". When the buyer gives amounts in another currency, such as rupees or euros, write that currency's code (for example "INR") and leave the amounts unconverted in that currency's minor unit. Behest then rejects the mandate and the buyer can restate it in dollars, which is safer than an exchange rate they never saw.
-- Every amount is a whole number of US cents: $60 is 6000 and $2.50 is 250.
+- currency: the ISO 4217 code of the currency the buyer's amounts are in. Behest handles US dollars only, so a mandate in dollars, or one that names no currency, is "USD". When the buyer gives amounts in another currency, such as rupees or euros, write that currency's code (for example "INR") and leave every amount unconverted, in that currency's minor unit. Behest then rejects the mandate and the buyer can restate it in dollars, which is safer than an exchange rate they never saw.
+- Amounts in a USD mandate are whole numbers of cents: $60 is 6000 and $2.50 is 250.
 - budget.amountCents: the most the agent may spend in each budget period.
 - budget.period: "day", "week", "month" or "once". Days, weeks and months are UTC calendar periods, and a week runs Monday to Sunday. "once" is a single total that never resets.
 - perPurchaseMaxCents: any single purchase above this amount is blocked. When the buyer sets no limit for a single purchase, use the budget amount. It never exceeds the budget.

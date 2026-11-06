@@ -1,0 +1,19 @@
+{
+  "id": "9GT47180MC2365043",
+  "status": "PAYER_ACTION_REQUIRED",
+  "payment_source": {
+    "paypal": {}
+  },
+  "links": [
+    {
+      "href": "https://api-m.sandbox.paypal.com/v2/checkout/orders/9GT47180MC2365043",
+      "rel": "self",
+      "method": "GET"
+    },
+    {
+      "href": "https://www.sandbox.paypal.com/checkoutnow?token=9GT47180MC2365043",
+      "rel": "payer-action",
+      "method": "GET"
+    }
+  ]
+}

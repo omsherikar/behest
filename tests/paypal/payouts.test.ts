@@ -79,12 +79,23 @@ describe('createPayout', () => {
     expect(await createPayout(payoutInput)).toEqual({ payoutBatchId: BATCH_ID });
   });
 
-  it('repeats a payout whose response was lost with the same PayPal-Request-Id and body', async () => {
-    const { calls, lost } = stubFetchLosingFirstResponse([{ method: 'POST', path: PAYOUTS, status: 201, body: payoutCreated }], PAYOUTS);
+  it('reports a payout repeated after a lost response as the existing batch, sent with the same PayPal-Request-Id and body', async () => {
+    // The sandbox does not replay the first answer to a repeated request id. It refuses the repeat as
+    // a duplicate sender batch, linking the batch the lost response would have named.
+    const refused = duplicateWithLinks([{ ...existingBatchLink, href: `https://api.sandbox.paypal.com${PAYOUTS}/${BATCH_ID}` }], []);
+    const { calls, lost } = stubFetchLosingFirstResponse(
+      [
+        { method: 'POST', path: PAYOUTS, status: 201, body: payoutCreated, once: true },
+        { method: 'POST', path: PAYOUTS, status: 400, body: refused },
+      ],
+      PAYOUTS,
+    );
 
     await expect(createPayout(payoutInput)).rejects.toBe(lost);
-    expect(await createPayout(payoutInput)).toEqual({ payoutBatchId: BATCH_ID });
+    const error = await createPayout(payoutInput).catch((e) => e);
 
+    expect(error).toBeInstanceOf(PayoutAlreadyExists);
+    expect(error).toMatchObject({ senderBatchId: SENDER_BATCH_ID, payoutBatchId: BATCH_ID });
     const posts = apiCalls(calls);
     expect(posts.map((c) => c.headers['paypal-request-id'])).toEqual([SENDER_BATCH_ID, SENDER_BATCH_ID]);
     expect(posts[1].body).toBe(posts[0].body);

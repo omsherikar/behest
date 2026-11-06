@@ -1,9 +1,10 @@
 'use client';
 
-// The dashboard: the PayPal shell (./components) wrapped around a single AG Studio instance, which
-// this file renders. Studio's configuration (data sources, theme, default report, AI) lives in
-// ./studio. The shell owns saved reports, page names and navigation; Studio owns
-// the report being edited. They meet in two places:
+// The dashboard: the shell (./components) wrapped around a single AG Studio instance, which this
+// file renders. Its rows come from /api/dashboard/data, scoped to the signed-in persona
+// (./use-dashboard-data.ts). Studio's configuration (data sources, custom widgets, theme, default
+// reports, AI) lives in ./studio. The shell owns saved reports, page names and navigation; Studio
+// owns the report being edited. They meet in two places:
 //   - the shell drives Studio through its AgStudioApi (setState, getState, undo, redo)
 //   - Studio reports every change back through onStateUpdated, which only redraws the shell
 //
@@ -11,16 +12,11 @@
 // leaving a report compares Studio's state with the saved one there and then.
 
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import {
-  AgStudioAiModule,
-  enableStudioDevValidations,
-  type AgReportState,
-  type AgStudioApi,
-  type AgStudioMode,
-} from 'ag-studio';
+import { AgStudioAiModule, enableStudioDevValidations, type AgStudioApi, type AgStudioMode } from 'ag-studio';
 import { AgStudio, AgStudioProvider } from 'ag-studio-react';
-import type { DashboardData } from '@/lib/dashboard-data';
-import { AppShell } from './components/app-shell';
+import type { DashboardData } from '@/lib/dashboard/scope';
+import type { Persona } from '@/lib/session';
+import { AppShell, viewerFor } from './components/app-shell';
 import {
   CreateReportDialog,
   DeleteReportDialog,
@@ -48,6 +44,8 @@ import * as reportState from './report-state';
 import { buildAi } from './studio/ai';
 import { buildStudioData, hasData } from './studio/data';
 import { agStudioPayPalTheme } from './studio/theme';
+import { behestWidgets, type BehestRegistry, type ReportState } from './studio/widgets';
+import { useDashboardData } from './use-dashboard-data';
 import { useReports } from './use-reports';
 
 if (process.env.NODE_ENV !== 'production') {
@@ -55,10 +53,18 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 type DashboardProps = {
-  data: DashboardData;
+  persona: Persona;
   licenseKey?: string;
   /** OpenAI models the assistant may use; omitted when no key is configured, which hides the assistant. */
   aiModels?: string[];
+};
+
+type ReportsDashboardProps = DashboardProps & {
+  data: DashboardData;
+  refreshing: boolean;
+  /** Problems loading part of the data, shown above the report. */
+  warnings: string[];
+  onRefresh: () => void;
 };
 
 type StudioHistory = { canUndo: boolean; canRedo: boolean };
@@ -67,6 +73,9 @@ const NO_HISTORY: StudioHistory = { canUndo: false, canRedo: false };
 
 const noSubscription = () => () => {};
 
+// Phone-sized screens, where the report needs every pixel.
+const narrowScreen = () => window.matchMedia('(max-width: 767px)').matches;
+
 export function Dashboard(props: DashboardProps) {
   // Saved reports live in localStorage, which only exists in the browser.
   const inBrowser = useSyncExternalStore(
@@ -74,16 +83,32 @@ export function Dashboard(props: DashboardProps) {
     () => true,
     () => false,
   );
-  return inBrowser ? <ReportsDashboard {...props} /> : <DashboardSkeleton />;
+  return inBrowser ? <LoadedDashboard {...props} /> : <DashboardSkeleton />;
 }
 
-function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
-  const { store, latest, update, editReport } = useReports();
-  const apiRef = useRef<AgStudioApi | null>(null);
+function LoadedDashboard(props: DashboardProps) {
+  const { state, refresh } = useDashboardData();
+  if (state.status === 'loading') return <DashboardSkeleton />;
+  // Shown by the error boundary in ./error.tsx, whose retry loads the data again.
+  if (state.status === 'failed') throw state.error;
+  return (
+    <ReportsDashboard
+      {...props}
+      data={state.data}
+      refreshing={state.refreshing}
+      warnings={[...state.data.warnings, ...(state.refreshError ? [state.refreshError] : [])]}
+      onRefresh={refresh}
+    />
+  );
+}
+
+function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, licenseKey, aiModels }: ReportsDashboardProps) {
+  const { store, latest, update, editReport } = useReports(persona);
+  const apiRef = useRef<AgStudioApi<BehestRegistry> | null>(null);
 
   // The open report as it is in Studio now, unsaved edits included, for drawing the shell.
   // Null until Studio is ready.
-  const [studioState, setStudioState] = useState<AgReportState | null>(null);
+  const [studioState, setStudioState] = useState<ReportState | null>(null);
   const [history, setHistory] = useState<StudioHistory>(NO_HISTORY);
   const [mode, setMode] = useState<AgStudioMode>('view');
   const [dialog, setDialog] = useState<DashboardDialog>(null);
@@ -93,7 +118,7 @@ function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
   const saved = findReport(reports, store.activeId) ?? reports[0];
   // Studio reads initialState once, when it is created, and starts on the open report; after that,
   // its state is read from Studio.
-  const [initialState] = useState(() => reportState.withFiltersPanelFor('view', saved.state));
+  const [initialState] = useState(() => reportState.withFiltersPanelFor('view', saved.state, narrowScreen()));
   const state = studioState ?? initialState;
   const studioData = useMemo(() => buildStudioData(data), [data]);
   // `ai` is read once, when Studio is created.
@@ -108,10 +133,14 @@ function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
     const api = apiRef.current;
     if (!api) return;
     api.setState(
-      reportState.withFiltersPanelFor(nextMode, {
-        ...report.state,
-        selectedPageId,
-      }),
+      reportState.withFiltersPanelFor(
+        nextMode,
+        {
+          ...report.state,
+          selectedPageId,
+        },
+        narrowScreen(),
+      ),
     );
     // Undo shouldn't step back into the previous report.
     api.clearHistory();
@@ -120,12 +149,12 @@ function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
     setMode(nextMode);
     update((current) => ({ ...current, activeId: report.id }));
   };
-  const updateState = (next: (current: AgReportState) => AgReportState) => {
+  const updateState = (next: (current: ReportState) => ReportState) => {
     const api = apiRef.current;
     if (api) api.setState(next(api.getState()));
   };
   const changeMode = (next: AgStudioMode) => {
-    updateState((s) => reportState.withFiltersPanelFor(next, s));
+    updateState((s) => reportState.withFiltersPanelFor(next, s, narrowScreen()));
     setMode(next);
   };
 
@@ -172,11 +201,11 @@ function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
       load(copy);
     });
   const resetDemo = () => {
-    update(initialReports);
-    load(defaultReport(), undefined, 'view');
+    update(() => initialReports(persona));
+    load(defaultReport(persona), undefined, 'view');
   };
   const deleteReport = (report: SavedReport) => {
-    update((current) => remove(current, report.id));
+    update((current) => remove(current, report.id, persona));
     if (report.id !== saved.id) return;
     const { reports: next, activeId } = latest();
     load(findReport(next, activeId) ?? next[0]);
@@ -214,6 +243,8 @@ function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
 
   return (
     <AppShell
+      viewer={viewerFor(persona)}
+      navKey={`${saved.id}/${state.selectedPageId}`}
       sidebar={
         <ReportsSidebar
           reports={reports}
@@ -242,6 +273,9 @@ function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
         reportName={saved.name}
         pageTitle={pages.find((p) => p.id === state.selectedPageId)?.title}
         asOf={data.asOf}
+        source={persona === 'operator' ? 'Behest and PayPal sandbox' : 'Behest'}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
         editing={editing}
         pageIsEmpty={studioState !== null && !reportState.pageHasWidgets(state)}
         canUndo={history.canUndo}
@@ -255,35 +289,46 @@ function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
         }
       />
 
+      {warnings.length > 0 && (
+        <div role="status" className="border-b border-pp-warning/30 bg-pp-warning/10 px-4 py-2 text-sm text-pp-ink sm:px-8">
+          {warnings.map((warning) => (
+            <p key={warning}>{warning}</p>
+          ))}
+        </div>
+      )}
+
       <div className="min-h-0 flex-1">
         {hasData(data) ? (
           <AgStudioProvider licenseKey={licenseKey} modules={ai ? [AgStudioAiModule] : undefined}>
-            <AgStudio
+            <AgStudio<BehestRegistry>
               style={{ height: '100%', width: '100%' }}
               theme={agStudioPayPalTheme}
               layout={{ widgetBorderEnabled: true }}
+              widgets={behestWidgets}
               data={studioData}
               ai={ai}
               initialState={initialState}
               mode={mode}
               onApiReady={(event) => {
-                apiRef.current = event.api;
+                // Studio's events are typed for its built-in widgets only; this API is the same
+                // object, typed for the Behest widgets this instance was created with.
+                apiRef.current = event.api as unknown as AgStudioApi<BehestRegistry>;
               }}
-              onStudioReady={(event) => {
-                const current = event.api.getState();
+              onStudioReady={() => {
+                const current = apiRef.current?.getState() ?? null;
                 console.log('[AG Studio] initial state', current);
                 setStudioState(current);
               }}
               onStateUpdated={(event) => {
                 console.log('[AG Studio] state updated', event.state);
                 const { undo, redo } = event.api.getHistory();
-                setStudioState(event.state);
+                setStudioState(event.state as unknown as ReportState);
                 setHistory({ canUndo: undo.length > 0, canRedo: redo.length > 0 });
               }}
             />
           </AgStudioProvider>
         ) : (
-          <EmptyData />
+          <EmptyData persona={persona} />
         )}
       </div>
 
@@ -320,7 +365,7 @@ function ReportsDashboard({ data, licenseKey, aiModels }: DashboardProps) {
       />
       <ResetDemoDialog
         open={dialog?.kind === 'reset'}
-        builtInName={defaultReport().name}
+        builtInName={defaultReport(persona).name}
         onCancel={() => setDialog(null)}
         onConfirm={() => {
           resetDemo();

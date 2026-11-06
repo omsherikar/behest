@@ -235,7 +235,10 @@ it('marks a job dead when no handler is registered for its kind, and still runs 
   expect(webhook).toHaveBeenCalledOnce();
 });
 
-it('runs a job once when two workers poll at the same time', async () => {
+// PGlite runs one statement at a time, so this shows that the claim marks jobs running in the same
+// statement that selects them. Two Postgres connections contending for rows, where FOR UPDATE SKIP
+// LOCKED does its work, are not exercised here.
+it('does not claim a job that another run has already claimed', async () => {
   const db = await createTestDb();
   for (const eventId of ['WH-1', 'WH-2', 'WH-3']) await enqueue(db, 'webhook', { eventId }, T);
   const webhook = vi.fn<JobHandler<Deps>>(async () => 'done');

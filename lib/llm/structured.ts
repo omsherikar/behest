@@ -134,6 +134,31 @@ export function billedUsage(message: Pick<BetaMessage, 'model' | 'usage'>, reque
   };
 }
 
+/**
+ * The usage to log for a response that failed a check, so the tokens it reports still count toward
+ * the daily cap: priced as `billedUsage` prices it, or, when only `usage.iterations` cannot be
+ * priced, its top-level token counts at the highest rates. Nothing for a response without a model
+ * and token counts.
+ */
+export function salvagedUsage(response: unknown, requestedModel: string): Partial<BilledUsage> {
+  if (typeof response !== 'object' || response === null) return {};
+  const { model, usage } = response as Partial<Pick<BetaMessage, 'model' | 'usage'>>;
+  if (typeof model !== 'string' || typeof usage !== 'object' || usage === null) return {};
+  try {
+    return billedUsage({ model, usage }, requestedModel);
+  } catch {
+    if (!hasCounts(usage)) return {};
+    return {
+      model,
+      inputTokens: usage.input_tokens,
+      outputTokens: usage.output_tokens,
+      cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+      costUsd: estimateCostUsd(null, usage),
+    };
+  }
+}
+
 function refusalDetail(details: BetaRefusalStopDetails | null): string | undefined {
   return details?.explanation ?? details?.category ?? undefined;
 }
@@ -210,7 +235,12 @@ export async function callStructured<T>(
     // The SDK's errors, and anything a malformed response breaks while it is read, such as a 200
     // carrying an HTML page or usage that cannot be priced.
     const detail = error instanceof Error ? error.message : String(error);
-    const callId = await recordCall(deps.db, { ...logged(deps.now()), ok: false, error: `api_error: ${detail}` });
+    const callId = await recordCall(deps.db, {
+      ...logged(deps.now()),
+      ...salvagedUsage(message, model),
+      ok: false,
+      error: `api_error: ${detail}`,
+    });
     return { ok: false, error: 'api_error', callId, detail };
   }
 

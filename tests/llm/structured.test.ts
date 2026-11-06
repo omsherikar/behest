@@ -264,27 +264,30 @@ it('maps a successful response that is not a message to api_error and logs it', 
   ]);
 });
 
-it('maps a reply with malformed usage iterations to api_error and logs it', async () => {
-  const withIterations = (iterations: unknown) => ({
+it('maps malformed usage iterations to api_error, charging top-level counts at the highest rates', async () => {
+  const withIterations = (iterations: unknown, inputTokens = 10) => ({
     ...messageJson({ json: { answer: 'yes' } }),
-    usage: { input_tokens: 10, output_tokens: 5, iterations },
+    usage: { input_tokens: inputTokens, output_tokens: 5, iterations },
   });
   const { db, call } = await setup([
     withIterations([null]),
     withIterations([{ type: 'message', model: 'claude-opus-5-5' }]),
     withIterations('all of them'),
+    withIterations([null], -1),
   ]);
 
-  const results = [await call(), await call(), await call()];
+  const results = [await call(), await call(), await call(), await call()];
 
   for (const result of results) {
     expect(result).toEqual({ ok: false, error: 'api_error', callId: expect.any(String), detail: expect.any(String) });
   }
+  // 10 x $10 + 5 x $50 per million at the highest rates. Top-level counts that are not counts are not charged.
   const rows = await db.select().from(llmCalls);
-  expect(rows.map((row) => [row.ok, row.requestId, row.costUsd, row.error?.split(':')[0]])).toEqual([
-    [false, 'req_fake_1', 0, 'api_error'],
-    [false, 'req_fake_2', 0, 'api_error'],
-    [false, 'req_fake_3', 0, 'api_error'],
+  expect(rows.map((row) => [row.ok, row.requestId, row.inputTokens, row.costUsd, row.error?.split(':')[0]])).toEqual([
+    [false, 'req_fake_1', 10, 0.00035, 'api_error'],
+    [false, 'req_fake_2', 10, 0.00035, 'api_error'],
+    [false, 'req_fake_3', 10, 0.00035, 'api_error'],
+    [false, 'req_fake_4', 0, 0, 'api_error'],
   ]);
 });
 

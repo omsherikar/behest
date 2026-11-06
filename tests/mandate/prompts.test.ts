@@ -11,3 +11,6 @@ it('describes every policy field', () => {
 
 it('holds no calendar date, so every request sends the same prompt', () =>
   expect(MANDATE_SYSTEM_PROMPT).not.toMatch(/\d{4}-\d{2}-\d{2}/));
+
+it('says how a limit the policy cannot hold is listed', () =>
+  expect(MANDATE_SYSTEM_PROMPT).toContain('"not enforced: '));

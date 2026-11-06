@@ -7,6 +7,7 @@ import demoReply from '@/tests/fixtures/llm/mandate_compile/demo.json';
 import nonUsdReply from '@/tests/fixtures/llm/mandate_compile/non-usd.json';
 import refusalReply from '@/tests/fixtures/llm/mandate_compile/refusal.json';
 import unknownSellerReply from '@/tests/fixtures/llm/mandate_compile/unknown-seller.json';
+import weekendsAnsweredReply from '@/tests/fixtures/llm/mandate_compile/weekends-answered.json';
 import weekendsReply from '@/tests/fixtures/llm/mandate_compile/weekends-question.json';
 import { fakeClaude, messageJson } from '@/tests/helpers/fake-claude';
 import { demoPolicy } from '@/tests/helpers/fixtures';
@@ -103,24 +104,39 @@ describe('a mandate Behest cannot honour is never compiled silently', () => {
     expect(result).toEqual({ ok: false, error: 'invalid_policy', issues: ['currency: Invalid input: expected "USD"'] });
   });
 
-  it('passes a question about weekends through with the rest of the policy', async () => {
-    const { result } = await compileWith(
-      weekendsReply,
-      '$60 a month on groceries and spices, only on weekends, ask me above $25, never electronics',
-    );
+  it('keeps a weekends limit out of the policy and lists it as not enforced, even after the buyer answers', async () => {
+    const text = '$60 a month on groceries and spices, only on weekends, ask me above $25, never electronics';
+    const notEnforced = [PER_PURCHASE_ASSUMPTION, 'not enforced: only on weekends'];
 
-    expect(result).toEqual({
+    const first = await compileWith(weekendsReply, text);
+
+    expect(first.result).toEqual({
       ok: true,
       policy: demoPolicy,
       readback: demoReadback,
-      assumptions: [PER_PURCHASE_ASSUMPTION],
+      assumptions: notEnforced,
       questions: [
         {
-          id: 'weekend_days',
-          question: 'Which days count as weekends?',
-          options: ['Saturday and Sunday', 'Friday and Saturday'],
+          id: 'weekend_limit',
+          question: "Behest can't limit purchases to weekends, so your agent could buy on any day. Do you want to go ahead?",
+          options: ['Buy on any day', "Don't set up this mandate"],
         },
       ],
+    });
+    if (!first.result.ok) throw new Error('The first round should compile');
+
+    const [question] = first.result.questions;
+    const second = await compileWith(weekendsAnsweredReply, text, { [question.id]: question.options[0] });
+
+    expect(second.sent).toMatchObject({
+      messages: [{ role: 'user', content: expect.stringContaining('<answers>\nweekend_limit: Buy on any day\n</answers>') }],
+    });
+    expect(second.result).toEqual({
+      ok: true,
+      policy: demoPolicy,
+      readback: demoReadback,
+      assumptions: notEnforced,
+      questions: [],
     });
   });
 

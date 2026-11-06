@@ -6,7 +6,7 @@
   "content": [
     {
       "type": "text",
-      "text": "{\"policy\":{\"version\":1,\"currency\":\"USD\",\"budget\":{\"amountCents\":6000,\"period\":\"month\"},\"perPurchaseMaxCents\":6000,\"askAboveCents\":2500,\"categories\":{\"allow\":[\"groceries\",\"spices\"],\"deny\":[\"electronics\"]},\"merchants\":{\"allow\":null,\"deny\":[]},\"velocity\":null,\"expiresAt\":null},\"assumptions\":[\"No limit was given for a single purchase, so one purchase can use the whole $60 monthly budget.\"],\"questions\":[{\"id\":\"weekend_days\",\"question\":\"Which days count as weekends?\",\"options\":[\"Saturday and Sunday\",\"Friday and Saturday\"]}]}",
+      "text": "{\"policy\":{\"version\":1,\"currency\":\"USD\",\"budget\":{\"amountCents\":6000,\"period\":\"month\"},\"perPurchaseMaxCents\":6000,\"askAboveCents\":2500,\"categories\":{\"allow\":[\"groceries\",\"spices\"],\"deny\":[\"electronics\"]},\"merchants\":{\"allow\":null,\"deny\":[]},\"velocity\":null,\"expiresAt\":null},\"assumptions\":[\"No limit was given for a single purchase, so one purchase can use the whole $60 monthly budget.\",\"not enforced: only on weekends\"],\"questions\":[{\"id\":\"weekend_limit\",\"question\":\"Behest can't limit purchases to weekends, so your agent could buy on any day. Do you want to go ahead?\",\"options\":[\"Buy on any day\",\"Don't set up this mandate\"]}]}",
       "citations": null
     }
   ],

@@ -73,6 +73,9 @@ const NO_HISTORY: StudioHistory = { canUndo: false, canRedo: false };
 
 const noSubscription = () => () => {};
 
+// Phone-sized screens, where the report needs every pixel.
+const narrowScreen = () => window.matchMedia('(max-width: 767px)').matches;
+
 export function Dashboard(props: DashboardProps) {
   // Saved reports live in localStorage, which only exists in the browser.
   const inBrowser = useSyncExternalStore(
@@ -115,7 +118,7 @@ function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, lice
   const saved = findReport(reports, store.activeId) ?? reports[0];
   // Studio reads initialState once, when it is created, and starts on the open report; after that,
   // its state is read from Studio.
-  const [initialState] = useState(() => reportState.withFiltersPanelFor('view', saved.state));
+  const [initialState] = useState(() => reportState.withFiltersPanelFor('view', saved.state, narrowScreen()));
   const state = studioState ?? initialState;
   const studioData = useMemo(() => buildStudioData(data), [data]);
   // `ai` is read once, when Studio is created.
@@ -130,10 +133,14 @@ function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, lice
     const api = apiRef.current;
     if (!api) return;
     api.setState(
-      reportState.withFiltersPanelFor(nextMode, {
-        ...report.state,
-        selectedPageId,
-      }),
+      reportState.withFiltersPanelFor(
+        nextMode,
+        {
+          ...report.state,
+          selectedPageId,
+        },
+        narrowScreen(),
+      ),
     );
     // Undo shouldn't step back into the previous report.
     api.clearHistory();
@@ -147,7 +154,7 @@ function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, lice
     if (api) api.setState(next(api.getState()));
   };
   const changeMode = (next: AgStudioMode) => {
-    updateState((s) => reportState.withFiltersPanelFor(next, s));
+    updateState((s) => reportState.withFiltersPanelFor(next, s, narrowScreen()));
     setMode(next);
   };
 
@@ -237,6 +244,7 @@ function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, lice
   return (
     <AppShell
       viewer={viewerFor(persona)}
+      navKey={`${saved.id}/${state.selectedPageId}`}
       sidebar={
         <ReportsSidebar
           reports={reports}
@@ -282,7 +290,7 @@ function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, lice
       />
 
       {warnings.length > 0 && (
-        <div role="status" className="border-b border-pp-warning/30 bg-pp-warning/10 px-8 py-2 text-sm text-pp-ink">
+        <div role="status" className="border-b border-pp-warning/30 bg-pp-warning/10 px-4 py-2 text-sm text-pp-ink sm:px-8">
           {warnings.map((warning) => (
             <p key={warning}>{warning}</p>
           ))}

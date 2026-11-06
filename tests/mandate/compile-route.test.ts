@@ -167,6 +167,16 @@ describe('POST /api/mandates/compile', () => {
     expect(fake.requests).toHaveLength(0);
   });
 
+  it('refuses a body over 64 KiB with 413 before reading it as JSON', async () => {
+    const fake = await claudeAnswers([demoReply]);
+
+    expect(await answer(await POST(await request({ text: TEXT, answers: { note: 'a'.repeat(64 * 1024) } })))).toEqual({
+      status: 413,
+      body: { error: { message: 'This request is too large.' } },
+    });
+    expect(fake.requests).toHaveLength(0);
+  });
+
   it.each([
     ['a refusal', [refusalReply], {}, 422, 'refusal', 'This mandate could not be compiled. Try rewording it.'],
     [

@@ -1,6 +1,7 @@
 import { connection, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { llmDeps } from '@/lib/app-deps';
+import { FORM_BODY_BYTES, readBody } from '@/lib/http/read-body';
 import { compileMandate, type CompileResult } from '@/lib/mandate/compile';
 import { confirmToken } from '@/lib/mandate/confirm-token';
 import { isDeclineAnswer } from '@/lib/mandate/decline';
@@ -81,8 +82,14 @@ export async function POST(request: NextRequest) {
     return error(429, 'Too many requests at once. Try again in a minute.');
   }
 
-  const body: unknown = await request.json().catch(() => undefined);
-  if (body === undefined) return error(400, NOT_JSON);
+  const raw = await readBody(request, FORM_BODY_BYTES);
+  if (raw === null) return error(413, 'This request is too large.');
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return error(400, NOT_JSON);
+  }
   const parsed = CompileRequest.safeParse(body);
   if (!parsed.success) return error(400, parsed.error.issues[0].message);
   const { text, answers = {} } = parsed.data;

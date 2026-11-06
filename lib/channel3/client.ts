@@ -8,15 +8,24 @@ import { oneLine } from '@/lib/catalog/csv';
 
 const SEARCH_URL = 'https://api.trychannel3.com/v1/search';
 const DEFAULT_LIMIT = 5;
-const TITLE_MAX = 120;
+const TEXT_MAX = 120;
 /** Retries after a 429 before it surfaces as an error. No other status is retried. */
 const MAX_RETRIES = 2;
-/** The wait before a retry when Retry-After gives no number of seconds. */
+/** How long one request may take, from sending it to reading the whole body. */
+const TIMEOUT_MS = 10_000;
+/** The wait before a retry when Retry-After gives neither a number of seconds nor a date. */
 const DEFAULT_WAIT_MS = 1000;
 /** The longest wait before a retry, whatever Retry-After asks for. */
 const MAX_WAIT_MS = 5000;
 /** The largest value of a Postgres integer, the column type the benchmark is stored in. */
 const INT_MAX = 2_147_483_647;
+/**
+ * What an API key may contain: printable ASCII without spaces. Checked before the key goes into a
+ * header, because fetch quotes an invalid header value in the error it throws.
+ */
+const API_KEY = /^[\x21-\x7e]+$/;
+/** A price as decimal text: digits, optionally a point and more digits. No sign, no exponent. */
+const DECIMAL = /^(\d+)(?:\.(\d+))?$/;
 
 export type MarketOffer = { domain: string; priceCents: number; availability: string; url: string };
 
@@ -25,20 +34,27 @@ export type MarketProduct = {
   title: string;
   brand: string | null;
   imageUrl: string | null;
-  /** The product's offers priced in USD, in the order Channel3 lists them. */
+  /** The product's offers priced in USD, in the order Channel3 lists them, whatever their stock or condition. */
   offers: MarketOffer[];
-  /** The median of the offers' prices, or null when there are no offers. */
+  /** The median price of the offers that are in stock and new, or null when there are none. */
   medianPriceCents: number | null;
 };
 
-export class Channel3ApiError extends Error {
+/** Channel3 could not answer the search: it timed out, failed or sent something unreadable. */
+export class Channel3Error extends Error {
+  override name = 'Channel3Error';
+}
+
+/** Channel3 answered the search with a status outside 2xx. */
+export class Channel3ApiError extends Channel3Error {
+  override name = 'Channel3ApiError';
+
   constructor(
     readonly status: number,
     /** The full response body. The message keeps only its start. */
     readonly body: string,
   ) {
     super(`Channel3 ${status} on /v1/search: ${body.slice(0, 300)}`);
-    this.name = 'Channel3ApiError';
   }
 }
 
@@ -54,20 +70,26 @@ const Product = z.object({
 });
 const Brand = z.object({ name: z.string() });
 const Image = z.object({ url: z.string(), cleaned_url: z.string().nullish(), is_main_image: z.boolean().nullish() });
+const Amount = z.union([z.number(), z.string()]).nullish();
 const Offer = z.object({
   url: z.string(),
   domain: z.string(),
-  price: z.object({ price: z.number(), currency: z.string() }),
+  // The API reference names the amount `price`; one of its guides calls it `amount`. Both are read.
+  price: z.object({ price: Amount, amount: Amount, currency: z.string() }),
   availability: z.string(),
+  condition: z.string().nullish(),
 });
+type Offer = z.infer<typeof Offer>;
 
 let sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Products on the open web matching `query`, with in-stock offers only, at most `limit` (default 5).
- * A 429 is retried twice, waiting as Retry-After asks up to 5 seconds, then surfaces as a
- * `Channel3ApiError`, as does any other status outside 2xx at once. Network errors propagate.
- * Throws before any request when CHANNEL3_API_KEY is not set.
+ * Products on the open web matching `query`, at most `limit` (default 5), each with an offer that is
+ * in stock and new. A 429 is retried twice, waiting as Retry-After asks up to 5 seconds, then
+ * surfaces as a `Channel3ApiError`, as does any other status outside 2xx at once. A request that
+ * takes over 10 seconds, or a body that is not a search response, is a `Channel3Error`, also not
+ * retried. Other network errors propagate. Throws before any request when CHANNEL3_API_KEY is not
+ * set or is not a well-formed key, naming the variable but never quoting its value.
  */
 export async function searchMarket(
   query: string,
@@ -75,39 +97,74 @@ export async function searchMarket(
 ): Promise<MarketProduct[]> {
   const apiKey = process.env.CHANNEL3_API_KEY;
   if (!apiKey) throw new Error('CHANNEL3_API_KEY must be set to search Channel3 (see .env.example)');
+  if (!API_KEY.test(apiKey)) {
+    throw new Error('CHANNEL3_API_KEY must be printable ASCII without spaces or line breaks (see .env.example)');
+  }
   const send = opts.fetch ?? fetch;
-  const body = JSON.stringify({ query, limit: opts.limit ?? DEFAULT_LIMIT, filters: { availability: ['InStock'] } });
+  // The API's default filters are in stock and new; sending any filters replaces them, so both are stated.
+  const body = JSON.stringify({
+    query,
+    limit: opts.limit ?? DEFAULT_LIMIT,
+    filters: { availability: ['InStock'], conditions: ['new'] },
+  });
 
   for (let retries = 0; ; retries++) {
+    const res = await post(send, apiKey, body);
+    if (res.status >= 200 && res.status < 300) return marketProducts(res.text);
+    if (res.status === 429 && retries < MAX_RETRIES) {
+      await sleep(retryWait(res.retryAfter));
+      continue;
+    }
+    throw new Channel3ApiError(res.status, res.text);
+  }
+}
+
+/** One search request, read to the end within `TIMEOUT_MS`. */
+async function post(
+  send: typeof fetch,
+  apiKey: string,
+  body: string,
+): Promise<{ status: number; retryAfter: string | null; text: string }> {
+  try {
     const res = await send(SEARCH_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
       body,
       cache: 'no-store',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (res.ok) return marketProducts(await res.json());
-
-    const text = await res.text();
-    if (res.status === 429 && retries < MAX_RETRIES) {
-      await sleep(retryWait(res.headers.get('retry-after')));
-      continue;
+    return { status: res.status, retryAfter: res.headers.get('retry-after'), text: await res.text() };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new Channel3Error(`Channel3 did not answer the search within ${TIMEOUT_MS / 1000} seconds`, { cause: error });
     }
-    throw new Channel3ApiError(res.status, text);
+    throw error;
   }
 }
 
-function marketProducts(json: unknown): MarketProduct[] {
+function marketProducts(text: string): MarketProduct[] {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Channel3Error('Channel3 sent an unexpected search response: the body is not JSON');
+  }
   const response = SearchResponse.safeParse(json);
-  if (!response.success) throw new Error('Channel3 sent an unexpected search response: it has no product list');
+  if (!response.success) throw new Channel3Error('Channel3 sent an unexpected search response: it has no product list');
+
   return valid(Product, response.data.products).map((product) => {
-    const offers = valid(Offer, product.offers ?? []).flatMap(usdOffer);
+    const usd = valid(Offer, product.offers ?? []).flatMap((offer) => {
+      const market = usdOffer(offer);
+      return market ? [{ market, benchmark: offer.availability === 'InStock' && offer.condition === 'new' }] : [];
+    });
+    const brand = valid(Brand, product.brands ?? [])[0];
     return {
       id: product.id,
-      title: oneLine(product.title, TITLE_MAX),
-      brand: valid(Brand, product.brands ?? [])[0]?.name ?? null,
+      title: oneLine(product.title, TEXT_MAX),
+      brand: brand ? oneLine(brand.name, TEXT_MAX) || null : null,
       imageUrl: imageUrl(valid(Image, product.images ?? [])),
-      offers,
-      medianPriceCents: median(offers.map((offer) => offer.priceCents)),
+      offers: usd.map((o) => o.market),
+      medianPriceCents: median(usd.filter((o) => o.benchmark).map((o) => o.market.priceCents)),
     };
   });
 }
@@ -121,11 +178,28 @@ function valid<T>(schema: z.ZodType<T>, items: unknown[]): T[] {
 }
 
 /** The offer in cents when it is priced in USD at a storable whole number of cents and linked over http. */
-function usdOffer(offer: z.infer<typeof Offer>): MarketOffer[] {
-  const priceCents = Math.round(offer.price.price * 100);
+function usdOffer(offer: Offer): MarketOffer | null {
+  const amount = offer.price.price ?? offer.price.amount;
+  const priceCents = amount == null ? null : cents(amount);
   const url = webUrl(offer.url);
-  if (offer.price.currency !== 'USD' || priceCents < 1 || priceCents > INT_MAX || url === null) return [];
-  return [{ domain: offer.domain, priceCents, availability: offer.availability, url }];
+  if (offer.price.currency !== 'USD' || priceCents === null || priceCents < 1 || priceCents > INT_MAX || url === null) {
+    return null;
+  }
+  return { domain: offer.domain, priceCents, availability: offer.availability, url };
+}
+
+/**
+ * Dollars as whole cents, read from the decimal text so no binary fraction shifts a half cent:
+ * 1.005 is 101. Rounds half up on the third decimal. Null for anything that is not plain decimal
+ * text, including exponent forms such as 1e3.
+ */
+function cents(amount: number | string): number | null {
+  const match = DECIMAL.exec(typeof amount === 'number' ? String(amount) : amount);
+  if (match === null) return null;
+  const [, whole, fraction = ''] = match;
+  const digits = fraction.padEnd(3, '0');
+  const result = Number(whole) * 100 + Number(digits.slice(0, 2)) + (Number(digits[2]) >= 5 ? 1 : 0);
+  return Number.isSafeInteger(result) ? result : null;
 }
 
 /** The main image, or else the first, preferring the background-removed copy Channel3 hosts. */
@@ -143,18 +217,23 @@ function webUrl(text: string | null | undefined): string | null {
 }
 
 /** The middle value, or with an even count the mean of the middle two rounded down to a whole cent. */
-function median(cents: number[]): number | null {
-  if (cents.length === 0) return null;
-  const sorted = [...cents].sort((a, b) => a - b);
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? sorted[mid] : Math.floor((sorted[mid - 1] + sorted[mid]) / 2);
 }
 
-/** The wait Retry-After asks for in seconds, at most `MAX_WAIT_MS`, or `DEFAULT_WAIT_MS` when it gives no number. */
+/**
+ * The wait Retry-After asks for, as a number of seconds or as the time until an HTTP date, at most
+ * `MAX_WAIT_MS`. `DEFAULT_WAIT_MS` when the header is absent or gives neither.
+ */
 function retryWait(retryAfter: string | null): number {
-  const seconds = retryAfter === null || retryAfter.trim() === '' ? Number.NaN : Number(retryAfter);
-  if (!Number.isFinite(seconds) || seconds < 0) return DEFAULT_WAIT_MS;
-  return Math.min(seconds * 1000, MAX_WAIT_MS);
+  const text = retryAfter?.trim() ?? '';
+  if (/^\d+$/.test(text)) return Math.min(Number(text) * 1000, MAX_WAIT_MS);
+  const date = text === '' ? Number.NaN : Date.parse(text);
+  if (Number.isNaN(date)) return DEFAULT_WAIT_MS;
+  return Math.min(Math.max(date - Date.now(), 0), MAX_WAIT_MS);
 }
 
 /** For tests: replace the wait between retries, so tests neither sleep nor depend on timers. */

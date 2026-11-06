@@ -60,7 +60,12 @@ async function request(
   });
 }
 
-let db: Db;
+/** A fresh database for the route to use. Only the tests that reach Claude need one. */
+async function useDb(): Promise<Db> {
+  const db = await createTestDb();
+  vi.mocked(getDb).mockReturnValue(db);
+  return db;
+}
 
 /** Answers the next requests to Claude with `responses`, through a client holding API_KEY. */
 function claudeAnswers(responses: object[]) {
@@ -72,12 +77,10 @@ function claudeAnswers(responses: object[]) {
 // The first createTestDb() in a file migrates the template database, which is slow on a busy machine.
 beforeAll(() => createTestDb(), 30_000);
 
-beforeEach(async () => {
+beforeEach(() => {
   vi.stubEnv('SESSION_SECRET', SECRET);
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(NOW);
-  db = await createTestDb();
-  vi.mocked(getDb).mockReturnValue(db);
 });
 
 afterEach(() => {
@@ -93,6 +96,7 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: { message: 'Pick a persona on the home page first.' } });
     expect(rateLimit).not.toHaveBeenCalled();
+    expect(getDb).not.toHaveBeenCalled();
     expect(createClaude).not.toHaveBeenCalled();
   });
 
@@ -139,6 +143,7 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
   });
 
   it("streams Claude's reply as server-sent events and logs the call", async () => {
+    const db = await useDb();
     const fake = claudeAnswers([streamReply(recordedStream('text-turn'))]);
     const withExtras = { ...turn, model: 'claude-fable-5-1', tools: [{ ...turn.tools[0], cache_control: { type: 'ephemeral' } }] };
 
@@ -165,6 +170,7 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
   });
 
   it('streams a spend_cap error event once the daily budget is spent', async () => {
+    const db = await useDb();
     const fake = claudeAnswers([]);
     await recordCall(db, { route: 'intent_check', model: 'claude-opus-5-5', effort: 'low', ok: true, costUsd: 5, createdAt: NOW });
 

@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { BetaMessageParam, BetaTool } from '@anthropic-ai/sdk/resources/beta/messages';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, expect, it, vi } from 'vitest';
+import type { Db } from '@/lib/db/client';
 import { llmCalls } from '@/lib/db/schema';
 import { createClaude, recordCall } from '@/lib/llm/client';
 import { type LlmStreamEvent, streamReply } from '@/lib/llm/stream';
@@ -20,16 +21,23 @@ const tools: BetaTool[] = [
 ];
 const request = { system: 'You are the dashboard analyst.', messages, tools };
 
-afterEach(() => {
+// One database for the file, emptied after each test. The first createTestDb() in a file migrates
+// the template database, which is slow on a busy machine.
+let db: Db;
+beforeAll(async () => {
+  db = await createTestDb();
+}, 30_000);
+
+afterEach(async () => {
   vi.unstubAllEnvs();
+  await db.delete(llmCalls);
 });
 
 async function setup(responses: object[]) {
-  const db = await createTestDb();
   const fake = fakeClaude(responses);
   const claude = new Anthropic({ apiKey: 'test', fetch: fake.fetch, maxRetries: 0 });
   const deps = { db, claude, now: () => NOW, env: { NODE_ENV: 'test' as const } };
-  return { db, fake, stream: () => streamReply(deps, 'studio_analyst', request) };
+  return { fake, stream: () => streamReply(deps, 'studio_analyst', request) };
 }
 
 async function collect(events: AsyncIterable<LlmStreamEvent>): Promise<LlmStreamEvent[]> {
@@ -40,7 +48,7 @@ async function collect(events: AsyncIterable<LlmStreamEvent>): Promise<LlmStream
 
 it('passes the reply on event by event and logs one call with cost', async () => {
   const recorded = recordedStream('text-turn');
-  const { db, stream } = await setup([streamed(recorded)]);
+  const { stream } = await setup([streamed(recorded)]);
 
   const events = await collect(stream());
 
@@ -99,7 +107,7 @@ it('passes message_start on as the API sent it, before the rest of the reply fil
 });
 
 it('sends nothing and ends with a spend_cap error once the daily cap is reached', async () => {
-  const { db, fake, stream } = await setup([]);
+  const { fake, stream } = await setup([]);
   await recordCall(db, { route: 'intent_check', model: 'claude-opus-5-5', effort: 'low', ok: true, costUsd: 5, createdAt: NOW });
 
   const events = await collect(stream());
@@ -113,7 +121,7 @@ it('sends nothing and ends with a spend_cap error once the daily cap is reached'
 
 it('ends a stream that fails part way with an api_error event and logs what it spent', async () => {
   const recorded = recordedStream('error-turn');
-  const { db, stream } = await setup([streamed(recorded)]);
+  const { stream } = await setup([streamed(recorded)]);
 
   const events = await collect(stream());
 
@@ -137,7 +145,7 @@ it('ends a stream that fails part way with an api_error event and logs what it s
 });
 
 it('ends with an api_error event when the request is refused outright, and logs the call', async () => {
-  const { db, stream } = await setup([
+  const { stream } = await setup([
     { status: 529, body: { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } } },
   ]);
 
@@ -163,7 +171,7 @@ it('logs a refused reply as a failed call and leaves the refusal in the events',
     },
     { type: 'message_stop' },
   ] as { type: string }[]);
-  const { db, stream } = await setup([streamed(refused)]);
+  const { stream } = await setup([streamed(refused)]);
 
   const events = await collect(stream());
 
@@ -175,7 +183,7 @@ it('logs a refused reply as a failed call and leaves the refusal in the events',
 });
 
 it('cancels the request and logs it when the reader stops early', async () => {
-  const { db, stream } = await setup([streamed(recordedStream('text-turn'))]);
+  const { stream } = await setup([streamed(recordedStream('text-turn'))]);
 
   const events = stream();
   const first = await events.next();
@@ -193,7 +201,6 @@ it('cancels the request and logs it when the reader stops early', async () => {
 
 it('replays the recorded stream of the route when LLM_STUB=1', async () => {
   vi.stubEnv('LLM_STUB', '1');
-  const db = await createTestDb();
   const deps = { db, claude: createClaude(), now: () => NOW, env: { NODE_ENV: 'test' as const } };
 
   const events = await collect(streamReply(deps, 'studio_analyst', request));
@@ -206,7 +213,6 @@ it('replays the recorded stream of the route when LLM_STUB=1', async () => {
 
 it('ends with an api_error event for a route without a recorded stream when LLM_STUB=1', async () => {
   vi.stubEnv('LLM_STUB', '1');
-  const db = await createTestDb();
   const deps = { db, claude: createClaude(), now: () => NOW, env: { NODE_ENV: 'test' as const } };
 
   expect(await collect(streamReply(deps, 'intent_check', request))).toEqual([

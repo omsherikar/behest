@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import { jobs, payouts, purchases, type PurchaseStatus } from '@/lib/db/schema';
+import { type JobPayload, runDueJobs } from '@/lib/jobs/queue';
 import { PayPalApiError } from '@/lib/paypal/http';
 import { PayoutAlreadyExists } from '@/lib/paypal/payouts';
 import { payoutSeller, pollPayout } from '@/lib/purchases/settle';
@@ -358,6 +359,45 @@ describe('pollPayout', () => {
     expect(await Promise.all([pollPayout(deps, purchaseId), pollPayout(deps, purchaseId)])).toEqual(['done', 'done']);
 
     expect(await eventsOf(db, purchaseId)).toEqual([{ kind: 'payout_after_refund', data: { status: 'refunded' } }]);
+  });
+
+  describe('when PayPal cannot answer the status check', () => {
+    /** Runs the payout's queued poll job, past its due time, with pollPayout as its handler. */
+    async function runPollJob(db: Db, deps: Parameters<typeof pollPayout>[0]) {
+      const handlers = { payout_poll: (payload: JobPayload) => pollPayout(deps, String(payload.purchaseId)) };
+      await runDueJobs(db, handlers, undefined, () => new Date(NOW.getTime() + 31_000));
+      const [job] = await db.select().from(jobs);
+      return job;
+    }
+
+    it('retries the poll after a network error, changing nothing', async () => {
+      const { db, paypal, purchaseId, deps } = await sent();
+      paypal.failNext('getPayoutBatch', 'network');
+      const before = await payoutRows(db);
+
+      const job = await runPollJob(db, deps);
+
+      expect(paypal.callsTo('getPayoutBatch')).toHaveLength(1);
+      expect(job).toMatchObject({ kind: 'payout_poll', status: 'queued', attempts: 1, lastError: 'fetch failed' });
+      expect(await payoutRows(db)).toEqual(before);
+      expect(await statusOf(db, purchaseId)).toBe('accepted');
+      expect(await eventsOf(db, purchaseId)).toEqual([]);
+    });
+
+    it('retries the poll after PayPal answers 404, changing nothing', async () => {
+      const { db, paypal, purchaseId, deps, batchId } = await sent();
+      const notFound = new PayPalApiError(404, `/v1/payments/payouts/${batchId}`, JSON.stringify({ name: 'INVALID_RESOURCE_ID' }));
+      const asked = vi.spyOn(paypal, 'getPayoutBatch').mockRejectedValueOnce(notFound);
+      const before = await payoutRows(db);
+
+      const job = await runPollJob(db, deps);
+
+      expect(asked).toHaveBeenCalledExactlyOnceWith(batchId);
+      expect(job).toMatchObject({ kind: 'payout_poll', status: 'queued', attempts: 1, lastError: notFound.message });
+      expect(await payoutRows(db)).toEqual(before);
+      expect(await statusOf(db, purchaseId)).toBe('accepted');
+      expect(await eventsOf(db, purchaseId)).toEqual([]);
+    });
   });
 
   it('fails, to be retried, when PayPal has the payout but does not say which batch it is', async () => {

@@ -107,6 +107,32 @@ describe('listDisputes', () => {
     ]);
   });
 
+  it('reads up to 100 pages', async () => {
+    const pages = Array.from({ length: 100 }, (_, i) => ({
+      method: 'GET',
+      path: DISPUTES,
+      once: true,
+      body: { items: [], links: i < 99 ? [nextLink(`https://api-m.sandbox.paypal.com/v1/customer/disputes?page_size=50&next_page_token=p${i + 1}`)] : [] },
+    }));
+    const calls = stubFetch(pages);
+
+    expect(await listDisputes()).toEqual([]);
+    expect(apiCalls(calls)).toHaveLength(100);
+  });
+
+  it('fails, naming the cap, rather than read a 101st page', async () => {
+    const endless = Array.from({ length: 101 }, (_, i) => ({
+      method: 'GET',
+      path: DISPUTES,
+      once: true,
+      body: { items: [listed], links: [nextLink(`https://api-m.sandbox.paypal.com/v1/customer/disputes?page_size=50&next_page_token=p${i + 1}`)] },
+    }));
+    const calls = stubFetch(endless);
+
+    await expect(listDisputes()).rejects.toThrow(/100 pages/);
+    expect(apiCalls(calls)).toHaveLength(100);
+  });
+
   it('stops when the next link leads back to a page already read', async () => {
     const selfHref = 'https://api-m.sandbox.paypal.com/v1/customer/disputes?page_size=50';
     const calls = stubFetch([{ method: 'GET', path: DISPUTES, body: { items: [listed], links: [nextLink(selfHref)] } }]);

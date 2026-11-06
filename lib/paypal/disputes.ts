@@ -9,6 +9,8 @@ import type { DisputeSummary, PaypalPort } from './port';
 const DISPUTES = '/v1/customer/disputes';
 /** The most disputes PayPal returns on one page. */
 const PAGE_SIZE = 50;
+/** The most pages read, so a list that never ends cannot keep the caller waiting forever. */
+const MAX_PAGES = 100;
 
 type Link = { href?: string; rel?: string };
 type Dispute = {
@@ -64,6 +66,7 @@ export const listDisputes: PaypalPort['listDisputes'] = async () => {
   let path: string | null = `${DISPUTES}?page_size=${PAGE_SIZE}`;
   // A next link back to a page already read would otherwise loop forever.
   while (path !== null && !read.has(path)) {
+    if (read.size === MAX_PAGES) throw new Error(`PayPal listed more than ${MAX_PAGES} pages of disputes, so the list was not read to the end`);
     read.add(path);
     const page: DisputePage | undefined = await paypalRequest<DisputePage | undefined>('GET', path);
     disputes.push(...(page?.items ?? []).map(toSummary));

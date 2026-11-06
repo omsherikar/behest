@@ -7,7 +7,7 @@ it('is the option the compiler offers for a limit Behest cannot enforce', () => 
 
 it.each([
   "Don't set up this mandate",
-  'Don’t set up this mandate',
+  'Don\u2019t set up this mandate',
   "don't SET UP this mandate",
   "  Don't  set up\tthis mandate. ",
 ])('reads %j as declining', (answer) => {

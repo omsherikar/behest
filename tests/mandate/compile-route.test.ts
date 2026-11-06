@@ -142,7 +142,7 @@ describe('POST /api/mandates/compile', () => {
     expect(isConfirmToken(body.confirmToken, WEEKENDS_TEXT, body.policy)).toBe(true);
   });
 
-  it.each(["Don't set up this mandate", 'Don’t set up this mandate.'])(
+  it.each(["Don't set up this mandate", 'Don\u2019t set up this mandate.'])(
     'refuses the decline answer %j with 400 and never compiles it',
     async (decline) => {
       const fake = await claudeAnswers([weekendsAnsweredReply]);

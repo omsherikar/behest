@@ -65,9 +65,9 @@ describe('budget', () => {
   });
 });
 
-it('says purchases never need approval when there is no approval limit', () =>
+it('says no purchase needs approval for its amount when there is no approval limit', () =>
   expect(readbackWith({ askAboveCents: null })).toEqual(
-    demoWithLine(2, 'Purchases inside these limits never need your approval.'),
+    demoWithLine(2, 'No purchase needs your approval because of its amount alone.'),
   ));
 
 describe('categories', () => {

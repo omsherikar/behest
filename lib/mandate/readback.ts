@@ -48,7 +48,7 @@ export function renderReadback(policy: MandatePolicy): string[] {
     `Your agent can spend up to ${formatUsd(budget.amountCents)} ${PER_PERIOD[budget.period]}.`,
     `Any single purchase over ${formatUsd(policy.perPurchaseMaxCents)} is blocked.`,
     policy.askAboveCents === null
-      ? 'Purchases inside these limits never need your approval.'
+      ? 'No purchase needs your approval because of its amount alone.'
       : `Purchases over ${formatUsd(policy.askAboveCents)} need your approval.`,
     allowedCategories(categories),
     ...(categories.deny.length > 0 ? [`Never: ${categoryList(categories.deny)}.`] : []),

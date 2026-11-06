@@ -3,6 +3,7 @@ import { calculateJwkThumbprint, exportJWK, exportPKCS8, generateKeyPair, import
 import { sha256Hex } from './canonical';
 
 const ALG = 'EdDSA';
+const KEY_ID = /^[0-9a-f]{16}$/;
 
 /** First 16 hex chars of the SHA-256 of the key's RFC 7638 thumbprint. */
 async function keyIdOf(publicJwk: JWK): Promise<string> {
@@ -37,8 +38,12 @@ export async function loadSigningKey(env: {
 
   const publicJwk = await exportJWK(createPublicKey(pem));
   const kid = await keyIdOf(publicJwk);
-  if (env.RECEIPT_KEY_ID && env.RECEIPT_KEY_ID !== kid) {
-    throw new Error(`RECEIPT_KEY_ID ${env.RECEIPT_KEY_ID} does not match the signing key, whose id is ${kid}`);
+  const givenKid = env.RECEIPT_KEY_ID;
+  if (givenKid && givenKid !== kid) {
+    // Echo the value only when it has the shape of a key id: anything else may be a pasted
+    // secret, such as the PEM itself, and errors here end up in startup logs.
+    if (!KEY_ID.test(givenKid)) throw new Error('RECEIPT_KEY_ID is not a key id');
+    throw new Error(`RECEIPT_KEY_ID ${givenKid} does not match the signing key, whose id is ${kid}`);
   }
   return { kid, privateKey, publicJwk };
 }

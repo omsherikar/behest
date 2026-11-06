@@ -62,12 +62,38 @@ it('loads a PEM whose newlines are written as literal \\n, as in a .env file', a
   expect((await loadSigningKey({ RECEIPT_SIGNING_KEY: escaped })).kid).toBe(kid);
 });
 
-it('refuses a RECEIPT_KEY_ID that does not match the key', async () => {
+async function loadError(env: { RECEIPT_SIGNING_KEY?: string; RECEIPT_KEY_ID?: string }): Promise<string> {
+  const error = await loadSigningKey(env).then(
+    () => expect.unreachable('the key loaded'),
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(Error);
+  return (error as Error).message;
+}
+
+it('refuses a RECEIPT_KEY_ID that does not match the key, naming both ids', async () => {
   const { pem, kid } = await generateSigningKey();
   const other = await generateSigningKey();
-  await expect(loadSigningKey({ RECEIPT_SIGNING_KEY: pem, RECEIPT_KEY_ID: other.kid })).rejects.toThrow(
+  expect(await loadError({ RECEIPT_SIGNING_KEY: pem, RECEIPT_KEY_ID: other.kid })).toBe(
     `RECEIPT_KEY_ID ${other.kid} does not match the signing key, whose id is ${kid}`,
   );
+});
+
+it('refuses a RECEIPT_KEY_ID that is not a key id without echoing it', async () => {
+  const { pem } = await generateSigningKey();
+  for (const value of ['not-a-key-id', 'ABCDEF0123456789', 'abcdef01234567890']) {
+    expect(await loadError({ RECEIPT_SIGNING_KEY: pem, RECEIPT_KEY_ID: value })).toBe('RECEIPT_KEY_ID is not a key id');
+  }
+});
+
+it('never puts a private key pasted into RECEIPT_KEY_ID into the error', async () => {
+  const { pem } = await generateSigningKey();
+  const body = pem.split('\n')[1];
+  for (const value of [pem, pem.replaceAll('\n', '\\n')]) {
+    const message = await loadError({ RECEIPT_SIGNING_KEY: pem, RECEIPT_KEY_ID: value });
+    expect(message).not.toContain('PRIVATE KEY');
+    expect(message).not.toContain(body);
+  }
 });
 
 it('refuses a RECEIPT_SIGNING_KEY that is not an Ed25519 PKCS8 private key', async () => {

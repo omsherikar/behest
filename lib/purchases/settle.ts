@@ -2,6 +2,7 @@ import { and, eq, ne } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import { payouts, purchases, sellers } from '@/lib/db/schema';
 import { enqueue } from '@/lib/jobs/queue';
+import { PayPalApiError } from '@/lib/paypal/http';
 import { PayoutAlreadyExists } from '@/lib/paypal/payouts';
 import type { PurchaseDeps } from './deps';
 import { appendEvent, StaleTransition, transition } from './events';
@@ -33,8 +34,9 @@ const FIRST_POLL_DELAY_MS = 30_000;
  * Pays the seller of an accepted purchase its total, and queues a `payout_poll` job to follow the
  * payout. Only the first call sends anything. A purchase refunded before its payout, or one that has
  * moved on from `accepted` with its payout made, is left alone; one that never reached `accepted` is
- * refused. If PayPal's answer is lost, the payout may or may not exist: that is logged as a
- * `payout_unknown` event and left to the poll, which sends it again under the same sender batch id.
+ * refused. If the payout cannot be followed, because PayPal's answer was lost, PayPal refused it, or
+ * PayPal has it but did not name its batch, that is logged as a `payout_unknown` event and left to the
+ * poll, which sends it again under the same sender batch id.
  */
 export async function payoutSeller(deps: SettleDeps, purchaseId: string): Promise<void> {
   const { db } = deps;
@@ -62,13 +64,13 @@ export async function payoutSeller(deps: SettleDeps, purchaseId: string): Promis
     if (row) await enqueue(tx, 'payout_poll', { purchaseId }, new Date(deps.now().getTime() + FIRST_POLL_DELAY_MS));
     return row;
   });
-  // Another call got here first and is sending, or has sent, the payout.
+  // Nothing to send: refunded first, or another call got here first and is sending, or has sent, it.
   if (!payout) return;
 
   try {
     await sendPayout(deps, payout);
   } catch (error) {
-    await appendEvent(db, purchaseId, 'payout_unknown', { error: error instanceof Error ? error.message : String(error) });
+    await appendEvent(db, purchaseId, 'payout_unknown', describeFailure(error));
   }
 }
 
@@ -77,7 +79,7 @@ export async function payoutSeller(deps: SettleDeps, purchaseId: string): Promis
  * once PayPal reports the item failed (recorded on the payout and as a `payout_failed` event, with the
  * purchase left `accepted`), or once the purchase has moved on some other way, such as a refund.
  * `retry` while the item is pending, unclaimed, on hold, missing or in a status not known here.
- * Throws, to be retried, if PayPal has the payout but did not say which batch it is.
+ * Throws, to be retried, if PayPal cannot be asked, or has the payout but did not name its batch.
  */
 export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<'done' | 'retry'> {
   const { db, paypal } = deps;
@@ -91,9 +93,6 @@ export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<
   if (purchaseStatus !== 'accepted' || FAILED_ITEM_STATUSES.has(payout.status)) return 'done';
 
   const payoutBatchId = payout.paypalBatchId ?? (await sendPayout(deps, payout));
-  if (!payoutBatchId) {
-    throw new Error(`PayPal has a payout under sender batch id ${payout.senderBatchId} but did not say which batch it is`);
-  }
 
   const { batchStatus, itemStatus } = await paypal.getPayoutBatch(payoutBatchId);
   if (itemStatus === null) return 'retry';
@@ -116,13 +115,13 @@ async function hasPayout(db: Db, purchaseId: string): Promise<boolean> {
 }
 
 /**
- * Asks PayPal to make the payout and stores the batch PayPal names. A payout PayPal already has under
- * this sender batch id counts as sent. Returns the batch id, or null if PayPal has the payout but did
- * not say which batch it is.
+ * Asks PayPal to make the payout and stores and returns the batch PayPal names. A payout PayPal
+ * already has under this sender batch id counts as sent; if PayPal does not name its batch, the
+ * PayoutAlreadyExists is rethrown, since there is nothing to follow.
  */
-async function sendPayout({ db, paypal }: SettleDeps, payout: Payout): Promise<string | null> {
+async function sendPayout({ db, paypal }: SettleDeps, payout: Payout): Promise<string> {
   const [seller] = await db.select({ payoutEmail: sellers.payoutEmail }).from(sellers).where(eq(sellers.id, payout.sellerId));
-  let payoutBatchId: string | null;
+  let payoutBatchId: string;
   try {
     ({ payoutBatchId } = await paypal.createPayout({
       senderBatchId: payout.senderBatchId,
@@ -131,11 +130,22 @@ async function sendPayout({ db, paypal }: SettleDeps, payout: Payout): Promise<s
       note: `Behest order ${payout.purchaseId}`,
     }));
   } catch (error) {
-    if (!(error instanceof PayoutAlreadyExists)) throw error;
+    if (!(error instanceof PayoutAlreadyExists) || error.payoutBatchId === null) throw error;
     payoutBatchId = error.payoutBatchId;
   }
-  if (payoutBatchId) await db.update(payouts).set({ paypalBatchId: payoutBatchId }).where(eq(payouts.id, payout.id));
+  await db.update(payouts).set({ paypalBatchId: payoutBatchId }).where(eq(payouts.id, payout.id));
   return payoutBatchId;
+}
+
+/**
+ * What an operator needs to tell a payout PayPal refused (a 4xx, such as missing funds or a bad
+ * receiver) from one whose answer was lost: the message, the error's class and, when PayPal
+ * answered, its HTTP status.
+ */
+function describeFailure(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { error: String(error) };
+  const answer = error instanceof PayPalApiError ? error : error.cause instanceof PayPalApiError ? error.cause : null;
+  return { error: error.message, errorClass: error.name, ...(answer ? { httpStatus: answer.status } : {}) };
 }
 
 /**

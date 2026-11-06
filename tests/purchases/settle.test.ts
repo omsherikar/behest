@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import { jobs, payouts, purchases, type PurchaseStatus } from '@/lib/db/schema';
+import { PayPalApiError } from '@/lib/paypal/http';
 import { PayoutAlreadyExists } from '@/lib/paypal/payouts';
 import { payoutSeller, pollPayout } from '@/lib/purchases/settle';
 import { FakePaypal } from '@/tests/helpers/fake-paypal';
@@ -141,12 +142,40 @@ describe('payoutSeller', () => {
     await payoutSeller(deps, purchaseId);
 
     expect(await payoutRows(db)).toEqual([expect.objectContaining({ paypalBatchId: null })]);
-    expect(await eventsOf(db, purchaseId)).toEqual([{ kind: 'payout_unknown', data: { error: 'fetch failed' } }]);
+    expect(await eventsOf(db, purchaseId)).toEqual([
+      { kind: 'payout_unknown', data: { error: 'fetch failed', errorClass: 'TypeError' } },
+    ]);
 
     expect(await pollPayout(deps, purchaseId)).toBe('retry');
 
     expect(paypal.payouts).toHaveLength(1);
     expect(await payoutRows(db)).toEqual([expect.objectContaining({ paypalBatchId: paypal.payouts[0].payoutBatchId })]);
+  });
+
+  it('records PayPal refusing the payout with its HTTP status, so a refusal reads apart from a lost answer', async () => {
+    const { db, paypal, purchaseId, deps } = await setUp();
+    const refusal = new PayPalApiError(422, '/v1/payments/payouts', JSON.stringify({ name: 'INSUFFICIENT_FUNDS' }));
+    vi.spyOn(paypal, 'createPayout').mockRejectedValueOnce(refusal);
+
+    await payoutSeller(deps, purchaseId);
+
+    expect(await eventsOf(db, purchaseId)).toEqual([
+      { kind: 'payout_unknown', data: { error: refusal.message, errorClass: 'PayPalApiError', httpStatus: 422 } },
+    ]);
+  });
+
+  it('records a payout PayPal already has but does not name the batch of', async () => {
+    const { db, paypal, purchaseId, deps } = await setUp();
+    const duplicate = new PayPalApiError(400, '/v1/payments/payouts', JSON.stringify({ name: 'USER_BUSINESS_ERROR' }));
+    const unnamed = new PayoutAlreadyExists(`${purchaseId}:payout`, null, { cause: duplicate });
+    vi.spyOn(paypal, 'createPayout').mockRejectedValueOnce(unnamed);
+
+    await payoutSeller(deps, purchaseId);
+
+    expect(await payoutRows(db)).toEqual([expect.objectContaining({ paypalBatchId: null })]);
+    expect(await eventsOf(db, purchaseId)).toEqual([
+      { kind: 'payout_unknown', data: { error: unnamed.message, errorClass: 'PayoutAlreadyExists', httpStatus: 400 } },
+    ]);
   });
 
   it('sends the payout from the poll when the first request never reached PayPal', async () => {

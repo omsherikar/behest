@@ -121,13 +121,13 @@ function StatusPill({ status }: { status: Status }) {
 
 function ClaimMark({ verified }: { verified: boolean }) {
   return verified ? (
-    <span aria-label="Verified" className="flex size-5 shrink-0 items-center justify-center rounded-full bg-pp-success text-white">
+    <span role="img" aria-label="Verified" className="flex size-5 shrink-0 items-center justify-center rounded-full bg-pp-success text-white">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-3">
         <path d="m5 12.5 4.5 4.5L19 7.5" />
       </svg>
     </span>
   ) : (
-    <span aria-label="Not verified" className="size-5 shrink-0 rounded-full border-2 border-dashed border-pp-border" />
+    <span role="img" aria-label="Not verified" className="size-5 shrink-0 rounded-full border-2 border-dashed border-pp-border" />
   );
 }
 
@@ -170,7 +170,12 @@ function PagerButton({ label, disabled, onClick, children }: { label: string; di
 export function ReceiptCardWidget(params: AgWidgetParams<ReceiptCardDef>) {
   const load = useWidgetLoad(params, loadReceipts);
   const receipts = load.status === 'loaded' ? load.value : null;
-  const [position, setPosition] = useState(0);
+  // The pager remembers which receipts it paged through, so a different set (a new filter or a
+  // new selection in the ledger) starts again at the newest.
+  const receiptIds = receipts?.map((r) => r.id).join(' ') ?? '';
+  const [page, setPage] = useState({ receiptIds: '', position: 0 });
+  const position = page.receiptIds === receiptIds ? page.position : 0;
+  const setPosition = (next: number) => setPage({ receiptIds, position: next });
   // Verifier answers by receipt id and attempt, so "Verify again" asks afresh.
   const [answers, setAnswers] = useState<Record<string, Verification>>({});
   const [attempt, setAttempt] = useState(0);

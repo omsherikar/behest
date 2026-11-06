@@ -202,6 +202,14 @@ describe('pollPayout', () => {
     return { ...setup, batchId: setup.paypal.payouts[0].payoutBatchId };
   }
 
+  /** Runs the payout's queued poll job, past its due time, with pollPayout as its handler. */
+  async function runPollJob(db: Db, deps: Parameters<typeof pollPayout>[0]) {
+    const handlers = { payout_poll: (payload: JobPayload) => pollPayout(deps, String(payload.purchaseId)) };
+    await runDueJobs(db, handlers, undefined, () => new Date(NOW.getTime() + 31_000));
+    const [job] = await db.select().from(jobs);
+    return job;
+  }
+
   it('settles the purchase when PayPal reports the item paid', async () => {
     const { db, paypal, purchaseId, deps, batchId } = await sent();
     paypal.setPayoutStatus(batchId, { batchStatus: 'SUCCESS', itemStatus: 'SUCCESS' });
@@ -323,13 +331,67 @@ describe('pollPayout', () => {
     expect(await eventsOf(db, purchaseId)).toHaveLength(1);
   });
 
-  it('is done without asking PayPal once the purchase has moved on another way', async () => {
-    const { db, paypal, purchaseId, deps } = await sent();
-    await db.update(purchases).set({ status: 'refunded' }).where(eq(purchases.id, purchaseId));
+  describe('for a purchase refunded before the poll starts', () => {
+    /** A sent payout whose purchase has since been refunded. */
+    async function refundedAfterSending() {
+      const setup = await sent();
+      await setup.db.update(purchases).set({ status: 'refunded' }).where(eq(purchases.id, setup.purchaseId));
+      return setup;
+    }
 
-    expect(await pollPayout(deps, purchaseId)).toBe('done');
+    it('still follows the payout, and records that the seller was paid anyway when it succeeds', async () => {
+      const { db, paypal, purchaseId, deps, batchId } = await refundedAfterSending();
+      paypal.setPayoutStatus(batchId, { batchStatus: 'SUCCESS', itemStatus: 'SUCCESS' });
 
-    expect(paypal.callsTo('getPayoutBatch')).toEqual([]);
+      expect(await pollPayout(deps, purchaseId)).toBe('done');
+      expect(await pollPayout(deps, purchaseId)).toBe('done');
+
+      expect(await statusOf(db, purchaseId)).toBe('refunded');
+      expect(await payoutRows(db)).toEqual([expect.objectContaining({ status: 'SUCCESS' })]);
+      expect(await eventsOf(db, purchaseId)).toEqual([{ kind: 'payout_after_refund', data: { status: 'refunded' } }]);
+      expect(paypal.callsTo('getPayoutBatch')).toHaveLength(1);
+    });
+
+    it('queues the poll again while the payout is pending, logging nothing yet', async () => {
+      const { db, paypal, purchaseId, deps } = await refundedAfterSending();
+
+      const job = await runPollJob(db, deps);
+
+      expect(paypal.callsTo('getPayoutBatch')).toHaveLength(1);
+      expect(job).toMatchObject({ kind: 'payout_poll', status: 'queued', attempts: 1, lastError: null });
+      expect(await statusOf(db, purchaseId)).toBe('refunded');
+      expect(await payoutRows(db)).toEqual([expect.objectContaining({ status: 'PENDING' })]);
+      expect(await eventsOf(db, purchaseId)).toEqual([]);
+    });
+
+    it.each([
+      { batchStatus: 'SUCCESS', itemStatus: 'FAILED' },
+      { batchStatus: 'SUCCESS', itemStatus: 'RETURNED' },
+      { batchStatus: 'SUCCESS', itemStatus: 'BLOCKED' },
+      { batchStatus: 'DENIED', itemStatus: null },
+      { batchStatus: 'CANCELED', itemStatus: null },
+    ])('records the payout as failed, and no payout after the refund, when the batch is $batchStatus and the item $itemStatus', async (reported) => {
+      const { db, paypal, purchaseId, deps, batchId } = await refundedAfterSending();
+      paypal.setPayoutStatus(batchId, reported);
+
+      expect(await pollPayout(deps, purchaseId)).toBe('done');
+
+      expect(await statusOf(db, purchaseId)).toBe('refunded');
+      expect(await payoutRows(db)).toEqual([expect.objectContaining({ status: reported.itemStatus ?? reported.batchStatus })]);
+      expect(await eventsOf(db, purchaseId)).toEqual([{ kind: 'payout_failed', data: { payoutBatchId: batchId, ...reported } }]);
+    });
+
+    it('does not send again a payout PayPal never named a batch for', async () => {
+      const { db, paypal, purchaseId, deps } = await setUp();
+      paypal.failNext('createPayout', 'network');
+      await payoutSeller(deps, purchaseId);
+      await db.update(purchases).set({ status: 'refunded' }).where(eq(purchases.id, purchaseId));
+
+      await expect(pollPayout(deps, purchaseId)).rejects.toThrow(`payout ${purchaseId}:payout has no batch to follow`);
+
+      expect(paypal.callsTo('createPayout')).toHaveLength(1);
+      expect(paypal.payouts).toEqual([]);
+    });
   });
 
   /** A paid payout whose purchase is refunded while PayPal is first asked about it. */
@@ -362,14 +424,6 @@ describe('pollPayout', () => {
   });
 
   describe('when PayPal cannot answer the status check', () => {
-    /** Runs the payout's queued poll job, past its due time, with pollPayout as its handler. */
-    async function runPollJob(db: Db, deps: Parameters<typeof pollPayout>[0]) {
-      const handlers = { payout_poll: (payload: JobPayload) => pollPayout(deps, String(payload.purchaseId)) };
-      await runDueJobs(db, handlers, undefined, () => new Date(NOW.getTime() + 31_000));
-      const [job] = await db.select().from(jobs);
-      return job;
-    }
-
     it('retries the poll after a network error, changing nothing', async () => {
       const { db, paypal, purchaseId, deps } = await sent();
       paypal.failNext('getPayoutBatch', 'network');

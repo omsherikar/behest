@@ -1,6 +1,6 @@
 import { and, eq, ne } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
-import { payouts, purchases, sellers } from '@/lib/db/schema';
+import { payouts, purchases, sellers, type PurchaseStatus } from '@/lib/db/schema';
 import { enqueue } from '@/lib/jobs/queue';
 import { PayPalApiError } from '@/lib/paypal/http';
 import { PayoutAlreadyExists } from '@/lib/paypal/payouts';
@@ -10,7 +10,9 @@ import { appendEvent, transition } from './events';
 // Paying sellers. Behest is the merchant of record, so the buyer's payment lands in Behest's
 // account; once the seller has verified the receipt and accepted the order, Behest pays the seller
 // the order total with PayPal Payouts. The purchase settles when PayPal reports the payout item
-// paid. The item, not the batch, decides, because the batch status trails the item's.
+// paid. The item, not the batch, decides, because the batch status trails the item's. A payout is
+// followed until PayPal finishes it, even if its purchase is refunded meanwhile, so that a seller
+// paid for a refunded order is always on record.
 //
 // Both functions may run again, even while an earlier call is still going, and neither may pay
 // twice. The payouts row, one per purchase, is written before PayPal is asked, so only the first
@@ -84,14 +86,16 @@ export async function payoutSeller(deps: SettleDeps, purchaseId: string): Promis
 }
 
 /**
- * Follows a purchase's payout: the `payout_poll` job's handler. `done` once the purchase has settled,
- * once PayPal reports the item failed, or the batch denied or cancelled before it reported an item
- * (recorded on the payout and as a `payout_failed` event, with the purchase left `accepted`), or once
- * the purchase has moved on some other way, such as a refund. A payout that succeeds for a purchase
- * refunded while PayPal was asked is logged as a `payout_after_refund` event.
+ * Follows a purchase's payout until PayPal finishes it: the `payout_poll` job's handler. It goes by
+ * the payout, not the purchase, so it keeps asking PayPal after a refund. `done` once:
+ * - the item is paid. An accepted purchase settles. A refunded one stays refunded, and the first
+ *   poll to see the payment logs a `payout_after_refund` event;
+ * - the item failed, or the batch was denied or cancelled before it reported an item. This is
+ *   recorded on the payout and as a `payout_failed` event, and the purchase is left as it is.
  * `retry` while the item is pending, unclaimed, on hold, missing or in a status not known here.
  * Throws, so the job is retried, if PayPal cannot be asked or has the payout but did not name its
- * batch; and, without asking PayPal, if the payout was never answered and is too old to resend safely.
+ * batch. Also throws, without asking PayPal, for a payout that never got a batch back if its purchase
+ * is no longer accepted or it is too old to resend safely.
  */
 export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<'done' | 'retry'> {
   const { db, paypal } = deps;
@@ -102,15 +106,10 @@ export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<
     .where(eq(payouts.purchaseId, purchaseId));
   if (!found) throw new Error(`purchase ${purchaseId} has no payout to poll`);
   const { payout, purchaseStatus } = found;
-  if (purchaseStatus !== 'accepted' || FAILED_STATUSES.has(payout.status)) return 'done';
+  // Finished at PayPal: failed, or paid with nothing left to settle.
+  if (FAILED_STATUSES.has(payout.status) || (payout.status === 'SUCCESS' && purchaseStatus !== 'accepted')) return 'done';
 
-  let payoutBatchId = payout.paypalBatchId;
-  if (!payoutBatchId) {
-    if (deps.now().getTime() - payout.createdAt.getTime() > RESEND_WINDOW_MS) {
-      throw new Error(`payout ${payout.senderBatchId} is too old to resend safely; check PayPal before paying again`);
-    }
-    payoutBatchId = await sendPayout(deps, payout);
-  }
+  const payoutBatchId = payout.paypalBatchId ?? (await resendPayout(deps, payout, purchaseStatus));
 
   const { batchStatus, itemStatus } = await paypal.getPayoutBatch(payoutBatchId);
   // The item decides. A batch PayPal ended before reporting an item failed as a whole.
@@ -122,6 +121,23 @@ export async function pollPayout(deps: SettleDeps, purchaseId: string): Promise<
   }
   await recordStatus(db, purchaseId, status, { payoutBatchId, batchStatus, itemStatus });
   return FAILED_STATUSES.has(status) ? 'done' : 'retry';
+}
+
+/**
+ * Sends again, under the same sender batch id, a payout whose first request brought back no batch.
+ * Only while the purchase is accepted, so a refunded order is never paid out afresh, and only
+ * within the window in which PayPal still refuses a repeated sender batch id.
+ */
+async function resendPayout(deps: SettleDeps, payout: Payout, purchaseStatus: PurchaseStatus): Promise<string> {
+  if (purchaseStatus !== 'accepted') {
+    throw new Error(
+      `payout ${payout.senderBatchId} has no batch to follow and its purchase is ${purchaseStatus}, so it is not sent again; check PayPal`,
+    );
+  }
+  if (deps.now().getTime() - payout.createdAt.getTime() > RESEND_WINDOW_MS) {
+    throw new Error(`payout ${payout.senderBatchId} is too old to resend safely; check PayPal before paying again`);
+  }
+  return sendPayout(deps, payout);
 }
 
 async function hasPayout(db: Db, purchaseId: string): Promise<boolean> {

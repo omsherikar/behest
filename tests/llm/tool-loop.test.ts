@@ -142,6 +142,14 @@ it('sends the route model, effort, fallbacks and strict tools on every turn and 
   }
 });
 
+it('marks every turn for automatic prompt caching', async () => {
+  const { fake, loop } = await setup([messageJson({ toolUses: [searchCall] }), messageJson({ text: 'Done.' })]);
+
+  await loop();
+
+  expect(fake.requests.map(({ body }) => body.cache_control)).toEqual([{ type: 'ephemeral' }, { type: 'ephemeral' }]);
+});
+
 it('stops after maxTurns requests and returns the last reply', async () => {
   const { db, fake, run, loop } = await setup([messageJson({ toolUses: [searchCall] }), messageJson({ text: 'Done.' })]);
 

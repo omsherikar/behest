@@ -1,0 +1,22 @@
+{
+  "id": "msg_mandate_no_amount",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"policy\":{\"version\":1,\"currency\":\"USD\",\"budget\":{\"amountCents\":1,\"period\":\"once\"},\"perPurchaseMaxCents\":1,\"askAboveCents\":0,\"categories\":{\"allow\":[\"groceries\"],\"deny\":[\"electronics\"]},\"merchants\":{\"allow\":null,\"deny\":[]},\"velocity\":null,\"expiresAt\":null},\"assumptions\":[\"Until you say how much your agent can spend, it can spend only $0.01 and every purchase needs your approval.\"],\"questions\":[{\"id\":\"budget_amount\",\"question\":\"How much should your agent be able to spend, and is that per day, week or month, or in total?\",\"options\":[]}]}",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 1880,
+    "output_tokens": 480,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

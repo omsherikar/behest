@@ -1,0 +1,22 @@
+{
+  "id": "msg_intent_consistent",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"verdict\":\"consistent\",\"reasons\":[\"The cart is one 100g jar of turmeric for $4.50 from Ravi Spices, which is what you asked for.\"]}",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 560,
+    "output_tokens": 95,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 1120
+  }
+}

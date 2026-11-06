@@ -1,0 +1,22 @@
+{
+  "id": "msg_intent_needs_human",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"verdict\":\"needs_human\",\"reasons\":[\"You asked for a 100g jar of turmeric, but the cart has a 250g jar for $8.00.\",\"The agent says the 100g jar is out of stock. Please confirm the larger jar is fine.\"]}",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 590,
+    "output_tokens": 130,
+    "cache_read_input_tokens": 1120,
+    "cache_creation_input_tokens": 0
+  }
+}

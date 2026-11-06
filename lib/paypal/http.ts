@@ -10,7 +10,8 @@ export class PayPalApiError extends Error {
   constructor(
     readonly status: number,
     readonly path: string,
-    body: string,
+    /** The full response body. The message keeps only its start. */
+    readonly body: string,
   ) {
     super(`PayPal ${status} on ${path}: ${body.slice(0, 300)}`);
     this.name = 'PayPalApiError';

@@ -198,6 +198,20 @@ describe('retries', () => {
     expect(error).toMatchObject({ status: 422, message: expect.stringContaining('UNPROCESSABLE_ENTITY') });
     expect(apiCalls(calls)).toHaveLength(1);
   });
+
+  it('keeps the whole response body on the error, though the message is cut short', async () => {
+    const body = {
+      name: 'UNPROCESSABLE_ENTITY',
+      message: 'The requested action could not be performed, semantically incorrect, or failed business validation.',
+      details: [{ issue: 'INSTRUMENT_DECLINED', description: 'x'.repeat(400) }],
+    };
+    stubFetch([token('T1'), { method: 'POST', path: '/v2/checkout/orders', status: 422, body }]);
+
+    const error = await paypalRequest('POST', '/v2/checkout/orders', { body: {} }).catch((e) => e);
+
+    expect(error.body).toBe(JSON.stringify(body));
+    expect(error.message.length).toBeLessThan(error.body.length);
+  });
 });
 
 describe('requests', () => {

@@ -10,8 +10,11 @@ export type FakeClaudeRequest = {
   body: Record<string, unknown>;
 };
 
-/** A reply with a numeric `status` is sent as that HTTP response; any other reply is a 200 JSON body. */
-export type FakeClaudeReply = { status: number; body?: unknown; headers?: Record<string, string> };
+/**
+ * A reply with a numeric `status` is sent as that HTTP response, with `text` as the raw body or
+ * else `body` JSON-encoded. Any other reply is a 200 JSON body.
+ */
+export type FakeClaudeReply = { status: number; body?: unknown; text?: string; headers?: Record<string, string> };
 
 function isReply(response: object): response is FakeClaudeReply {
   return typeof (response as { status?: unknown }).status === 'number';
@@ -37,7 +40,7 @@ export function fakeClaude(responses: object[]): { fetch: typeof fetch; requests
     const next = remaining.shift();
     if (next === undefined) throw new Error(`fakeClaude: no reply left for request ${requests.length}`);
     const reply = isReply(next) ? next : { status: 200, body: next };
-    return new Response(JSON.stringify(reply.body ?? null), {
+    return new Response(reply.text ?? JSON.stringify(reply.body ?? null), {
       status: reply.status,
       headers: { 'content-type': 'application/json', 'request-id': `req_fake_${requests.length}`, ...reply.headers },
     });
@@ -53,35 +56,79 @@ type Usage = {
   cache_creation_input_tokens: number;
 };
 
+/** One entry of `usage.iterations`: an attempt by one model. Token counts default to zero. */
+export function iteration(type: 'message' | 'fallback_message', model: string, tokens: Partial<Usage> = {}) {
+  return {
+    type,
+    model,
+    cache_creation: null,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    ...tokens,
+  };
+}
+
+const textBlock = (text: string) => ({ type: 'text', text, citations: null });
+
 /**
- * A Messages API response body. `json` is serialized into the text block; `text` is used as is.
- * Without either the message has no content. Usage defaults to zero tokens.
+ * A Messages API response body from `model`. `json` is serialized into the text block; `text` is
+ * used as is. Without either the reply has no text. Usage defaults to zero tokens.
+ *
+ * `fallbackFrom` makes it a reply rescued by server-side fallback: the declining model's `text`
+ * (if any), then a `fallback` block handing over to `model`, then the reply. Unless `usage` gives
+ * `iterations`, they are the declining model's attempt with no tokens and a `fallback_message`
+ * attempt by `model` with the top-level tokens.
  */
 export function messageJson({
   text,
   json,
   stop_reason = 'end_turn',
   usage,
-}: { text?: string; json?: unknown; stop_reason?: BetaStopReason; usage?: Partial<Usage> } = {}) {
+  model = 'claude-opus-5-5',
+  fallbackFrom,
+}: {
+  text?: string;
+  json?: unknown;
+  stop_reason?: BetaStopReason;
+  usage?: Partial<Usage> & { iterations?: object[] };
+  model?: string;
+  fallbackFrom?: { model: string; text?: string };
+} = {}) {
   const body = text ?? (json === undefined ? undefined : JSON.stringify(json));
+  const reply = body === undefined ? [] : [textBlock(body)];
+  const { iterations, ...counts } = usage ?? {};
+  const tokens = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, ...counts };
+
+  const content = fallbackFrom
+    ? [
+        ...(fallbackFrom.text === undefined ? [] : [textBlock(fallbackFrom.text)]),
+        {
+          type: 'fallback',
+          from: { model: fallbackFrom.model },
+          to: { model },
+          trigger: { type: 'refusal', category: 'cyber' },
+        },
+        ...reply,
+      ]
+    : reply;
+  const defaultIterations = fallbackFrom
+    ? [iteration('message', fallbackFrom.model), iteration('fallback_message', model, tokens)]
+    : null;
+
   return {
     id: 'msg_fake',
     type: 'message',
     role: 'assistant',
-    model: 'claude-opus-5-5',
-    content: body === undefined ? [] : [{ type: 'text', text: body, citations: null }],
+    model,
+    content,
     stop_reason,
     stop_sequence: null,
     stop_details:
       stop_reason === 'refusal'
         ? { type: 'refusal', category: 'cyber', explanation: 'The request was declined.' }
         : null,
-    usage: {
-      input_tokens: 0,
-      output_tokens: 0,
-      cache_read_input_tokens: 0,
-      cache_creation_input_tokens: 0,
-      ...usage,
-    },
+    usage: { ...tokens, iterations: iterations ?? defaultIterations },
   };
 }

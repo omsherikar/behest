@@ -230,6 +230,8 @@ export async function callStructured<T>(
         system: req.system,
         messages: req.messages,
         output_config: { effort, format },
+        // Automatic prompt caching: the API marks the last cacheable block, so a repeated prefix is read back.
+        cache_control: { type: 'ephemeral' },
         betas: [FALLBACK_BETA],
         fallbacks: 'default',
       },

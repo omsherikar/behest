@@ -85,6 +85,14 @@ it('sends model, effort, fallbacks and the fallback beta', async () => {
   expect(sent.headers['x-behest-route']).toBe('mandate_compile');
 });
 
+it('marks the request for automatic prompt caching', async () => {
+  const { fake, call } = await setup([messageJson({ json: { answer: 'yes' } })]);
+
+  await call();
+
+  expect(fake.requests[0].body.cache_control).toEqual({ type: 'ephemeral' });
+});
+
 it('never sends tool_choice, temperature or disabled thinking', async () => {
   const { fake, call } = await setup(LLM_ROUTES.map(() => messageJson({ json: { answer: 'yes' } })));
 

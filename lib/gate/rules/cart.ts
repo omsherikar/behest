@@ -1,7 +1,7 @@
 import { Cart, type CartItem } from '@/lib/domain/cart';
 import { PurchaseProposal } from '@/lib/domain/proposal';
 import type { CatalogEntry, GateInput } from '@/lib/gate/evaluate';
-import { atOrBelow, block, pass, type Check } from './check';
+import { atOrBelow, block, pass, quoteAgentText, type Check } from './check';
 
 export type BuiltCart = { check: Check; cart: Cart; entries: CatalogEntry[] } | { check: Check; cart: null };
 
@@ -24,7 +24,9 @@ export function buildCart({ proposal, seller, catalog }: GateInput): BuiltCart {
   const items: CartItem[] = [];
   for (const { sku, quantity } of parsed.data.items) {
     const entry = catalog.get(sku);
-    if (!entry || entry.sku !== sku) return { check: block(`${sku} is not sold by ${seller.name}`), cart: null };
+    if (!entry || entry.sku !== sku) {
+      return { check: block(`SKU ${quoteAgentText(sku)} is not sold by ${seller.name}`), cart: null };
+    }
     if (entry.stock !== null && !atOrBelow(quantity, entry.stock)) {
       const detail =
         entry.stock > 0 ? `${entry.title} has only ${entry.stock} in stock` : `${entry.title} is out of stock`;

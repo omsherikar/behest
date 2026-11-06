@@ -21,3 +21,13 @@ export type CartContext = { input: GateInput; policy: MandatePolicy; cart: Cart;
  * written as "fails unless at or below" also fails on a missing or corrupt number.
  */
 export const atOrBelow = (value: number, limit: number) => value <= limit;
+
+/** The most characters of agent-written text a detail repeats. */
+const AGENT_TEXT_MAX = 40;
+
+/**
+ * Agent-written text made safe to repeat in a detail the buyer reads: cut to 40 characters, with
+ * `...` when cut, then quoted with JSON escaping so quotes and newlines cannot reshape the sentence.
+ */
+export const quoteAgentText = (text: string) =>
+  JSON.stringify(text.length > AGENT_TEXT_MAX ? `${text.slice(0, AGENT_TEXT_MAX)}...` : text);

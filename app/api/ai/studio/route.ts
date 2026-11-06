@@ -210,7 +210,11 @@ function serverSentEvents(
         }
       } catch (failure) {
         finish();
-        if (stopped) return close();
+        if (stopped) {
+          // The reply was stopped and then could not log its call: spend goes unrecorded.
+          console.error(CANCELLED_REPLY_FAILED, failure);
+          return close();
+        }
         // Misconfiguration or the database: the details go to the server log, not the browser.
         console.error('[analyst] The reply failed:', failure);
         controller.enqueue(frame({ type: 'error', error: { type: 'api_error', message: 'The analyst failed. Try again later.' } }));

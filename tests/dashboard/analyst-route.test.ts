@@ -21,10 +21,11 @@ vi.mock('@/lib/db/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/db/client')>()),
   getDb: vi.fn(),
 }));
-vi.mock('@/lib/llm/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/llm/client')>()),
-  createClaude: vi.fn(),
-}));
+vi.mock('@/lib/llm/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/llm/client')>();
+  // recordCall logs for real unless a test makes it fail.
+  return { ...actual, createClaude: vi.fn(), recordCall: vi.fn(actual.recordCall) };
+});
 vi.mock('@/lib/ratelimit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ratelimit')>()),
   rateLimit: vi.fn(() => true),
@@ -75,6 +76,17 @@ function allSlotsFree(key: string): boolean {
   const slots = Array.from({ length: 4 }, () => takeSlot(key, 4));
   for (const slot of slots) slot?.();
   return slots.every((slot) => slot !== null);
+}
+
+/** What is left to read of an SSE body, as text. */
+async function readRest(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
+  const decoder = new TextDecoder();
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    text += decoder.decode(value, { stream: true });
+  }
 }
 
 /**
@@ -133,14 +145,21 @@ const frames = (body: string) => body.split('\n\n').filter(Boolean).map((frame) 
 function heldClaude() {
   let send: (text: string) => void = () => {};
   let end: () => void = () => {};
+  let fail: (reason: unknown) => void = () => {};
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       send = (text) => controller.enqueue(new TextEncoder().encode(text));
       end = () => controller.close();
+      fail = (reason) => controller.error(reason);
     },
   });
-  const reply: typeof fetch = async () =>
-    new Response(body, { headers: { 'content-type': 'text/event-stream', 'request-id': 'req_held' } });
+  const reply: typeof fetch = async (input, init) => {
+    // As with a real response, aborting the request fails its body. The client's middleware
+    // sends a Request, which carries the signal.
+    const signal = new Request(input, init).signal;
+    signal.addEventListener('abort', () => fail(signal.reason));
+    return new Response(body, { headers: { 'content-type': 'text/event-stream', 'request-id': 'req_held' } });
+  };
   vi.mocked(createClaude).mockReturnValue(new Anthropic({ apiKey: API_KEY, fetch: reply, maxRetries: 0 }));
   return { send: (text: string) => send(text), end: () => end() };
 }
@@ -343,6 +362,42 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
     expect(allSlotsFree(BUYER_KEY)).toBe(true);
     expect(errors).not.toHaveBeenCalled();
   });
+
+  it.each(['the client goes away', 'the reader cancels'] as const)(
+    'logs a failure to record the call when %s while waiting for Claude, and sends no error event',
+    async (how) => {
+      await useDb();
+      const claude = heldClaude();
+      const [start, ...rest] = frames(recordedStream('text-turn'));
+      claude.send(start);
+      vi.mocked(recordCall).mockRejectedValueOnce(new Error('The database is down'));
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const client = new AbortController();
+
+      const response = await POST(await request(turn, { signal: client.signal }));
+      const reader = response.body!.getReader();
+      await reader.read();
+      // Let the stream ask for the next event, which waits on Claude.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      if (how === 'the client goes away') {
+        client.abort();
+        // The stream ends with nothing more sent, no error event among it.
+        expect(await readRest(reader)).toBe('');
+      } else {
+        const cancelling = reader.cancel();
+        claude.send(rest.join(''));
+        claude.end();
+        await cancelling;
+      }
+
+      await vi.waitFor(() => expect(errors).toHaveBeenCalled(), { timeout: 10_000 });
+      expect(errors).toHaveBeenCalledExactlyOnceWith(
+        '[analyst] Logging a cancelled reply failed:',
+        expect.objectContaining({ message: 'The database is down' }),
+      );
+      expect(allSlotsFree(BUYER_KEY)).toBe(true);
+    },
+  );
 
   it('holds four answers open per address and persona, and frees a slot when one ends or is cancelled', async () => {
     const db = await useDb();

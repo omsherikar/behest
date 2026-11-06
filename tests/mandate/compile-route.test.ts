@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { POST } from '@/app/api/mandates/compile/route';
 import { llmDeps } from '@/lib/app-deps';
 import { confirmToken, isConfirmToken } from '@/lib/mandate/confirm-token';
+import { DECLINE_ANSWER } from '@/lib/mandate/decline';
 import { renderReadback } from '@/lib/mandate/readback';
 import { MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
@@ -12,7 +13,7 @@ import nonUsdReply from '@/tests/fixtures/llm/mandate_compile/non-usd.json';
 import refusalReply from '@/tests/fixtures/llm/mandate_compile/refusal.json';
 import weekendsAnsweredReply from '@/tests/fixtures/llm/mandate_compile/weekends-answered.json';
 import weekendsReply from '@/tests/fixtures/llm/mandate_compile/weekends-question.json';
-import { fakeClaude } from '@/tests/helpers/fake-claude';
+import { fakeClaude, messageJson } from '@/tests/helpers/fake-claude';
 import { demoPolicy } from '@/tests/helpers/fixtures';
 import { createTestDb } from '@/tests/helpers/test-db';
 
@@ -100,6 +101,30 @@ describe('POST /api/mandates/compile', () => {
     expect(status).toBe(200);
     expect(body.questions).toEqual([expect.objectContaining({ id: 'weekend_limit' })]);
     expect(body).not.toHaveProperty('confirmToken');
+  });
+
+  it("offers the exact decline option last on every question, in place of the model's own wording", async () => {
+    const weekends = 'Behest cannot limit purchases to weekends. Do you want to go ahead?';
+    const amount = 'How much should your agent be able to spend?';
+    await claudeAnswers([
+      messageJson({
+        json: {
+          policy: demoPolicy,
+          assumptions: [],
+          questions: [
+            { id: 'weekend_limit', question: weekends, options: ["Don't create this mandate", 'Buy on any day'] },
+            { id: 'budget_amount', question: amount, options: [] },
+          ],
+        },
+      }),
+    ]);
+
+    const { body } = await answer(await POST(await request({ text: WEEKENDS_TEXT })));
+
+    expect(body.questions).toEqual([
+      { id: 'weekend_limit', question: weekends, options: ['Buy on any day', DECLINE_ANSWER] },
+      { id: 'budget_amount', question: amount, options: [DECLINE_ANSWER] },
+    ]);
   });
 
   it('compiles again with the answers, and gives a token once no question is left', async () => {

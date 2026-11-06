@@ -4,7 +4,7 @@ import { llmDeps } from '@/lib/app-deps';
 import { FORM_BODY_BYTES, readBody } from '@/lib/http/read-body';
 import { compileMandate, type CompileResult } from '@/lib/mandate/compile';
 import { confirmToken } from '@/lib/mandate/confirm-token';
-import { isDeclineAnswer } from '@/lib/mandate/decline';
+import { isDeclineAnswer, withDeclineOption } from '@/lib/mandate/decline';
 import { clientAddress, MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { personaRefusal } from '@/lib/session';
 
@@ -103,6 +103,10 @@ export async function POST(request: NextRequest) {
     const [status, message] = FAILURES[result.error];
     return Response.json({ error: { code: result.error, message } }, { status });
   }
-  if (result.questions.length > 0) return Response.json(result);
+  if (result.questions.length > 0) {
+    // The model words its decline option freely; the page recognises only the exact one.
+    const questions = result.questions.map((question) => ({ ...question, options: withDeclineOption(question.options) }));
+    return Response.json({ ...result, questions });
+  }
   return Response.json({ ...result, confirmToken: confirmToken(text, result.policy) });
 }

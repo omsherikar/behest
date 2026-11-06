@@ -45,12 +45,17 @@ beforeEach(() => {
   vi.stubEnv('PAYPAL_WEBHOOK_ID', WEBHOOK_ID);
   resetPaypalTokenCacheForTests();
   setPaypalRetrySleepForTests(async () => {});
+  vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
+
+/** Everything verifyWebhook wrote with console.error, as one string. */
+const errorLog = () => vi.mocked(console.error).mock.calls.flat().map(String).join('\n');
 
 describe('verifyWebhook', () => {
   it('asks PayPal to check the signature headers against the webhook id and the event', async () => {
@@ -72,10 +77,11 @@ describe('verifyWebhook', () => {
     });
   });
 
-  it('accepts an event PayPal verifies', async () => {
+  it('accepts an event PayPal verifies, logging nothing', async () => {
     stubFetch([{ method: 'POST', path: VERIFY, body: verifySuccess }]);
 
     expect(await verifyWebhook(new Headers(signatureHeaders), rawBody)).toBe(true);
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -147,12 +153,48 @@ describe('verifyWebhook', () => {
     await expect(verifyWebhook(new Headers(signatureHeaders), rawBody)).resolves.toBe(false);
   });
 
-  it('rejects the event, without throwing, when PayPal cannot be reached', async () => {
+  it("logs PayPal's status and debug id when the verification call fails, and none of the event or its signature", async () => {
+    const body = {
+      name: 'AUTHENTICATION_FAILURE',
+      message: 'Authentication failed due to invalid authentication credentials or a missing Authorization header.',
+      debug_id: 'f81b2e3c9d4a7',
+    };
+    stubFetch([{ method: 'POST', path: VERIFY, status: 401, body }]);
+
+    expect(await verifyWebhook(new Headers(signatureHeaders), rawBody)).toBe(false);
+
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(errorLog()).toContain('401');
+    expect(errorLog()).toContain('f81b2e3c9d4a7');
+    for (const secret of [
+      ...Object.values(signatureHeaders),
+      WEBHOOK_ID,
+      event.id,
+      'client-secret',
+      'AUTHENTICATION_FAILURE',
+    ]) {
+      expect(errorLog()).not.toContain(secret);
+    }
+  });
+
+  it('logs the status alone when the PayPal error body carries no debug id', async () => {
+    stubFetch([{ method: 'POST', path: VERIFY, status: 500, body: { name: 'INTERNAL_SERVICE_ERROR' } }]);
+
+    expect(await verifyWebhook(new Headers(signatureHeaders), rawBody)).toBe(false);
+
+    expect(errorLog()).toContain('500');
+    expect(errorLog()).not.toContain('debug');
+  });
+
+  it('rejects the event, without throwing, when PayPal cannot be reached, logging the error name and message', async () => {
     vi.stubGlobal('fetch', async () => {
       throw new TypeError('fetch failed');
     });
 
     await expect(verifyWebhook(new Headers(signatureHeaders), rawBody)).resolves.toBe(false);
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(errorLog()).toContain('TypeError');
+    expect(errorLog()).toContain('fetch failed');
   });
 
   it('rejects the event, without throwing, when the PayPal credentials are missing', async () => {

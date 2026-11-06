@@ -1,43 +1,33 @@
 // Saved reports, kept in this browser's localStorage. Studio's state has no page names, so each
-// report carries its page titles alongside the AG Studio state.
+// report carries its page titles alongside the AG Studio state. Each persona sees different data,
+// so each keeps its own reports.
 //
-// The built-in report comes from ./studio/initial-report.ts until it is saved;
+// The persona's built-in report comes from ./studio/initial-report.ts until it is saved;
 // after that the saved copy wins until it is reset to default.
 
-import type { AgReportState } from 'ag-studio';
-import { dashboardReport } from './studio/initial-report';
+import type { Persona } from '@/lib/session';
+import { BUILT_IN_REPORTS } from './studio/initial-report';
+import type { ReportState } from './studio/widgets';
 
 export type SavedReport = {
   id: string;
   name: string;
   builtIn?: boolean;
   pageTitles: Record<string, string>;
-  state: AgReportState;
+  state: ReportState;
   updatedAt: string;
 };
 
 export type StoredReports = { reports: SavedReport[]; activeId: string };
 
-const STORAGE_KEY = 'ag-paypal-demo:reports:v1';
+const storageKey = (persona: Persona) => `behest:reports:v1:${persona}`;
 
-export const BUILT_IN_ID = 'paypal-overview';
+export const BUILT_IN_ID = 'built-in';
 
-// Sidebar titles for the built-in report's pages, keyed by page id in initial-report.ts.
-const defaultPageTitles: Record<string, string> = {
-  revenue: 'Revenue',
-  receivables: 'Receivables',
-  cash: 'Cash & payouts',
-  catalogue: 'Catalogue',
+export const defaultReport = (persona: Persona): SavedReport => {
+  const { name, pageTitles, state } = BUILT_IN_REPORTS[persona];
+  return { id: BUILT_IN_ID, name, builtIn: true, pageTitles, state, updatedAt: new Date(0).toISOString() };
 };
-
-export const defaultReport = (): SavedReport => ({
-  id: BUILT_IN_ID,
-  name: 'PayPal overview',
-  builtIn: true,
-  pageTitles: defaultPageTitles,
-  state: dashboardReport,
-  updatedAt: new Date(0).toISOString(),
-});
 
 export const newId = (prefix: string) => `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 
@@ -73,43 +63,44 @@ export function upsert(current: StoredReports, report: SavedReport): StoredRepor
 }
 
 // Deleting the built-in report resets it to default rather than removing it.
-export function remove(current: StoredReports, id: string): StoredReports {
-  if (id === BUILT_IN_ID) return upsert(current, defaultReport());
+export function remove(current: StoredReports, id: string, persona: Persona): StoredReports {
+  if (id === BUILT_IN_ID) return upsert(current, defaultReport(persona));
   const reports = current.reports.filter((r) => r.id !== id);
   return { reports, activeId: current.activeId === id ? BUILT_IN_ID : current.activeId };
 }
 
 // Back to a fresh demo: only the built-in report, as defined in initial-report.ts.
-export const initialReports = (): StoredReports => ({ reports: [defaultReport()], activeId: BUILT_IN_ID });
+export const initialReports = (persona: Persona): StoredReports => ({
+  reports: [defaultReport(persona)],
+  activeId: BUILT_IN_ID,
+});
 
 // --- Storage ----------------------------------------------------------------------
 
-export function loadReports(): StoredReports {
+export function loadReports(persona: Persona): StoredReports {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return initialReports();
+    const raw = localStorage.getItem(storageKey(persona));
+    if (!raw) return initialReports(persona);
     const stored = JSON.parse(raw) as StoredReports;
     // The built-in report is always listed first, from code unless a saved copy exists.
     const reports = [
-      stored.reports.find((r) => r.id === BUILT_IN_ID) ?? defaultReport(),
+      stored.reports.find((r) => r.id === BUILT_IN_ID) ?? defaultReport(persona),
       ...stored.reports.filter((r) => r.id !== BUILT_IN_ID),
     ];
     const activeId = reports.some((r) => r.id === stored.activeId) ? stored.activeId : BUILT_IN_ID;
     return { reports, activeId };
   } catch {
-    return initialReports();
+    return initialReports(persona);
   }
 }
 
-export function saveReports(next: StoredReports) {
+export function saveReports(next: StoredReports, persona: Persona) {
   // Only keep the built-in report once it differs from code, so edits to initial-report.ts show up.
+  const builtIn = BUILT_IN_REPORTS[persona];
   const untouched = (r: SavedReport) =>
-    r.id === BUILT_IN_ID &&
-    r.state === dashboardReport &&
-    r.pageTitles === defaultPageTitles &&
-    r.name === defaultReport().name;
+    r.id === BUILT_IN_ID && r.state === builtIn.state && r.pageTitles === builtIn.pageTitles && r.name === builtIn.name;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...next, reports: next.reports.filter((r) => !untouched(r)) }));
+    localStorage.setItem(storageKey(persona), JSON.stringify({ ...next, reports: next.reports.filter((r) => !untouched(r)) }));
   } catch {
     // Storage full or blocked: keep working in memory for this session.
   }

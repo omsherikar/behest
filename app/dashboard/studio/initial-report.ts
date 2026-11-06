@@ -1,9 +1,17 @@
-// The built-in "PayPal overview" report: pages for revenue, receivables, cash and catalogue, as
-// AG Studio report state. Field ids ('invoices.paidAmount') refer to the data sources in ./data.ts.
+// The built-in report for each persona, as AG Studio report state. Every persona gets the pages
+// that make sense for it: the buyer sees its agent's decisions, budget, receipts and the
+// catalogue; the seller sees the orders placed with it, its receipts and payouts and its
+// catalogue, with nothing about how the buyer's agent decided (its data has none); the operator
+// sees everything plus reconciliation against PayPal. Field ids
+// ('purchases.total') refer to the data sources in ./data.ts; 'behest-*' widgets are in ./widgets.ts.
 
-import type { AgPageState, AgReportState, AgWidgetLayoutState } from 'ag-studio';
+import type { AgPageState, AgWidgetLayoutState } from 'ag-studio';
+import type { Persona } from '@/lib/session';
+import type { BehestRegistry, ReportState } from './widgets';
 
 // --- Helpers ----------------------------------------------------------------------
+
+type PageState = AgPageState<BehestRegistry>;
 
 // Position on the canvas grid, in tracks: 24 columns wide, rows of studioCanvasRowHeight.
 const at = (xTrack: number, yTrack: number, xSpan: number, ySpan: number): AgWidgetLayoutState => ({
@@ -16,12 +24,13 @@ const title = (text: string) => ({ title: { enabled: true, text } });
 const sum = (id: string) => ({ id, aggregation: 'sum' as const });
 const avg = (id: string) => ({ id, aggregation: 'avg' as const });
 const countd = (id: string) => ({ id, aggregation: 'countd' as const });
+const withLegend = { style: { theme: { common: { legend: { enabled: true } } } } };
 
 // Same stack as --pp-font in app/globals.css.
-const PAYPAL_FONT = '"PayPal Open", "Helvetica Neue", Helvetica, Arial, sans-serif';
+const FONT = '"PayPal Open", "Helvetica Neue", Helvetica, Arial, sans-serif';
 
 const typography = (fontSize: number, fontWeight: 'normal' | 'bold' = 'normal') => ({
-  fontFamily: PAYPAL_FONT,
+  fontFamily: FONT,
   fontSize,
   fontWeight,
   fontStyle: 'normal' as const,
@@ -43,245 +52,364 @@ const kpi = (text: string, value: { id: string; aggregation?: 'sum' | 'avg' | 'c
 
 // --- Pages ------------------------------------------------------------------------
 
-const revenue: AgPageState = {
-  id: 'revenue',
+const decisions: PageState = {
+  id: 'decisions',
   widgets: {
-    'invoice-date': {
-      type: 'date-filter',
-      dataMapping: { value: [{ id: 'invoices.invoiceDate' }] },
-      // No default period: a relative date filter in saved state fails to apply on load in
-      // Studio 3.0 ("must be a two-element range"), though it works once picked in the widget.
-      format: { style: { filterType: 'relative' } },
-    },
-    'kpi-invoiced': kpi(
-      'Invoiced',
-      sum('invoices.issuedAmount'),
-      'calendar::month',
-    ),
-    'kpi-collected': kpi(
-      'Collected',
-      sum('invoices.paidAmount'),
-      'calendar::month',
-    ),
-    'kpi-outstanding': kpi(
-      'Outstanding',
-      sum('invoices.outstanding'),
-      'invoices.outstanding',
-    ),
-    'kpi-overdue': kpi(
-      'Overdue',
-      sum('invoices.overdueAmount'),
-      'invoices.overdueAmount',
-    ),
-    'billed-vs-collected': {
-      type: 'combo-chart-grouped-column-line',
-      dataMapping: {
-        categoryKey: [{ id: 'calendar::month' }],
-        valueKey: [sum('invoices.issuedAmount'), sum('invoices.paidAmount')],
-        secondaryValueKey: [{ id: 'collectionRate' }],
-      },
+    'kpi-proposals': kpi('Proposals', sum('purchases.proposals'), 'calendar::day'),
+    'kpi-allowed': kpi('Allowed', sum('purchases.allowed')),
+    'kpi-asked': kpi('Needed approval', sum('purchases.asked')),
+    'kpi-blocked': kpi('Blocked', sum('purchases.blocked')),
+    verdict: {
+      type: 'button-filter',
+      dataMapping: { value: [{ id: 'purchases.verdict' }] },
       format: {
-        ...title('Invoiced and paid by invoice month, with collection rate'),
-        style: { theme: { common: { legend: { enabled: true } } } },
+        ...title('Verdict'),
+        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 64 } },
       },
     },
-    'collection-rate': {
-      type: 'radial-gauge',
-      dataMapping: { value: [{ id: 'collectionRate' }] },
-      format: {
-        ...title('Collection rate'),
-        style: {
-          scaleLabel: { min: 0, max: 1 },
-          label: { typography: typography(24, 'bold') },
-          secondaryLabel: {
-            enabled: true,
-            text: 'of invoiced value paid',
-            typography: typography(12),
-          },
-        },
-      },
-    },
-    'status-sunburst': {
-      type: 'sunburst-chart',
+    ledger: {
+      type: 'behest-ledger',
       dataMapping: {
-        categoryKey: [
-          { id: 'invoices.statusGroup' },
-          { id: 'customers.company' },
+        columns: [
+          { id: 'purchases.createdAt' },
+          { id: 'sellers.name' },
+          { id: 'purchases.request' },
+          { id: 'purchases.total' },
+          { id: 'purchases.status' },
         ],
-        valueKey: [sum('invoices.total')],
       },
-      format: title('Invoice value by status and customer'),
+      format: title('Decision ledger'),
     },
-    'items-treemap': {
-      type: 'treemap-chart',
+    // Follows the ledger: clicking a paid purchase there shows and verifies its receipt here.
+    receipt: { type: 'behest-receipt', dataMapping: {}, format: title('Receipt for the selected purchase') },
+    'rule-outcomes': {
+      type: 'bar-chart-stacked',
       dataMapping: {
-        categoryKey: [{ id: 'invoiceItems.unit' }, { id: 'invoiceItems.name' }],
-        valueKey: [sum('invoiceItems.lineTotal')],
+        categoryKey: [{ id: 'gateOutcomes.rule' }],
+        valueKey: [countd('gateOutcomes.id')],
+        legendKey: [{ id: 'gateOutcomes.result' }],
       },
-      format: title('Billing by unit'),
+      format: { ...title('Rules that asked or blocked'), ...withLegend },
     },
-    'payment-methods': {
-      type: 'nightingale-chart',
-      dataMapping: {
-        categoryKey: [{ id: 'invoicePayments.method' }],
-        valueKey: [sum('invoicePayments.amount')],
-      },
+    'intent-check': {
+      type: 'donut-chart',
+      dataMapping: { categoryKey: [{ id: 'purchases.intent' }], valueKey: [sum('purchases.proposals')] },
       format: {
-        ...title('Payments by method'),
-        style: {
-          theme: {
-            nightingale: {
-              series: { label: { enabled: true, ...typography(2) } },
-            },
-          },
-        },
-      },
-    },
-    'invoice-status-pivot': {
-      type: 'pivot-grid',
-      dataMapping: {
-        rows: [{ id: 'customers.company' }, { id: 'invoices.number' }],
-        columns: [{ id: 'invoices.status' }],
-        values: [sum('invoices.total')],
-      },
-      format: {
-        style: {
-          totalColumns: true,
-          totalColumnsPlacement: 'before',
-          grandTotalRow: { enabled: true },
-        },
+        ...title('Intent check results'),
+        style: { custom: { pieDataLabel: { enabled: true }, totalLabel: { enabled: true } } },
       },
     },
   },
   widgetLayout: {
-    'kpi-invoiced': at(0, 0, 4, 7),
-    'kpi-collected': at(4, 0, 4, 7),
-    'kpi-outstanding': at(8, 0, 4, 7),
-    'kpi-overdue': at(12, 0, 4, 7),
-    'invoice-date': at(16, 0, 8, 7),
-    'billed-vs-collected': at(0, 7, 16, 16),
-    'collection-rate': at(16, 7, 8, 16),
-    'status-sunburst': at(0, 23, 8, 18),
-    'items-treemap': at(8, 23, 8, 18),
-    'payment-methods': at(16, 23, 8, 18),
-    'invoice-status-pivot': at(0, 41, 24, 20),
+    'kpi-proposals': at(0, 0, 4, 7),
+    'kpi-allowed': at(4, 0, 4, 7),
+    'kpi-asked': at(8, 0, 4, 7),
+    'kpi-blocked': at(12, 0, 4, 7),
+    verdict: at(16, 0, 8, 7),
+    ledger: at(0, 7, 24, 30),
+    receipt: at(0, 37, 9, 36),
+    'rule-outcomes': at(9, 37, 15, 18),
+    'intent-check': at(9, 55, 15, 18),
+  },
+  filter: {
+    // Passing and skipped rules would drown out the few that decided anything.
+    widget: {
+      'rule-outcomes': [{ field: { id: 'gateOutcomes.result' }, model: { operator: 'isIn', value: ['Ask', 'Block'] } }],
+    },
   },
 };
 
-const receivables: AgPageState = {
-  id: 'receivables',
+const budget: PageState = {
+  id: 'budget',
   widgets: {
-    // Invoice money isn't converted between currencies, so this page is driven by a
-    // single-select currency switch, starting on USD (see the page filter below).
-    currency: {
-      type: 'button-filter',
-      dataMapping: { value: [{ id: 'invoices.currency' }] },
-      format: {
-        ...title('Currency'),
-        style: {
-          selection: { type: 'single' },
-          dimensions: { height: 28, minWidth: 48 },
-        },
-      },
-    },
-    'kpi-outstanding': kpi('Outstanding', sum('invoices.outstanding')),
-    'kpi-overdue': kpi('Overdue', sum('invoices.overdueAmount')),
-    'kpi-open': kpi('Open invoices', countd('invoices.id')),
-    'overdue-share': {
-      type: 'radial-gauge',
-      dataMapping: { value: [{ id: 'overdueShare' }] },
-      format: {
-        ...title('Overdue share'),
-        style: {
-          label: { typography: typography(24) },
-          secondaryLabel: { enabled: true, text: 'of receivables past due' },
-          scaleLabel: { min: 0, max: 1, typography: typography(11) },
-        },
-      },
-    },
-    aging: {
-      type: 'column-chart-stacked',
+    'kpi-budget': kpi('Budget this period', sum('budgets.budget')),
+    'kpi-spent': kpi('Spent', sum('budgets.spent')),
+    'kpi-in-flight': kpi('Reserved in flight', sum('budgets.inFlight')),
+    'kpi-left': kpi('Budget left', sum('budgets.remaining')),
+    'burn-down': { type: 'behest-burn-down', dataMapping: {}, format: title('Budget burn-down') },
+    'kpi-used': kpi('Budget used', { id: 'budgetUsed' }),
+    limits: {
+      type: 'grid',
       dataMapping: {
-        categoryKey: [{ id: 'customers.name' }],
-        valueKey: [sum('invoices.total')],
-        legendKey: [{ id: 'invoices.status' }],
+        cols: [{ id: 'mandates.confirmedAt' }, { id: 'mandates.perPurchaseMax' }, { id: 'mandates.askAbove' }],
       },
-      format: {
-        ...title('Receivables aging by customer'),
-        style: { theme: { common: { legend: { enabled: true } } } },
-      },
+      format: title('Mandate limits'),
     },
-    'open-invoices': {
+    counted: {
       type: 'grid',
       dataMapping: {
         cols: [
-          { id: 'invoices.number' },
-          { id: 'customers.name' },
-          { id: 'customers.company' },
-          { id: 'invoices.statusGroup' },
-          { id: 'invoices.dueDate' },
-          { id: 'invoices.daysOverdue' },
-          sum('invoices.total'),
-          sum('invoices.paidAmount'),
-          sum('invoices.outstanding'),
+          { id: 'budgetSteps.at' },
+          { id: 'purchases.request' },
+          { id: 'budgetSteps.effect' },
+          // One row per counted purchase, so amounts are shown as they are.
+          { id: 'budgetSteps.amount' },
+          { id: 'budgetSteps.remaining' },
         ],
       },
-      sort: [{ field: { id: 'invoices.daysOverdue' }, direction: 'desc' }],
-      format: title('Open invoices, most overdue first'),
+      sort: [{ field: { id: 'budgetSteps.at' }, direction: 'desc' }],
+      format: title('Counted against the budget this period'),
+    },
+    'by-category': {
+      type: 'donut-chart',
+      dataMapping: { categoryKey: [{ id: 'cartItems.category' }], valueKey: [sum('cartItems.lineTotal')] },
+      format: {
+        ...title('Spend by category, all time'),
+        style: { custom: { pieDataLabel: { enabled: true }, totalLabel: { enabled: true } } },
+      },
     },
   },
   widgetLayout: {
-    'kpi-outstanding': at(0, 0, 6, 7),
-    'kpi-overdue': at(6, 0, 6, 7),
-    'kpi-open': at(12, 0, 6, 7),
-    currency: at(18, 0, 6, 7),
-    aging: at(0, 7, 16, 18),
-    'overdue-share': at(16, 7, 8, 18),
-    'open-invoices': at(0, 25, 24, 20),
+    'kpi-budget': at(0, 0, 6, 7),
+    'kpi-spent': at(6, 0, 6, 7),
+    'kpi-in-flight': at(12, 0, 6, 7),
+    'kpi-left': at(18, 0, 6, 7),
+    'burn-down': at(0, 7, 16, 24),
+    'kpi-used': at(16, 7, 8, 7),
+    limits: at(16, 14, 8, 17),
+    counted: at(0, 31, 15, 20),
+    'by-category': at(15, 31, 9, 20),
   },
   filter: {
-    page: [
-      {
-        field: { id: 'invoices.currency' },
-        model: { operator: 'isIn', value: ['USD'] },
-        filterWidgetId: 'currency',
-      },
-      { field: { id: 'invoices.isReceivable' }, model: { operator: 'isTrue' } },
-    ],
+    // Only what counts against a budget: captured or reserved, not blocked or refunded.
+    widget: {
+      'by-category': [{ field: { id: 'purchases.budgetEffect' }, model: { operator: 'isIn', value: ['Spent', 'In flight'] } }],
+      limits: [{ field: { id: 'mandates.status' }, model: { operator: 'isIn', value: ['Active'] } }],
+    },
   },
 };
 
-const cash: AgPageState = {
-  id: 'cash',
+const receipts: PageState = {
+  id: 'receipts',
   widgets: {
-    'kpi-balance': kpi('Available balance', sum('balances.available')),
-    'kpi-paid-out': kpi('Paid out (31 days)', sum('payouts.amount')),
-    'kpi-fees': kpi('Payout fees', sum('payouts.fee')),
-    'kpi-recipients': kpi('Recipients', countd('payouts.recipient')),
-    'payout-treemap': {
-      type: 'treemap-chart',
+    'kpi-receipts': kpi('Receipts issued', countd('receipts.id')),
+    'kpi-paid-out': kpi('Paid out to sellers', sum('payouts.amount')),
+    'kpi-pending': kpi('Payouts pending', sum('payouts.pending')),
+    receipt: { type: 'behest-receipt', dataMapping: {}, format: title('Receipt') },
+    'receipt-list': {
+      type: 'grid',
       dataMapping: {
-        // Payouts aren't related to customers, so recipient (not company) is the second level.
-        categoryKey: [{ id: 'payouts.campaign' }, { id: 'payouts.recipient' }],
-        valueKey: [sum('payouts.amount')],
+        cols: [
+          { id: 'receipts.issuedAt' },
+          { id: 'receipts.id' },
+          { id: 'receipts.sellerSlug' },
+          { id: 'purchases.verdict' },
+          { id: 'purchases.approver' },
+          // One receipt per purchase, so the purchase total is shown as is, not summed.
+          { id: 'purchases.total' },
+          { id: 'receipts.keyId' },
+        ],
       },
-      format: title('Payouts by campaign and recipient'),
+      sort: [{ field: { id: 'receipts.issuedAt' }, direction: 'desc' }],
+      format: title('Receipts'),
     },
-    'campaign-donut': {
-      type: 'donut-chart',
+    payouts: {
+      type: 'grid',
       dataMapping: {
-        categoryKey: [{ id: 'payouts.campaign' }],
-        valueKey: [sum('payouts.amount')],
+        cols: [
+          { id: 'payouts.createdAt' },
+          sum('payouts.amount'),
+          { id: 'payouts.status' },
+          { id: 'purchases.request' },
+          { id: 'payouts.paypalBatchId' },
+        ],
       },
+      sort: [{ field: { id: 'payouts.createdAt' }, direction: 'desc' }],
+      format: title('PayPal payouts'),
+    },
+  },
+  widgetLayout: {
+    'kpi-receipts': at(0, 0, 8, 7),
+    'kpi-paid-out': at(8, 0, 8, 7),
+    'kpi-pending': at(16, 0, 8, 7),
+    receipt: at(0, 7, 9, 36),
+    'receipt-list': at(9, 7, 15, 18),
+    payouts: at(9, 25, 15, 18),
+  },
+};
+
+// Statuses in which the buyer's money has been captured.
+const PAID = ['Captured', 'Accepted', 'Settled', 'Disputed', 'Resolved'];
+
+const sellerOrders: PageState = {
+  id: 'orders',
+  widgets: {
+    'kpi-orders': kpi('Agent orders', sum('purchases.proposals'), 'calendar::day'),
+    'kpi-allowed': kpi('Allowed', sum('purchases.allowed')),
+    'kpi-asked': kpi('Needed approval', sum('purchases.asked')),
+    'kpi-blocked': kpi('Blocked', sum('purchases.blocked')),
+    verdict: {
+      type: 'button-filter',
+      dataMapping: { value: [{ id: 'purchases.verdict' }] },
       format: {
-        ...title('Payout share by campaign'),
-        style: {
-          custom: {
-            pieDataLabel: { enabled: true },
-            totalLabel: { enabled: true },
-          },
-        },
+        ...title('Verdict'),
+        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 64 } },
       },
+    },
+    ledger: {
+      type: 'behest-ledger',
+      dataMapping: {
+        columns: [
+          { id: 'purchases.createdAt' },
+          { id: 'purchases.itemCount' },
+          { id: 'purchases.total' },
+          { id: 'purchases.status' },
+          { id: 'purchases.captureId' },
+        ],
+      },
+      format: title('Orders from buyer agents'),
+    },
+    // Follows the ledger: clicking a paid order there shows and verifies its receipt here.
+    receipt: { type: 'behest-receipt', dataMapping: {}, format: title('Receipt for the selected order') },
+    items: {
+      type: 'grid',
+      dataMapping: {
+        cols: [
+          { id: 'purchases.createdAt' },
+          { id: 'cartItems.sku' },
+          { id: 'cartItems.title' },
+          { id: 'cartItems.quantity' },
+          { id: 'cartItems.lineTotal' },
+          { id: 'purchases.status' },
+        ],
+      },
+      sort: [{ field: { id: 'purchases.createdAt' }, direction: 'desc' }],
+      format: title('Items ordered'),
+    },
+    'sales-by-item': {
+      type: 'bar-chart-grouped',
+      dataMapping: { categoryKey: [{ id: 'cartItems.title' }], valueKey: [sum('cartItems.lineTotal')] },
+      format: title('Paid sales by item'),
+    },
+  },
+  widgetLayout: {
+    'kpi-orders': at(0, 0, 4, 7),
+    'kpi-allowed': at(4, 0, 4, 7),
+    'kpi-asked': at(8, 0, 4, 7),
+    'kpi-blocked': at(12, 0, 4, 7),
+    verdict: at(16, 0, 8, 7),
+    ledger: at(0, 7, 24, 26),
+    receipt: at(0, 33, 9, 36),
+    items: at(9, 33, 15, 18),
+    'sales-by-item': at(9, 51, 15, 18),
+  },
+  filter: {
+    widget: {
+      'sales-by-item': [{ field: { id: 'purchases.status' }, model: { operator: 'isIn', value: PAID } }],
+    },
+  },
+};
+
+const sellerReceipts: PageState = {
+  id: 'receipts',
+  widgets: {
+    'kpi-receipts': kpi('Receipts received', countd('receipts.id')),
+    'kpi-paid-out': kpi('Paid out to you', sum('payouts.amount')),
+    'kpi-pending': kpi('Payouts pending', sum('payouts.pending')),
+    receipt: { type: 'behest-receipt', dataMapping: {}, format: title('Receipt') },
+    'receipt-list': {
+      type: 'grid',
+      dataMapping: {
+        cols: [
+          { id: 'receipts.issuedAt' },
+          { id: 'receipts.id' },
+          { id: 'purchases.verdict' },
+          // One receipt per purchase, so the purchase total is shown as is, not summed.
+          { id: 'purchases.total' },
+          { id: 'receipts.keyId' },
+        ],
+      },
+      sort: [{ field: { id: 'receipts.issuedAt' }, direction: 'desc' }],
+      format: title('Receipts'),
+    },
+    payouts: {
+      type: 'grid',
+      dataMapping: {
+        cols: [
+          { id: 'payouts.createdAt' },
+          sum('payouts.amount'),
+          { id: 'payouts.status' },
+          { id: 'payouts.paypalBatchId' },
+        ],
+      },
+      sort: [{ field: { id: 'payouts.createdAt' }, direction: 'desc' }],
+      format: title('PayPal payouts'),
+    },
+  },
+  widgetLayout: {
+    'kpi-receipts': at(0, 0, 8, 7),
+    'kpi-paid-out': at(8, 0, 8, 7),
+    'kpi-pending': at(16, 0, 8, 7),
+    receipt: at(0, 7, 9, 36),
+    'receipt-list': at(9, 7, 15, 18),
+    payouts: at(9, 25, 15, 18),
+  },
+};
+
+const catalogue: PageState = {
+  id: 'catalogue',
+  widgets: {
+    'kpi-listings': kpi('Listings', countd('products.id')),
+    'kpi-flagged': kpi('Flagged by screening', sum('products.flagged')),
+    'kpi-sellers': kpi('Sellers', countd('sellers.id')),
+    'price-to-market': {
+      type: 'bar-chart-grouped',
+      dataMapping: {
+        categoryKey: [{ id: 'products.title' }],
+        valueKey: [sum('products.price'), sum('products.marketMedian')],
+      },
+      format: { ...title('Price against the market median'), ...withLegend },
+    },
+    listings: {
+      type: 'grid',
+      dataMapping: {
+        cols: [
+          { id: 'sellers.name' },
+          { id: 'products.sku' },
+          { id: 'products.title' },
+          { id: 'products.category' },
+          sum('products.price'),
+          sum('products.marketMedian'),
+          avg('products.priceToMarket'),
+          sum('products.stock'),
+          { id: 'products.flags' },
+        ],
+      },
+      format: title('Listings'),
+    },
+  },
+  widgetLayout: {
+    'kpi-listings': at(0, 0, 8, 7),
+    'kpi-flagged': at(8, 0, 8, 7),
+    'kpi-sellers': at(16, 0, 8, 7),
+    'price-to-market': at(0, 7, 24, 18),
+    listings: at(0, 25, 24, 20),
+  },
+};
+
+const reconciliation: PageState = {
+  id: 'reconciliation',
+  widgets: {
+    'kpi-transactions': kpi('Transactions (31 days)', countd('transactions.id')),
+    'kpi-captures': kpi('Matched captures', sum('transactions.captures')),
+    'kpi-unmatched': kpi('Not matched', sum('transactions.unmatched')),
+    'kpi-fees': kpi('PayPal fees', sum('transactions.fee')),
+    'by-match': {
+      type: 'donut-chart',
+      dataMapping: { categoryKey: [{ id: 'transactions.match' }], valueKey: [countd('transactions.id')] },
+      format: {
+        ...title('Transactions by reconciliation'),
+        style: { custom: { pieDataLabel: { enabled: true }, totalLabel: { enabled: true } } },
+      },
+    },
+    'daily-flow': {
+      type: 'column-chart-stacked',
+      dataMapping: {
+        categoryKey: [{ id: 'calendar::day' }],
+        valueKey: [sum('transactions.amount')],
+        legendKey: [{ id: 'transactions.match' }],
+      },
+      format: { ...title('Money through the account by day'), ...withLegend },
     },
     ledger: {
       type: 'grid',
@@ -289,114 +417,59 @@ const cash: AgPageState = {
         cols: [
           { id: 'transactions.date' },
           { id: 'transactions.eventType' },
-          { id: 'transactions.status' },
-          { id: 'transactions.counterparty' },
-          { id: 'transactions.note' },
+          { id: 'transactions.match' },
+          { id: 'purchases.request' },
+          { id: 'purchases.verdict' },
           sum('transactions.amount'),
           sum('transactions.fee'),
           sum('transactions.net'),
+          { id: 'transactions.status' },
+          { id: 'transactions.counterparty' },
         ],
       },
       sort: [{ field: { id: 'transactions.date' }, direction: 'desc' }],
-      format: title('Ledger'),
+      format: title('PayPal transactions'),
     },
   },
   widgetLayout: {
-    'kpi-balance': at(0, 0, 6, 7),
-    'kpi-paid-out': at(6, 0, 6, 7),
-    'kpi-fees': at(12, 0, 6, 7),
-    'kpi-recipients': at(18, 0, 6, 7),
-    'payout-treemap': at(0, 7, 15, 18),
-    'campaign-donut': at(15, 7, 9, 18),
-    ledger: at(0, 25, 24, 30),
+    'kpi-transactions': at(0, 0, 6, 7),
+    'kpi-captures': at(6, 0, 6, 7),
+    'kpi-unmatched': at(12, 0, 6, 7),
+    'kpi-fees': at(18, 0, 6, 7),
+    'by-match': at(0, 7, 9, 18),
+    'daily-flow': at(9, 7, 15, 18),
+    ledger: at(0, 25, 24, 24),
   },
 };
 
-const catalogue: AgPageState = {
-  id: 'catalogue',
-  widgets: {
-    'kpi-products': kpi('Products', countd('products.id')),
-    'kpi-plans': kpi('Billing plans', countd('plans.id')),
-    'kpi-monthly': kpi('Avg monthly price', avg('plans.monthlyPrice')),
-    'kpi-trial': kpi('Avg trial days', avg('plans.trialDays')),
-    'catalogue-sunburst': {
-      type: 'sunburst-chart',
-      dataMapping: {
-        categoryKey: [
-          { id: 'products.type' },
-          { id: 'products.name' },
-          { id: 'plans.name' },
-        ],
-        valueKey: [sum('plans.monthlyPrice')],
-      },
-      format: title(
-        'Catalogue: type, product and plan (sized by monthly price)',
-      ),
-    },
-    'price-range': {
-      type: 'bar-chart-grouped',
-      dataMapping: {
-        categoryKey: [{ id: 'products.name' }],
-        valueKey: [
-          { id: 'plans.monthlyPrice', aggregation: 'min' },
-          avg('plans.monthlyPrice'),
-          { id: 'plans.monthlyPrice', aggregation: 'max' },
-        ],
-      },
-      format: {
-        ...title('Monthly-normalised price range by product'),
-        style: {
-          theme: { common: { legend: { enabled: true, position: 'right' } } },
-        },
-      },
-    },
-    'plan-intervals': {
-      type: 'donut-chart',
-      dataMapping: {
-        categoryKey: [{ id: 'plans.billingInterval' }],
-        valueKey: [countd('plans.id')],
-      },
-      format: {
-        ...title('Plans by billing interval'),
-        style: {
-          custom: {
-            pieDataLabel: { enabled: true },
-            totalLabel: { enabled: false },
-          },
-        },
-      },
-    },
-    plans: {
-      type: 'grid',
-      dataMapping: {
-        cols: [
-          { id: 'products.name' },
-          { id: 'plans.name' },
-          { id: 'plans.status' },
-          { id: 'plans.billingInterval' },
-          sum('plans.price'),
-          sum('plans.monthlyPrice'),
-          sum('plans.trialDays'),
-          sum('plans.setupFee'),
-        ],
-      },
-      sort: [{ field: sum('plans.monthlyPrice'), direction: 'desc' }],
-      format: title('Plan catalogue'),
-    },
-  },
-  widgetLayout: {
-    'kpi-products': at(0, 0, 6, 7),
-    'kpi-plans': at(6, 0, 6, 7),
-    'kpi-monthly': at(12, 0, 6, 7),
-    'kpi-trial': at(18, 0, 6, 7),
-    'plan-intervals': at(0, 7, 10, 20),
-    'price-range': at(10, 7, 14, 20),
-    plans: at(0, 27, 16, 24),
-    'catalogue-sunburst': at(16, 27, 8, 24),
-  },
-};
-// The report opens on its first page.
-export const dashboardReport: AgReportState = {
-  selectedPageId: revenue.id,
-  pages: [revenue, receivables, cash, catalogue],
+// --- Reports ----------------------------------------------------------------------
+
+export type BuiltInReport = { name: string; pageTitles: Record<string, string>; state: ReportState };
+
+const report = (name: string, pages: [PageState, string][]): BuiltInReport => ({
+  name,
+  pageTitles: Object.fromEntries(pages.map(([page, pageTitle]) => [page.id, pageTitle])),
+  // Each report opens on its first page.
+  state: { selectedPageId: pages[0][0].id, pages: pages.map(([page]) => page) },
+});
+
+export const BUILT_IN_REPORTS: Record<Persona, BuiltInReport> = {
+  buyer: report('My agent', [
+    [decisions, 'Decisions'],
+    [budget, 'Budget'],
+    [receipts, 'Receipts'],
+    [catalogue, 'Catalogue'],
+  ]),
+  seller: report('My shop', [
+    [sellerOrders, 'Agent orders'],
+    [sellerReceipts, 'Receipts and payouts'],
+    [catalogue, 'Catalogue'],
+  ]),
+  operator: report('Operations', [
+    [decisions, 'Decisions'],
+    [budget, 'Budgets'],
+    [receipts, 'Receipts and payouts'],
+    [catalogue, 'Catalogue'],
+    [reconciliation, 'Reconciliation'],
+  ]),
 };

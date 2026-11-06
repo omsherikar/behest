@@ -375,6 +375,19 @@ describe('searchMarket errors', () => {
     expect(sleeps).toEqual([0]);
   });
 
+  it('waits the default for a Retry-After that is neither seconds nor an HTTP date', async () => {
+    const waits = ['+5', '-1', '1.5.0'];
+    const fetch: typeof globalThis.fetch = async () => {
+      const retryAfter = waits.shift();
+      return retryAfter === undefined
+        ? Response.json({ products: [] })
+        : Response.json({ detail: 'Too Many Requests' }, { status: 429, headers: { 'retry-after': retryAfter } });
+    };
+
+    await expect(searchMarket('turmeric', { fetch })).rejects.toThrow();
+    expect(sleeps).toEqual([1000, 1000]);
+  });
+
   it.each([400, 401, 402, 422, 500, 503, 504])('fails a %i at once, carrying the status but not the key', async (status) => {
     const { fetch, calls } = fakeFetch([failing(status), found(searchTurmeric)]);
 

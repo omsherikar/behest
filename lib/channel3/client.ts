@@ -233,7 +233,9 @@ function median(values: number[]): number | null {
 function retryWait(retryAfter: string | null): number {
   const text = retryAfter?.trim() ?? '';
   if (/^\d+(\.\d+)?$/.test(text)) return Math.min(Number(text) * 1000, MAX_WAIT_MS);
-  const date = text === '' ? Number.NaN : Date.parse(text);
+  // An HTTP date always names its day and month; without letters, Date.parse would read "+5" or "-1"
+  // as a date long past and the retry would not wait at all.
+  const date = /[A-Za-z]/.test(text) ? Date.parse(text) : Number.NaN;
   if (Number.isNaN(date)) return DEFAULT_WAIT_MS;
   return Math.min(Math.max(date - Date.now(), 0), MAX_WAIT_MS);
 }

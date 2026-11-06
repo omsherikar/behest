@@ -52,3 +52,21 @@ export function sessionCookieOptions() {
     maxAge: SESSION_MAX_AGE_SECONDS,
   };
 }
+
+// The first path segment of each persona's pages. The starter's PayPal data pages show the whole
+// merchant account, so they belong to the operator.
+const SECTION_PERSONA = new Map<string, Persona>([
+  ['buyer', 'buyer'],
+  ['seller', 'seller'],
+  ['ops', 'operator'],
+  ['products', 'operator'],
+  ['plans', 'operator'],
+  ['invoices', 'operator'],
+  ['transactions', 'operator'],
+  ['balances', 'operator'],
+]);
+
+/** The persona a page path needs, or null when everyone may open it. Used by proxy.ts. */
+export function requiredPersona(pathname: string): Persona | null {
+  return SECTION_PERSONA.get(pathname.split('/')[1]) ?? null;
+}

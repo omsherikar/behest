@@ -1,6 +1,6 @@
 import { SignJWT } from 'jose';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getPersona, isPersona, PERSONAS, sessionCookie, sessionCookieOptions } from '@/lib/session';
+import { getPersona, isPersona, PERSONAS, requiredPersona, sessionCookie, sessionCookieOptions } from '@/lib/session';
 
 const SECRET = 'test-session-secret-at-least-32-characters';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -95,4 +95,32 @@ describe('isPersona', () => {
     for (const persona of PERSONAS) expect(isPersona(persona)).toBe(true);
     for (const other of ['admin', 'Buyer', '', null, undefined, 1, {}]) expect(isPersona(other)).toBe(false);
   });
+});
+
+describe('requiredPersona', () => {
+  it.each([
+    ['/buyer', 'buyer'],
+    ['/buyer/', 'buyer'],
+    ['/buyer/shop', 'buyer'],
+    ['/buyer/approvals/123', 'buyer'],
+    ['/seller', 'seller'],
+    ['/seller/orders', 'seller'],
+    ['/ops', 'operator'],
+    ['/ops/disputes', 'operator'],
+    ['/ops/disputes/PP-D-1', 'operator'],
+    ['/products', 'operator'],
+    ['/plans', 'operator'],
+    ['/invoices', 'operator'],
+    ['/transactions', 'operator'],
+    ['/balances', 'operator'],
+  ])('%s needs the %s persona', (pathname, persona) => {
+    expect(requiredPersona(pathname)).toBe(persona);
+  });
+
+  it.each(['/', '/dashboard', '/api/session', '/buyers', '/sellerx', '/operations', '/opsx/disputes', '/shop/buyer', '/constructor', '/__proto__'])(
+    '%s is open to everyone',
+    (pathname) => {
+      expect(requiredPersona(pathname)).toBeNull();
+    },
+  );
 });

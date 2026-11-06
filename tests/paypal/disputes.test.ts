@@ -181,7 +181,29 @@ describe('getDispute', () => {
     });
   });
 
-  it('takes the first message the buyer wrote as their notes', async () => {
+  it("takes the buyer's earliest message by time posted, whatever the order PayPal lists them in", async () => {
+    const messages = [
+      { posted_by: 'BUYER', time_posted: '2026-11-05T08:10:12.000Z', content: 'Still nothing at my door.' },
+      { posted_by: 'SELLER', time_posted: '2026-11-04T16:20:00.000Z', content: 'Your order shipped on November 3.' },
+      { posted_by: 'BUYER', time_posted: '2026-11-04T16:22:41Z', content: BUYER_NOTES },
+      { posted_by: 'BUYER', time_posted: '2026-11-04T18:02:55.000Z', content: 'Any update?' },
+    ];
+    stubFetch([{ method: 'GET', path: DISPUTE_PATH, body: disputeWith({ messages }) }]);
+
+    expect((await getDispute(DISPUTE_ID)).buyerNotes).toBe(BUYER_NOTES);
+  });
+
+  it('counts a buyer message with no time posted as the latest', async () => {
+    const messages = [
+      { posted_by: 'BUYER', content: 'A message PayPal sent with no time.' },
+      { posted_by: 'BUYER', time_posted: '2026-11-05T08:10:12.000Z', content: BUYER_NOTES },
+    ];
+    stubFetch([{ method: 'GET', path: DISPUTE_PATH, body: disputeWith({ messages }) }]);
+
+    expect((await getDispute(DISPUTE_ID)).buyerNotes).toBe(BUYER_NOTES);
+  });
+
+  it('skips buyer messages with no text', async () => {
     const messages = [
       { posted_by: 'SELLER', time_posted: '2026-11-04T16:20:00.000Z', content: 'Your order shipped on November 3.' },
       { posted_by: 'BUYER', time_posted: '2026-11-04T16:21:30.000Z', content: '' },

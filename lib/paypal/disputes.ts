@@ -13,6 +13,7 @@ const PAGE_SIZE = 50;
 const MAX_PAGES = 100;
 
 type Link = { href?: string; rel?: string };
+type Message = { posted_by?: string; time_posted?: string; content?: string };
 type Dispute = {
   dispute_id?: string;
   status?: string;
@@ -21,7 +22,7 @@ type Dispute = {
   dispute_amount?: { currency_code?: string; value?: string };
   /** Present on a dispute read by id. List items usually leave it out. */
   disputed_transactions?: { seller_transaction_id?: string }[];
-  messages?: { posted_by?: string; content?: string }[];
+  messages?: Message[];
 };
 type DisputePage = { items?: Dispute[]; links?: Link[] };
 
@@ -75,12 +76,23 @@ export const listDisputes: PaypalPort['listDisputes'] = async () => {
   return disputes;
 };
 
+/** When a message was posted, in milliseconds. A message with no readable time counts as the latest. */
+function postedAt(message: Message): number {
+  const time = Date.parse(message.time_posted ?? '');
+  return Number.isNaN(time) ? Number.POSITIVE_INFINITY : time;
+}
+
+/** The buyer's earliest message with any text, by time posted, whatever order PayPal lists them in. */
+function firstBuyerMessage(messages: Message[] | undefined): Message | undefined {
+  const written = (messages ?? []).filter((message) => message.posted_by === 'BUYER' && message.content);
+  return written.reduce<Message | undefined>((first, message) => (first && postedAt(first) <= postedAt(message) ? first : message), undefined);
+}
+
 export const getDispute: PaypalPort['getDispute'] = async (id) => {
   const dispute = await paypalRequest<Dispute | undefined>('GET', `${DISPUTES}/${encodeURIComponent(id)}`);
-  // PayPal keeps what each side wrote in `messages`, in the order posted. The first one the buyer
-  // posted with any text is taken as their account of the dispute.
-  const buyerMessage = dispute?.messages?.find((message) => message.posted_by === 'BUYER' && message.content);
-  return { ...toSummary(dispute ?? {}), buyerNotes: buyerMessage?.content ?? null };
+  // PayPal keeps what each side wrote in `messages`. The buyer's earliest written message is taken
+  // as their account of the dispute.
+  return { ...toSummary(dispute ?? {}), buyerNotes: firstBuyerMessage(dispute?.messages)?.content ?? null };
 };
 
 export const provideEvidence: PaypalPort['provideEvidence'] = async (id, { notes }) => {

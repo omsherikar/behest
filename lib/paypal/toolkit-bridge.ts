@@ -49,6 +49,9 @@ export function paypalAgentToolkit(): PayPalAgentToolkit {
  * The read-only PayPal tools as Claude tools for the tool runner. Uses the toolkit passed in, or builds the
  * official one from the PayPal credentials, so importing this module needs no credentials. A read-only
  * tool the toolkit does not offer is left out with a warning rather than an error.
+ *
+ * Build the tools once per agent run and let them go with it: the official toolkit fetches one OAuth token
+ * on first use and keeps it without ever refreshing, so tools kept longer than the token lives would fail.
  */
 export function paypalReadOnlyTools(opts: { toolkit?: ToolkitLike } = {}): BetaRunnableTool[] {
   const toolkit = opts.toolkit ?? paypalAgentToolkit();
@@ -100,8 +103,10 @@ function claudeTool(toolkit: ToolkitLike, name: string, definition: ToolkitFunct
 
 /**
  * The first argument that breaks the toolkit's own schema by not being a string where the schema asks for
- * one, or by missing the schema's pattern. The toolkit does not check arguments and puts ids straight into
- * request URLs, so a value such as `../../v1/reporting/transactions` would reach other PayPal endpoints.
+ * one, or by missing the schema's pattern. The toolkit checks no arguments. It puts dispute_id, id and
+ * order_id into request paths, where `..` segments are resolved, so `../../v1/reporting/transactions` would
+ * send an authenticated GET to another PayPal endpoint, and it puts transaction_id into a query string
+ * unescaped. A value that is not a string is refused too, because an array would be joined into the path.
  */
 function invalidArgument(schema: Record<string, unknown> | undefined, input: Record<string, unknown>): string | undefined {
   const properties = (schema?.properties ?? {}) as Record<string, { type?: unknown; pattern?: unknown }>;

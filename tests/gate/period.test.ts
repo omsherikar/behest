@@ -1,4 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
+import type { BudgetPeriod } from '@/lib/domain/policy';
 import { periodStart } from '@/lib/gate/period';
 
 const at = (iso: string) => new Date(iso);
@@ -44,6 +45,12 @@ it('keeps month starts in the right year across the year boundary', () => {
 
 it('starts a one-off budget when the mandate was confirmed', () => {
   expect(periodStart('once', at('2026-11-06T15:42:10Z'), confirmedAt)).toEqual(confirmedAt);
+});
+
+it('throws on a period it does not know instead of returning no start', () => {
+  expect(() => periodStart('fortnight' as BudgetPeriod, at('2026-11-06T15:42:10Z'), confirmedAt)).toThrow(
+    'unknown budget period',
+  );
 });
 
 it('returns a new date and leaves its inputs untouched', () => {

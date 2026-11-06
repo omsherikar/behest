@@ -23,5 +23,11 @@ export function periodStart(period: BudgetPeriod, now: Date, confirmedAt: Date):
     case 'month':
       start.setUTCDate(1);
       return start;
+    default: {
+      // Unreachable for a valid policy. The assignment fails to compile if a period is added
+      // without a case, and the throw stops a bad value from reaching the gate as no start.
+      const unknown: never = period;
+      throw new Error(`unknown budget period: ${String(unknown)}`);
+    }
   }
 }

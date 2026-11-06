@@ -196,3 +196,45 @@ export const purchaseEvents = pgTable('purchase_events', {
   data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: createdAt(),
 });
+
+// Receipts and seller orders
+
+/** A signed receipt. Its id is the receipt id inside the signed payload. */
+export const receipts = pgTable('receipts', {
+  id: id(),
+  purchaseId: uuid('purchase_id')
+    .notNull()
+    .unique()
+    .references(() => purchases.id),
+  /** The signed receipt, a compact JWS. */
+  jws: text('jws').notNull(),
+  payloadHash: text('payload_hash').notNull(),
+  keyId: text('key_id').notNull(),
+  createdAt: createdAt(),
+});
+
+/**
+ * The seller side's record of an agent order and the receipt presented with it. Seller intake works
+ * as an outside seller would, from the receipt alone, so `receipt_id` is the id read from the
+ * presented receipt and deliberately has no reference to the receipts table.
+ */
+export const sellerOrders = pgTable(
+  'seller_orders',
+  {
+    id: id(),
+    sellerId: uuid('seller_id')
+      .notNull()
+      .references(() => sellers.id),
+    /** Null when the presented receipt was too malformed to read an id from. */
+    receiptId: text('receipt_id'),
+    status: text('status').$type<'accepted' | 'rejected'>().notNull(),
+    /** Why the receipt was rejected. Null when accepted. */
+    reason: text('reason'),
+    /** The cart the seller received with the order. */
+    cart: jsonb('cart').$type<Cart>().notNull(),
+    /** The receipt exactly as presented. */
+    receiptJws: text('receipt_jws').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [unique('seller_orders_receipt_seller_unique').on(t.receiptId, t.sellerId)],
+);

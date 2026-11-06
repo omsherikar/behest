@@ -1,11 +1,11 @@
-import { asc, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Db } from '@/lib/db/client';
-import { jobs, payouts, purchaseEvents, purchases, type PurchaseStatus } from '@/lib/db/schema';
+import { jobs, payouts, purchases, type PurchaseStatus } from '@/lib/db/schema';
 import { PayoutAlreadyExists } from '@/lib/paypal/payouts';
 import { payoutSeller, pollPayout } from '@/lib/purchases/settle';
 import { FakePaypal } from '@/tests/helpers/fake-paypal';
-import { SEEDED_SELLER, seedPurchase, seededCart } from '@/tests/helpers/seed-purchase';
+import { eventsOf, SEEDED_SELLER, seedPurchase, seededCart, statusOf } from '@/tests/helpers/seed-purchase';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 // The first createTestDb() call in a file migrates a template database, which can take several
@@ -24,21 +24,8 @@ async function setUp(status: PurchaseStatus = 'accepted') {
   return { db, paypal, purchaseId, sellerId, deps: { db, paypal, now: () => NOW } };
 }
 
-async function statusOf(db: Db, purchaseId: string) {
-  const [row] = await db.select({ status: purchases.status }).from(purchases).where(eq(purchases.id, purchaseId));
-  return row.status;
-}
-
 async function payoutRows(db: Db) {
   return db.select().from(payouts);
-}
-
-async function eventsOf(db: Db, purchaseId: string) {
-  return db
-    .select({ kind: purchaseEvents.kind, data: purchaseEvents.data })
-    .from(purchaseEvents)
-    .where(eq(purchaseEvents.purchaseId, purchaseId))
-    .orderBy(asc(purchaseEvents.seq));
 }
 
 describe('payoutSeller', () => {

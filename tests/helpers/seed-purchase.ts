@@ -1,10 +1,11 @@
+import { asc, eq } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
-import { buyers, mandates, purchases, sellers, type PurchaseStatus } from '@/lib/db/schema';
+import { buyers, mandates, purchaseEvents, purchases, sellers, type PurchaseStatus } from '@/lib/db/schema';
 import type { Cart } from '@/lib/domain/cart';
 import { demoPolicy } from '@/tests/helpers/fixtures';
 
 // One purchase and the rows it hangs off, inserted directly so that a test can start the purchase
-// at any point of its lifecycle.
+// at any point of its lifecycle, and readers for what the purchase flow then wrote.
 
 const HASH = 'a'.repeat(64);
 
@@ -63,4 +64,24 @@ export async function seedPurchase(db: Db, status: PurchaseStatus): Promise<Seed
     })
     .returning();
   return { purchaseId: purchase.id, buyerId: buyer.id, mandateId: mandate.id, sellerId: seller.id };
+}
+
+/** The purchase's row as stored. */
+export async function purchaseRow(db: Db, purchaseId: string) {
+  const [row] = await db.select().from(purchases).where(eq(purchases.id, purchaseId));
+  return row;
+}
+
+/** The purchase's current status. */
+export async function statusOf(db: Db, purchaseId: string): Promise<PurchaseStatus> {
+  return (await purchaseRow(db, purchaseId)).status;
+}
+
+/** The purchase's event log in the order it was written, as kind and data. */
+export async function eventsOf(db: Db, purchaseId: string) {
+  return db
+    .select({ kind: purchaseEvents.kind, data: purchaseEvents.data })
+    .from(purchaseEvents)
+    .where(eq(purchaseEvents.purchaseId, purchaseId))
+    .orderBy(asc(purchaseEvents.seq));
 }

@@ -1,10 +1,7 @@
-import { asc, eq } from 'drizzle-orm';
 import { beforeAll, expect, it } from 'vitest';
-import type { Db } from '@/lib/db/client';
-import { purchaseEvents, purchases } from '@/lib/db/schema';
 import { appendEvent, StaleTransition, transition } from '@/lib/purchases/events';
 import { IllegalTransition } from '@/lib/purchases/transitions';
-import { seedPurchase } from '@/tests/helpers/seed-purchase';
+import { eventsOf, purchaseRow, seedPurchase } from '@/tests/helpers/seed-purchase';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 // The first createTestDb() call in a file migrates a template database, which can take several
@@ -12,20 +9,6 @@ import { createTestDb } from '@/tests/helpers/test-db';
 beforeAll(async () => {
   await createTestDb();
 }, 30_000);
-
-async function eventsOf(db: Db, purchaseId: string) {
-  const rows = await db
-    .select({ kind: purchaseEvents.kind, data: purchaseEvents.data })
-    .from(purchaseEvents)
-    .where(eq(purchaseEvents.purchaseId, purchaseId))
-    .orderBy(asc(purchaseEvents.seq));
-  return rows;
-}
-
-async function purchaseRow(db: Db, purchaseId: string) {
-  const [row] = await db.select().from(purchases).where(eq(purchases.id, purchaseId));
-  return row;
-}
 
 it('appends events in the order they are recorded', async () => {
   const db = await createTestDb();

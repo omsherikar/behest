@@ -55,6 +55,13 @@ function fakeToolkit(names: readonly string[], reply: (call: ToolCall) => Reply 
   return { toolkit, calls };
 }
 
+/** The official toolkit as the bridge builds it, with stand-in credentials. Building it calls nothing. */
+function officialToolkit() {
+  vi.stubEnv('PAYPAL_CLIENT_ID', 'client-id');
+  vi.stubEnv('PAYPAL_CLIENT_SECRET', 'client-secret');
+  return paypalAgentToolkit();
+}
+
 /** The tool named `name`, which the test expects to be there. */
 function toolNamed(toolkit: ToolkitLike, name: string) {
   const tool = paypalReadOnlyTools({ toolkit }).find((candidate) => candidate.name === name);
@@ -268,9 +275,7 @@ describe('a read-only tool when PayPal fails', () => {
   );
 
   it('fails safely when the official toolkit cannot get a PayPal token', async () => {
-    vi.stubEnv('PAYPAL_CLIENT_ID', 'client-id');
-    vi.stubEnv('PAYPAL_CLIENT_SECRET', 'client-secret');
-    const toolkit = paypalAgentToolkit();
+    const toolkit = officialToolkit();
     vi.spyOn(toolkit.client, 'getAccessToken').mockRejectedValue(
       new Error('Failed to fetch access token: Client Authentication failed'),
     );
@@ -280,5 +285,27 @@ describe('a read-only tool when PayPal fails', () => {
     );
     expect(console.error).toHaveBeenCalledOnce();
     expect(String(vi.mocked(console.error).mock.calls[0][0])).toContain('Client Authentication failed');
+  });
+});
+
+describe('a read-only tool from the official toolkit', () => {
+  it.each([
+    ['get_dispute', 'dispute_id'],
+    ['get_order', 'id'],
+    ['get_shipment_tracking', 'order_id'],
+    ['get_shipment_tracking', 'transaction_id'],
+  ])('%s refuses ../.. as %s without calling the toolkit, and logs the refusal', async (name, argument) => {
+    const toolkit = officialToolkit();
+    const handleToolCall = vi.spyOn(toolkit, 'handleToolCall');
+
+    await expect(toolNamed(toolkit, name).run({ [argument]: '../../v1/reporting/transactions' })).rejects.toThrow(
+      new Error(`${name} was given an invalid ${argument}`),
+    );
+    expect(handleToolCall).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledOnce();
+    const warning = String(vi.mocked(console.warn).mock.calls[0][0]);
+    expect(warning).toContain(name);
+    expect(warning).toContain(argument);
+    expect(warning).not.toContain('../');
   });
 });

@@ -75,7 +75,10 @@ function claudeTool(toolkit: ToolkitLike, name: string, definition: ToolkitFunct
     inputSchema: (definition.parameters ?? { type: 'object' }) as { type: 'object' },
     run: async (input) => {
       const invalid = invalidArgument(definition.parameters, input);
-      if (invalid) throw new Error(`${name} was given an invalid ${invalid}`);
+      if (invalid) {
+        console.warn(`Refused a ${name} call whose ${invalid} does not match the PayPal Agent Toolkit schema`);
+        throw new Error(`${name} was given an invalid ${invalid}`);
+      }
 
       let content: string;
       try {

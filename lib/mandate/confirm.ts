@@ -44,9 +44,15 @@ export async function confirmMandate(
   const jws = await deps.signer.sign(payload, 'behest-mandate+jws');
 
   await deps.db.transaction(async (tx) => {
-    // Two confirms for one buyer queue on this lock. Without it the second could miss the first's
-    // new mandate when revoking and then break the one-active-mandate index on insert.
-    const [buyer] = await tx.select({ id: buyers.id }).from(buyers).where(eq(buyers.id, i.buyerId)).for('update');
+    // Two confirms for one buyer queue on this lock, so the second revokes the first's new mandate
+    // rather than breaking the one-active-mandate index on insert. It is NO KEY UPDATE, not UPDATE:
+    // inserting a purchase takes KEY SHARE on its buyer through the foreign key, which only UPDATE
+    // blocks, so a confirm cannot deadlock with the gate holding that buyer's mandate row.
+    const [buyer] = await tx
+      .select({ id: buyers.id })
+      .from(buyers)
+      .where(eq(buyers.id, i.buyerId))
+      .for('no key update');
     if (!buyer) throw new Error(`no buyer has the id ${i.buyerId}`);
 
     // The database allows one active mandate per buyer, so the old one is revoked first.

@@ -1,11 +1,8 @@
-import type { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
-import { drizzle } from 'drizzle-orm/pglite';
 import { decodeProtectedHeader } from 'jose';
 import { expect, it } from 'vitest';
 import { z } from 'zod';
 import type { Db } from '@/lib/db/client';
-import * as schema from '@/lib/db/schema';
 import { buyers, mandates } from '@/lib/db/schema';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { MandatePayload } from '@/lib/domain/receipt';
@@ -182,21 +179,16 @@ it('throws for a buyer that does not exist and stores nothing', async () => {
 
 it('locks the buyer row before it revokes the old mandate and inserts the new one', async () => {
   // PGlite runs one transaction at a time, so two racing confirms cannot show the lock at work.
-  // Instead a second Drizzle instance over the test database's PGlite client logs each statement,
-  // and their order shows the lock is taken before anything is written.
-  const base = await createTestDb();
+  // The statements the transaction sends, in order, show it is taken before anything is written.
+  // The lock is NO KEY UPDATE, which leaves the KEY SHARE lock a purchase's foreign key takes free.
   const statements: string[] = [];
-  const db: Db = drizzle({
-    client: (base as unknown as { $client: PGlite }).$client,
-    schema,
-    logger: { logQuery: (query) => statements.push(query) },
-  });
+  const db = await createTestDb({ logger: { logQuery: (query) => statements.push(query) } });
   const buyerId = await addBuyer(db);
   statements.length = 0;
 
   await confirmMandate({ db, signer, now: () => NOW }, { buyerId, text: TEXT, policy: demoPolicy });
 
-  const lock = /^select .* from "buyers" where "buyers"\."id" = \$1 for update$/;
+  const lock = /^select .* from "buyers" where "buyers"\."id" = \$1 for no key update$/;
   const revoke = /^update "mandates" set "status" = \$1, .* where \("mandates"\."buyer_id" = \$\d+ and "mandates"\."status" = \$\d+\)$/;
   expect(statements).toEqual([
     expect.stringMatching(lock),

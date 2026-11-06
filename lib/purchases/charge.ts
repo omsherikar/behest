@@ -1,4 +1,5 @@
 import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { z } from 'zod';
 import type { Db } from '@/lib/db/client';
 import { purchaseEvents, purchases, receipts, wallets } from '@/lib/db/schema';
 import { enqueue, type JobOutcome } from '@/lib/jobs/queue';
@@ -27,6 +28,20 @@ type ChargeAnswer = Awaited<ReturnType<PaypalPort['chargeSavedWallet']>>;
 type Capture = { orderId: string; captureId: string };
 
 const NO_WALLET = 'The buyer has no linked PayPal wallet.';
+
+/**
+ * A `charge` event's data: the request exactly as sent to PayPal, so a replay can send the same
+ * bytes, and when it was first sent, on the app's clock, the one the replay window is measured on.
+ */
+const SentCharge = z.object({
+  paymentTokenId: z.string().min(1),
+  amountCents: z.number().int().positive(),
+  description: z.string().min(1),
+  invoiceId: z.string().min(1),
+  requestId: z.string().min(1),
+  startedAt: z.iso.datetime(),
+});
+type SentCharge = z.infer<typeof SentCharge>;
 
 /**
  * How long after a charge starts its `charge_retry` job first runs. By then a charge that went
@@ -86,8 +101,9 @@ export async function chargeAllowed(deps: ChargeDeps, purchaseId: string): Promi
 
 /**
  * Replays the charge of a purchase whose charge was never recorded: the handler of the
- * `charge_retry` job queued with every charge. It sends the same request id, so PayPal either
- * reports the charge it already made or makes it now, and goes on as chargeAllowed does with the
+ * `charge_retry` job queued with every charge. It sends exactly the request its `charge` event
+ * recorded, payment token and request id included, so PayPal either reports the charge it already
+ * made or makes it now, and goes on as chargeAllowed does with the
  * answer; that is safe even while another call acts on the same answer. `done` once PayPal has
  * answered, and also, without asking PayPal, for a purchase no longer `charging` or one whose
  * capture is pending, which only PayPal's webhook can move on. Throws, so the job is retried with
@@ -101,7 +117,6 @@ export async function retryCharge(deps: ChargeDeps, purchaseId: string): Promise
     .select({
       status: purchases.status,
       buyerId: purchases.buyerId,
-      totalCents: purchases.totalCents,
       captureId: purchases.paypalCaptureId,
     })
     .from(purchases)
@@ -109,18 +124,20 @@ export async function retryCharge(deps: ChargeDeps, purchaseId: string): Promise
   if (!purchase) throw new Error(`there is no purchase ${purchaseId}`);
   if (purchase.status !== 'charging' || purchase.captureId !== null) return 'done';
 
-  const startedAt = await chargeStartedAt(db, purchaseId);
-  if (!startedAt) throw new Error(`purchase ${purchaseId} has no saved-wallet charge to replay`);
-  if (deps.now().getTime() - startedAt.getTime() > REPLAY_WINDOW_MS) {
+  const sent = await sentCharge(db, purchaseId);
+  if (!sent) throw new Error(`purchase ${purchaseId} has no saved-wallet charge to replay`);
+  const { startedAt, ...request } = sent;
+  if (deps.now().getTime() - Date.parse(startedAt) > REPLAY_WINDOW_MS) {
     throw new Error(`the charge of purchase ${purchaseId} is too old to replay safely; check PayPal before charging again`);
   }
-  const paymentTokenId = await linkedPaymentToken(db, purchase.buyerId);
-  if (!paymentTokenId) {
-    throw new Error(`the buyer of purchase ${purchaseId} has no linked wallet to replay its charge with; check PayPal`);
+  // The replay sends the token the charge was sent with, but only while the buyer still has a
+  // linked wallet: one who has unlinked it since must not be charged by a request PayPal never got.
+  if (!(await linkedPaymentToken(db, purchase.buyerId))) {
+    throw new Error(
+      `the buyer of purchase ${purchaseId} has no linked wallet any more, so its charge is not replayed; check PayPal`,
+    );
   }
-  if (purchase.totalCents === null) throw new Error(`charging purchase ${purchaseId} has no total`);
 
-  const request = chargeRequest(purchaseId, paymentTokenId, purchase.totalCents);
   await applyAnswer(deps, purchaseId, request.requestId, await sendCharge(deps.paypal, request));
   return 'done';
 }
@@ -215,12 +232,7 @@ async function startCharge(
         return null;
       }
       const request = chargeRequest(purchaseId, paymentTokenId, totalCents);
-      // The time of the first attempt is kept on the app's clock, the one the replay window is measured on.
-      await appendEvent(tx, purchaseId, 'charge', {
-        requestId: request.requestId,
-        amountCents: totalCents,
-        startedAt: now().toISOString(),
-      });
+      await appendEvent(tx, purchaseId, 'charge', { ...request, startedAt: now().toISOString() } satisfies SentCharge);
       await enqueue(tx, 'charge_retry', { purchaseId }, new Date(now().getTime() + CHARGE_RETRY_DELAY_MS));
       return request;
     });
@@ -301,14 +313,14 @@ async function linkedPaymentToken(db: Db, buyerId: string): Promise<string | nul
   return wallet?.paymentTokenId ?? null;
 }
 
-/** When the purchase's saved-wallet charge was first sent, from its `charge` event, or null if it has none. */
-async function chargeStartedAt(db: Db, purchaseId: string): Promise<Date | null> {
+/** The purchase's saved-wallet charge as its `charge` event recorded it, or null if it has none. */
+async function sentCharge(db: Db, purchaseId: string): Promise<SentCharge | null> {
   const [charge] = await db
     .select({ data: purchaseEvents.data })
     .from(purchaseEvents)
     .where(and(eq(purchaseEvents.purchaseId, purchaseId), eq(purchaseEvents.kind, 'charge')))
     .orderBy(asc(purchaseEvents.seq))
     .limit(1);
-  const startedAt = charge?.data.startedAt;
-  return typeof startedAt === 'string' ? new Date(startedAt) : null;
+  const parsed = SentCharge.safeParse(charge?.data);
+  return parsed.success ? parsed.data : null;
 }

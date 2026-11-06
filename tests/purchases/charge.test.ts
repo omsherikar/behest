@@ -116,7 +116,14 @@ describe('chargeAllowed', () => {
       { kind: 'status', data: { from: 'proposed', to: 'charging' } },
       {
         kind: 'charge',
-        data: { requestId: chargeRequestId(purchaseId), amountCents: seededCart.totalCents, startedAt: NOW.toISOString() },
+        data: {
+          paymentTokenId: 'TOKEN-1',
+          amountCents: seededCart.totalCents,
+          description: `Behest order ${purchaseId}`,
+          invoiceId: purchaseId,
+          requestId: chargeRequestId(purchaseId),
+          startedAt: NOW.toISOString(),
+        },
       },
       { kind: 'capture', data: { orderId, captureId } },
       { kind: 'status', data: { from: 'charging', to: 'captured' } },
@@ -293,6 +300,18 @@ describe('retryCharge', () => {
 
     expect(paypal.captures).toHaveLength(1);
     expect(await statusOf(db, purchaseId)).toBe('accepted');
+  });
+
+  it('replays the request exactly as first sent, even after the buyer links a new wallet', async () => {
+    const { db, deps, paypal, buyerId, purchaseId } = await setUpUnknownCharge({ lost: false });
+    await db.update(wallets).set({ paymentTokenId: 'TOKEN-2' }).where(eq(wallets.buyerId, buyerId));
+
+    expect(await retryCharge(deps, purchaseId)).toBe('done');
+
+    const [first, ...replays] = paypal.callsTo('chargeSavedWallet');
+    expect(first[0].paymentTokenId).toBe('TOKEN-1');
+    expect(replays).toEqual([first, first]);
+    expect(paypal.captures).toHaveLength(1);
   });
 
   it('ends failed when the replay is declined', async () => {

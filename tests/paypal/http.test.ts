@@ -207,7 +207,7 @@ describe('retries', () => {
     };
     stubFetch([token('T1'), { method: 'POST', path: '/v2/checkout/orders', status: 422, body }]);
 
-    const error = await paypalRequest('POST', '/v2/checkout/orders', { body: {} }).catch((e) => e);
+    const error = await paypalRequest<never>('POST', '/v2/checkout/orders', { body: {} }).catch((e: PayPalApiError) => e);
 
     expect(error.body).toBe(JSON.stringify(body));
     expect(error.message.length).toBeLessThan(error.body.length);

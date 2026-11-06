@@ -62,8 +62,9 @@ export async function enqueue(db: Db, kind: JobKind, payload: JobPayload, runAt?
 /**
  * Claims up to CLAIM_LIMIT due jobs, longest overdue first, runs each in turn with its kind's
  * handler and records the outcome. A kind missing from `handlers` marks its jobs dead. The clock
- * is read once for the claim and again as each job starts. Returns the number of jobs this call
- * processed: those it claimed and still held when their turn came.
+ * is read once for the claim, again as each job starts, and again when a retry is recorded.
+ * Returns the number of jobs this call processed: those it claimed and still held when their turn
+ * came.
  */
 export async function runDueJobs<D>(
   db: Db,
@@ -156,6 +157,8 @@ async function runJob<D>(
     return true;
   }
 
+  // Back off from now, when the outcome is recorded, not from the start: a handler that ran out its
+  // deadline or failed slowly must still wait out the full backoff before its next run.
   const attempts = job.attempts + 1;
   const dead = attempts >= MAX_ATTEMPTS;
   await db
@@ -163,7 +166,7 @@ async function runJob<D>(
     .set({
       attempts,
       status: dead ? 'dead' : 'queued',
-      ...(dead ? {} : { runAt: new Date(startedAt.getTime() + backoffMs(job.attempts)) }),
+      ...(dead ? {} : { runAt: new Date(clock().getTime() + backoffMs(job.attempts)) }),
       ...(error === undefined ? {} : { lastError: error }),
     })
     .where(stillClaimed);

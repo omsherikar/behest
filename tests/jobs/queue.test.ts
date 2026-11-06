@@ -357,22 +357,26 @@ it('skips a job whose claim another run took over while it waited for its turn',
   expect(rows).toEqual([{ status: 'done' }, { status: 'done' }]);
 });
 
-it('measures the backoff from when the job started, not from when its batch was claimed', async () => {
+it('measures the backoff from when the failure is recorded, not from when the job started or was claimed', async () => {
   const db = await createTestDb();
   const id = await enqueue(db, 'payout_poll', { purchaseId: 'pur-1' }, T);
+  // Claimed at T, started 40 seconds later, and failed after running for 2 minutes.
   const startedAt = after(40 * SECOND);
+  const failedAt = after(2 * MINUTE, startedAt);
   let runAtWhileRunning: Date | undefined;
   const payoutPoll: JobHandler<Deps> = async () => {
     runAtWhileRunning = (await jobRow(db, id)).runAt;
-    return 'retry';
+    throw new Error('PayPal returned 503 Service Unavailable');
   };
 
-  expect(await runDueJobs(db, handlersWith({ payout_poll: payoutPoll }), deps, clockReading(T, startedAt))).toBe(1);
+  const clock = clockReading(T, startedAt, failedAt);
+  expect(await runDueJobs(db, handlersWith({ payout_poll: payoutPoll }), deps, clock)).toBe(1);
   expect(runAtWhileRunning).toEqual(startedAt);
   expect(await jobRow(db, id)).toMatchObject({
     status: 'queued',
     attempts: 1,
-    runAt: after(15 * SECOND, startedAt),
+    runAt: after(15 * SECOND, failedAt),
+    lastError: 'PayPal returned 503 Service Unavailable',
   });
 });
 
@@ -380,11 +384,14 @@ it('gives up on a handler after 5 minutes, reschedules its job and moves on to t
   const db = await createTestDb();
   const stuckId = await enqueue(db, 'charge_retry', { purchaseId: 'pur-1' }, T);
   const nextId = await enqueue(db, 'webhook', { eventId: 'WH-1' }, T);
-  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  // The clock is the faked Date, so the deadline and the time the retry is recorded move together.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  vi.setSystemTime(T);
   const stuck = heldHandler();
   const webhook = vi.fn<JobHandler<Deps>>(async () => 'done');
   let finished = false;
-  const run = runDueJobs(db, handlersWith({ charge_retry: stuck.handler, webhook }), deps, at(T)).then((count) => {
+  const handlers = handlersWith({ charge_retry: stuck.handler, webhook });
+  const run = runDueJobs(db, handlers, deps, () => new Date()).then((count) => {
     finished = true;
     return count;
   });
@@ -399,7 +406,7 @@ it('gives up on a handler after 5 minutes, reschedules its job and moves on to t
   expect(await jobRow(db, stuckId)).toMatchObject({
     status: 'queued',
     attempts: 1,
-    runAt: after(15 * SECOND),
+    runAt: after(5 * MINUTE + 15 * SECOND),
     lastError: 'timed out after 5 minutes',
   });
   expect(await jobRow(db, nextId)).toMatchObject({ status: 'done' });

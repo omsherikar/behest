@@ -4,9 +4,11 @@ import { formatUsd } from '@/lib/domain/money';
 import { ReceiptPayload } from '@/lib/domain/receipt';
 
 // The dashboard's receipt card: what a receipt claims, and whether Behest's verifier
-// (POST /api/receipts/verify) accepts it against the purchase's cart. The card reads the claims
-// straight from the JWS so it can show them even when the verifier cannot be asked; only the
-// verifier's answer marks them as verified.
+// (POST /api/receipts/verify) accepts it against the purchase's cart. The card asks in audit mode,
+// which checks the signature, seller, cart and amount but not freshness or replay, since the
+// receipts it shows were issued long ago and already presented. It reads the claims straight from
+// the JWS so it can show them even when the verifier cannot be asked; only the verifier's answer
+// marks them as verified.
 
 export type DecodedReceipt = { keyId: string | null; algorithm: string | null; payload: ReceiptPayload };
 
@@ -38,7 +40,8 @@ const dateTime = new Intl.DateTimeFormat('en-GB', {
   hourCycle: 'h23',
   timeZone: 'UTC',
 });
-const utcTime = (date: Date) => `${dateTime.format(date)} UTC`;
+/** 6 Nov 2026, 11:20 UTC */
+export const formatUtc = (date: Date) => `${dateTime.format(date)} UTC`;
 
 /** A long hash or id cut to its ends, enough to compare by eye. */
 const short = (value: string) => (value.length > 18 ? `${value.slice(0, 8)}...${value.slice(-7)}` : value);
@@ -79,9 +82,9 @@ export function receiptClaims({ keyId, algorithm, payload: p }: DecodedReceipt):
     {
       kind: 'signed',
       label: 'Payment',
-      value: `PayPal capture ${p.payment.captureId} on ${utcTime(new Date(p.payment.capturedAt))}`,
+      value: `PayPal capture ${p.payment.captureId} on ${formatUtc(new Date(p.payment.capturedAt))}`,
     },
-    { kind: 'signed', label: 'Issued', value: `by ${p.iss} on ${utcTime(new Date(p.iat * 1000))}` },
+    { kind: 'signed', label: 'Issued', value: `by ${p.iss} on ${formatUtc(new Date(p.iat * 1000))}` },
   ];
 }
 
@@ -97,7 +100,7 @@ export const VERIFY_ENDPOINT = '/api/receipts/verify';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
-/** Asks the verifier route about a receipt. Never throws: every failure is an `unavailable` answer. */
+/** Asks the verifier route about a receipt, in audit mode. Never throws: every failure is an `unavailable` answer. */
 export async function verifyReceipt(
   request: VerifyRequest,
   { fetch: fetchFn = fetch, endpoint = VERIFY_ENDPOINT, signal }: { fetch?: typeof fetch; endpoint?: string; signal?: AbortSignal } = {},
@@ -107,7 +110,7 @@ export async function verifyReceipt(
     response = await fetchFn(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
+      body: JSON.stringify({ ...request, mode: 'audit' }),
       signal,
     });
   } catch {

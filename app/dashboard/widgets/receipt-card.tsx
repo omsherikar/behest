@@ -1,14 +1,23 @@
 'use client';
 
 // The receipt card: a signed receipt's claims, checked live. For the receipt in view it asks
-// Behest's verifier (POST /api/receipts/verify) with the receipt and the cart it was issued for,
-// exactly what a seller holds, and marks each claim once the verifier accepts the receipt. It
+// Behest's verifier (POST /api/receipts/verify), in audit mode, with the receipt and the cart it
+// was issued for, and marks each claim once the verifier accepts the receipt. Audit mode checks
+// the signature, seller, cart and amount; it skips freshness and replay, which only matter when a
+// seller first takes the order. It
 // follows the page's filters, so selecting a purchase in a decision ledger on the same page shows
 // that purchase's receipt.
 
 import { useEffect, useRef, useState } from 'react';
 import type { AgWidgetDataFormat, AgWidgetParams } from 'ag-studio';
-import { decodeReceipt, receiptClaims, verifyReceipt, type ReceiptClaim, type Verification } from '@/lib/dashboard/receipt';
+import {
+  decodeReceipt,
+  formatUtc,
+  receiptClaims,
+  verifyReceipt,
+  type ReceiptClaim,
+  type Verification,
+} from '@/lib/dashboard/receipt';
 import { Cart } from '@/lib/domain/cart';
 import { WIDGET_FIELDS } from '../studio/fields';
 import { asDate, findFields, WidgetMessage } from './shared';
@@ -155,16 +164,6 @@ function PagerButton({ label, disabled, onClick, children }: { label: string; di
   );
 }
 
-const issued = new Intl.DateTimeFormat('en-GB', {
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  hourCycle: 'h23',
-  timeZone: 'UTC',
-});
-
 // --- Widget -----------------------------------------------------------------------
 
 export function ReceiptCardWidget(params: AgWidgetParams<ReceiptCardDef>) {
@@ -235,7 +234,7 @@ export function ReceiptCardWidget(params: AgWidgetParams<ReceiptCardDef>) {
             Receipt {receipt.id}
           </p>
           <p className="text-sm text-pp-muted">
-            {receipt.issuedAt ? `Issued ${issued.format(receipt.issuedAt)} UTC` : 'Issue time unknown'}
+            {receipt.issuedAt ? `Issued ${formatUtc(receipt.issuedAt)}` : 'Issue time unknown'}
             {receipt.sellerSlug && ` to ${receipt.sellerSlug}`}
           </p>
         </div>
@@ -275,7 +274,7 @@ export function ReceiptCardWidget(params: AgWidgetParams<ReceiptCardDef>) {
       )}
 
       <div className="mt-auto flex items-center justify-between gap-3 border-t border-pp-gridline pt-3">
-        <p className="text-xs text-pp-muted">Checked with Behest&apos;s public key, as a seller would.</p>
+        <p className="text-xs text-pp-muted">Checked in audit mode: signature, seller, cart and amount.</p>
         <button
           type="button"
           onClick={() => setAttempt((n) => n + 1)}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeReceipt, receiptClaims, verifyReceipt } from '@/lib/dashboard/receipt';
+import { decodeReceipt, formatUtc, receiptClaims, verifyReceipt } from '@/lib/dashboard/receipt';
 import type { Cart } from '@/lib/domain/cart';
 import type { ReceiptPayload } from '@/lib/domain/receipt';
 import { fakeFetch } from '@/tests/helpers/fake-fetch';
@@ -92,15 +92,23 @@ describe('receiptClaims', () => {
   });
 });
 
+describe('formatUtc', () => {
+  it('writes an instant as a short UTC date and time', () => {
+    expect(formatUtc(new Date('2026-11-06T11:20:59Z'))).toBe('6 Nov 2026, 11:20 UTC');
+  });
+});
+
 describe('verifyReceipt', () => {
   const input = { jws: jwsOf(payload), cart, sellerSlug: 'ravi-spices' };
 
-  it('posts the receipt, cart and seller slug as JSON and reports a verified payload', async () => {
+  it('posts the receipt, cart and seller slug as JSON in audit mode and reports a verified payload', async () => {
     const { fetch, calls } = fakeFetch([{ method: 'POST', path: '/api/receipts/verify', body: { ok: true, payload } }]);
     expect(await verifyReceipt(input, { fetch, endpoint: ENDPOINT })).toEqual({ state: 'verified', payload });
     expect(calls).toHaveLength(1);
     expect(calls[0].headers['content-type']).toBe('application/json');
-    expect(JSON.parse(calls[0].body ?? '')).toEqual(input);
+    // Audit mode checks signature, seller, cart and amount but not freshness or replay, so a
+    // receipt issued days ago still verifies.
+    expect(JSON.parse(calls[0].body ?? '')).toEqual({ ...input, mode: 'audit' });
   });
 
   it.each([200, 422])('reports the reason when the verifier rejects the receipt with %i', async (status) => {

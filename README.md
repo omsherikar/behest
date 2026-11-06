@@ -53,7 +53,7 @@ In production `.env.local` isn't deployed: set the variable in your host's envir
 
 ```
 lib/paypal.ts            Every PayPal call: OAuth token, paging, retries, response types
-lib/dashboard-data.ts    Turns those responses into the dashboard's related tables
+lib/dashboard/           The dashboard's rows, scoped to the persona viewing them
 app/(endpoints)/         One page per endpoint, each rendering an AG Grid
 app/dashboard/           The AG Studio dashboard
 app/api/ai/responses/    Server-side proxy for the dashboard's AI assistant
@@ -88,4 +88,4 @@ Pages are server components, so the column definitions they pass to the grid mus
 
 ## Dashboard
 
-[`/dashboard`](app/dashboard/page.tsx) fetches all five endpoints at once. [`lib/dashboard-data.ts`](lib/dashboard-data.ts) turns them into related tables: customers, invoices, invoice line items, invoice payments, products, plans, transactions, payouts and balances. AG Studio's data sources, relationships, theme, default report and AI assistant are configured in [`app/dashboard/studio`](app/dashboard/studio). Reports you create or edit are saved in the browser's localStorage.
+[`/dashboard`](app/dashboard/page.tsx) loads its rows from [`/api/dashboard/data`](app/api/dashboard/data/route.ts), which scopes them to the signed-in persona ([`lib/dashboard/scope.ts`](lib/dashboard/scope.ts)): the buyer sees its own purchases and mandate, the seller the orders placed with it, and the operator everything plus PayPal Transaction Search for reconciliation. AG Studio's data sources, relationships, custom widgets (decision ledger, budget burn-down, receipt card), theme, built-in reports and AI assistant are configured in [`app/dashboard/studio`](app/dashboard/studio). Reports you create or edit are saved per persona in the browser's localStorage.

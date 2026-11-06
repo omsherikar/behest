@@ -19,7 +19,13 @@ export const Cart = z
   .object({
     seller: z.object({ slug: z.string().min(1), name: z.string().min(1) }).strict(),
     currency: z.literal('USD'),
-    items: z.array(CartItem).min(1),
+    items: z
+      .array(CartItem)
+      .min(1)
+      // One line per SKU, so the gate's per-SKU quantity and stock rules see the full quantity.
+      .refine((items) => new Set(items.map((i) => i.sku)).size === items.length, {
+        message: 'each SKU may appear only once',
+      }),
     totalCents: z.number().int().positive(),
   })
   .strict()

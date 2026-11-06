@@ -244,7 +244,7 @@ function BurnChart({ data, width, height, showPace }: { data: BurnData; width: n
 
       {hover !== null && hovered && (
         <div
-          className="pointer-events-none absolute top-2 z-10 w-48 rounded-md border border-pp-border bg-white px-3 py-2 text-xs shadow-lg"
+          className="pointer-events-none absolute top-2 z-10 w-48 rounded-md border border-pp-border bg-pp-surface px-3 py-2 text-xs shadow-lg"
           style={flip ? { right: width - tooltipLeft + 12 } : { left: tooltipLeft + 12 }}
         >
           <p className="pb-1 text-pp-muted">{instantLabel.format(hover)} UTC</p>

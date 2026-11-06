@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { BetaMessageParam, BetaTool } from '@anthropic-ai/sdk/resources/beta/messages';
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { llmCalls } from '@/lib/db/schema';
-import { recordCall } from '@/lib/llm/client';
+import { createClaude, recordCall } from '@/lib/llm/client';
 import { type LlmStreamEvent, streamReply } from '@/lib/llm/stream';
 import { fakeClaude } from '@/tests/helpers/fake-claude';
 import { recordedStream, sseBody, sseEvents, streamReply as streamed } from '@/tests/helpers/sse';
@@ -19,6 +19,10 @@ const tools: BetaTool[] = [
   },
 ];
 const request = { system: 'You are the dashboard analyst.', messages, tools };
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 async function setup(responses: object[]) {
   const db = await createTestDb();
@@ -184,5 +188,31 @@ it('cancels the request and logs it when the reader stops early', async () => {
       ok: false,
       error: 'api_error: The reader stopped before the reply ended',
     }),
+  ]);
+});
+
+it('replays the recorded stream of the route when LLM_STUB=1', async () => {
+  vi.stubEnv('LLM_STUB', '1');
+  const db = await createTestDb();
+  const deps = { db, claude: createClaude(), now: () => NOW, env: { NODE_ENV: 'test' as const } };
+
+  const events = await collect(streamReply(deps, 'studio_analyst', request));
+
+  expect(events).toEqual(sseEvents(recordedStream('stub')));
+  expect(await db.select().from(llmCalls)).toEqual([
+    expect.objectContaining({ route: 'studio_analyst', ok: true, requestId: 'stub', costUsd: 0 }),
+  ]);
+});
+
+it('ends with an api_error event for a route without a recorded stream when LLM_STUB=1', async () => {
+  vi.stubEnv('LLM_STUB', '1');
+  const db = await createTestDb();
+  const deps = { db, claude: createClaude(), now: () => NOW, env: { NODE_ENV: 'test' as const } };
+
+  expect(await collect(streamReply(deps, 'intent_check', request))).toEqual([
+    {
+      type: 'error',
+      error: { type: 'api_error', message: expect.stringContaining('tests/fixtures/llm/intent_check/stub.sse') },
+    },
   ]);
 });

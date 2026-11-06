@@ -423,6 +423,62 @@ describe('pollPayout', () => {
     expect(await eventsOf(db, purchaseId)).toEqual([{ kind: 'payout_after_refund', data: { status: 'refunded' } }]);
   });
 
+  describe('a late write from a poll the queue abandoned', () => {
+    type Batch = { batchStatus: string; itemStatus: string | null };
+
+    /**
+     * Starts a poll whose PayPal answer is held back, as in a run the queue gave up on and retried.
+     * `answer` lets PayPal's reply through and returns what that run then does.
+     */
+    async function abandonedPoll({ paypal, deps, purchaseId }: Awaited<ReturnType<typeof sent>>) {
+      const reply = Promise.withResolvers<Batch>();
+      const asked = Promise.withResolvers<void>();
+      vi.spyOn(paypal, 'getPayoutBatch').mockImplementationOnce(() => {
+        asked.resolve();
+        return reply.promise;
+      });
+      const run = pollPayout(deps, purchaseId);
+      await asked.promise;
+      return {
+        answer: (batch: Batch) => {
+          reply.resolve(batch);
+          return run;
+        },
+      };
+    }
+
+    it('cannot turn a paid payout back to pending, so the payout after a refund is logged once', async () => {
+      const setup = await sent();
+      const { db, paypal, purchaseId, deps, batchId } = setup;
+      await db.update(purchases).set({ status: 'refunded' }).where(eq(purchases.id, purchaseId));
+      const abandoned = await abandonedPoll(setup);
+      paypal.setPayoutStatus(batchId, { batchStatus: 'SUCCESS', itemStatus: 'SUCCESS' });
+      expect(await pollPayout(deps, purchaseId)).toBe('done');
+
+      await abandoned.answer({ batchStatus: 'PENDING', itemStatus: 'PENDING' });
+
+      expect(await payoutRows(db)).toEqual([expect.objectContaining({ status: 'SUCCESS' })]);
+      expect(await pollPayout(deps, purchaseId)).toBe('done');
+      expect(await statusOf(db, purchaseId)).toBe('refunded');
+      expect(await eventsOf(db, purchaseId)).toEqual([{ kind: 'payout_after_refund', data: { status: 'refunded' } }]);
+    });
+
+    it('cannot turn a failed payout back to pending, so the failure is logged once', async () => {
+      const setup = await sent();
+      const { db, paypal, purchaseId, deps, batchId } = setup;
+      const abandoned = await abandonedPoll(setup);
+      paypal.setPayoutStatus(batchId, { batchStatus: 'SUCCESS', itemStatus: 'RETURNED' });
+      expect(await pollPayout(deps, purchaseId)).toBe('done');
+
+      await abandoned.answer({ batchStatus: 'PENDING', itemStatus: 'PENDING' });
+
+      expect(await payoutRows(db)).toEqual([expect.objectContaining({ status: 'RETURNED' })]);
+      expect(await pollPayout(deps, purchaseId)).toBe('done');
+      expect(await statusOf(db, purchaseId)).toBe('accepted');
+      expect((await eventsOf(db, purchaseId)).map((e) => e.kind)).toEqual(['payout_failed']);
+    });
+  });
+
   describe('when PayPal cannot answer the status check', () => {
     it('retries the poll after a network error, changing nothing', async () => {
       const { db, paypal, purchaseId, deps } = await sent();

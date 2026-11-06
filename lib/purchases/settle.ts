@@ -1,4 +1,4 @@
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, ne, notInArray } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import { payouts, purchases, sellers, type PurchaseStatus } from '@/lib/db/schema';
 import { enqueue } from '@/lib/jobs/queue';
@@ -31,6 +31,8 @@ const FAILED_ITEM_STATUSES = ['FAILED', 'RETURNED', 'BLOCKED', 'REFUNDED', 'REVE
 const FAILED_BATCH_STATUSES: ReadonlySet<string> = new Set(['DENIED', 'CANCELED']);
 /** Statuses, of the item or of a batch with no item, that leave the seller unpaid. Settling then needs an operator. */
 const FAILED_STATUSES: ReadonlySet<string> = new Set([...FAILED_ITEM_STATUSES, ...FAILED_BATCH_STATUSES]);
+/** Statuses that end a payout, paid or not. Once stored, a payout's status never changes again. */
+const FINAL_STATUSES: ReadonlySet<string> = new Set(['SUCCESS', ...FAILED_STATUSES]);
 
 /** The oldest payout the poll resends: a day inside the 30 days PayPal remembers a sender batch id. */
 const RESEND_WINDOW_MS = 29 * 24 * 60 * 60 * 1000;
@@ -182,12 +184,18 @@ function describeFailure(error: unknown): Record<string, unknown> {
 /** What PayPal reported about a payout's batch and its one item. */
 type Reported = { payoutBatchId: string; batchStatus: string; itemStatus: string | null };
 
-/** Stores the payout's latest status, and returns whether this call changed it. */
+/**
+ * Stores the payout's latest status, and returns whether this call changed it. A final status is
+ * never replaced: a poll the queue abandoned can still write what PayPal told it earlier, after its
+ * retry has stored how the payout ended. The update itself checks, so no read can go stale first.
+ */
 async function setPayoutStatus(db: Db, purchaseId: string, status: string): Promise<boolean> {
   const changed = await db
     .update(payouts)
     .set({ status })
-    .where(and(eq(payouts.purchaseId, purchaseId), ne(payouts.status, status)))
+    .where(
+      and(eq(payouts.purchaseId, purchaseId), ne(payouts.status, status), notInArray(payouts.status, [...FINAL_STATUSES])),
+    )
     .returning({ id: payouts.id });
   return changed.length > 0;
 }

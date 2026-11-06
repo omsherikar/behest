@@ -165,8 +165,9 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<
       let results: Awaited<ReturnType<MarketSearch>>;
       try {
         results = await ctx.search(query);
-      } catch {
+      } catch (error) {
         // The error may carry text from the market's response, which must not reach the model unquoted.
+        console.error(`Shopping agent: market search failed: ${describeFailure(error)}`);
         return MARKET_UNAVAILABLE;
       }
       return JSON.stringify({

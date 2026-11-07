@@ -14,6 +14,7 @@
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AgStudioAiModule, enableStudioDevValidations, type AgStudioApi, type AgStudioMode } from 'ag-studio';
 import { AgStudio, AgStudioProvider } from 'ag-studio-react';
+import { Notice } from '@/components/ui/notice';
 import type { DashboardData } from '@/lib/dashboard/scope';
 import type { Persona } from '@/lib/session';
 import { AppShell, viewerFor } from './components/app-shell';
@@ -43,7 +44,7 @@ import { DashboardSkeleton } from './components/skeleton';
 import * as reportState from './report-state';
 import { buildAi } from './studio/ai';
 import { buildStudioData, hasData } from './studio/data';
-import { agStudioPayPalTheme } from './studio/theme';
+import { agStudioBehestTheme } from './studio/theme';
 import { behestWidgets, type BehestRegistry, type ReportState } from './studio/widgets';
 import { useDashboardData } from './use-dashboard-data';
 import { useReports } from './use-reports';
@@ -290,19 +291,24 @@ function ReportsDashboard({ persona, data, refreshing, warnings, onRefresh, lice
       />
 
       {warnings.length > 0 && (
-        <div role="status" className="border-b border-pp-warning/30 bg-pp-warning/10 px-4 py-2 text-sm text-pp-ink sm:px-8">
+        <Notice kind="hold" className="mx-4 mt-3 sm:mx-8">
           {warnings.map((warning) => (
             <p key={warning}>{warning}</p>
           ))}
-        </div>
+        </Notice>
       )}
 
-      <div className="min-h-0 flex-1">
+      {/* AG Studio lays a report out no narrower than 600 px, so on a phone it scrolls sideways
+          inside its own area, never the page, and the page says so. */}
+      <Notice kind="info" className="mx-4 mt-3 sm:hidden">
+        The dashboard is best on a wider screen. On a phone, scroll the report sideways to see all of it.
+      </Notice>
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-auto">
         {hasData(data) ? (
           <AgStudioProvider licenseKey={licenseKey} modules={ai ? [AgStudioAiModule] : undefined}>
             <AgStudio<BehestRegistry>
               style={{ height: '100%', width: '100%' }}
-              theme={agStudioPayPalTheme}
+              theme={agStudioBehestTheme}
               layout={{ widgetBorderEnabled: true }}
               widgets={behestWidgets}
               data={studioData}

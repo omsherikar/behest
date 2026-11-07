@@ -1,18 +1,21 @@
 import type { Metadata } from 'next';
 import { connection } from 'next/server';
+import { fillWindow } from '@/components/shell/app-shell';
+import { EmptyState } from '@/components/ui/empty-state';
+import { PageHeader } from '@/components/ui/page-header';
 import { appDb, demoBuyerId } from '@/lib/app-deps';
-import { ledgerRows } from '@/lib/buyer-pages/purchases';
+import { purchaseDetails } from '@/lib/buyer-pages/detail';
 import { plural } from '@/lib/domain/words';
 import { requireBuyer } from '../require-buyer';
 import { LedgerGrid } from './ledger-grid';
-import { fillWindow } from '@/components/shell/app-shell';
 
 export const metadata: Metadata = {
   title: 'Your ledger',
 };
 
 // Every purchase the buyer's agent proposed, whatever became of it: paid, waiting for the buyer,
-// or not bought, with Behest's verdict, the reasons and the signed receipt of each paid one.
+// or not bought, with Behest's verdict, its trace, the reasons and the signed receipt of each paid
+// one. Each row opens the full trace and its proof, read here on the server as plain data.
 
 export default async function LedgerPage() {
   // Reads the database on every request, never at build time.
@@ -20,24 +23,28 @@ export default async function LedgerPage() {
   await requireBuyer();
 
   const db = appDb();
-  const rows = await ledgerRows(db, await demoBuyerId(db));
+  const rows = await purchaseDetails(db, { buyerId: await demoBuyerId(db) }, new Date());
 
   return (
     <div className={fillWindow}>
-      <h1 id="ledger-heading" className="text-[28px] font-semibold text-pp-navy">
-        Your ledger
-      </h1>
-      <p className="mt-2 max-w-3xl text-sm text-pp-muted">
-        {plural(rows.length, 'purchase')} your agent proposed. Each one shows Behest&apos;s verdict, where it stands and
-        why it was not simply allowed. A paid purchase has a receipt Behest signed, which the seller checks before
-        accepting the order.
-      </p>
+      <PageHeader
+        id="ledger-heading"
+        title="Your ledger"
+        purpose={
+          rows.length > 0
+            ? `${plural(rows.length, 'purchase')} your agent proposed. Select one, or press Enter on it, to see its full trace and the proof behind each step.`
+            : 'Every purchase your agent proposes, with the trace that authorized it.'
+        }
+      />
       {rows.length > 0 ? (
-        <div className="mt-4 flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
           <LedgerGrid rows={rows} labelledBy="ledger-heading" />
         </div>
       ) : (
-        <p className="mt-6 text-pp-muted">Your agent has not proposed a purchase yet.</p>
+        <EmptyState
+          message="Your agent has not proposed a purchase yet. Send it shopping, and every purchase it proposes shows up here with its trace and receipt."
+          action={{ href: '/buyer/shop', label: 'Send your agent shopping' }}
+        />
       )}
     </div>
   );

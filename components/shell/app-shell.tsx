@@ -22,6 +22,12 @@ const SHELL_HEIGHT = '[--shell-h:7.75rem] lg:[--shell-h:4.75rem]';
  */
 export const fillWindow = 'flex h-[max(36rem,calc(100dvh-var(--shell-h)-4rem))] flex-col';
 
+/**
+ * The same from 1024 px only, for a page with more above its grid than a phone's window holds, such
+ * as the ledger's figures: on a phone the page scrolls and the grid keeps a height of its own.
+ */
+export const fillWindowFromLg = 'flex flex-col lg:h-[max(36rem,calc(100dvh-var(--shell-h)-4rem))]';
+
 export function AppShell({ persona, children }: { persona: Persona; children: ReactNode }) {
   const info = personaInfo(persona);
   return (

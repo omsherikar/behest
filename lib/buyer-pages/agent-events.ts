@@ -1,7 +1,11 @@
+import { STEP_STATES, TRACE_STEPS } from '@/lib/ui/trail';
+import type { PurchaseDetail } from './detail';
+
 // What a shopping agent run streams to the buyer's shop page, and a reader for its server-sent
 // events. The run route sends one event per frame, its data an AgentEvent as JSON. These types copy
 // the route's shapes rather than import them, so the page takes no server code, and a test checks
-// that every outcome the purchase flow returns fits them.
+// that every outcome the purchase flow returns fits them. A proposal may come with its description
+// (a PurchaseDetail); one that does not have that shape is left out and the outcome kept.
 
 /** Where a proposed purchase stands, as the purchase flow reports it. */
 export type RunOutcome = {
@@ -20,7 +24,7 @@ export type RunOutcome = {
 export type AgentEvent =
   | { type: 'status'; text: string }
   | { type: 'tool'; name: string; input: unknown }
-  | { type: 'proposal'; outcome: RunOutcome }
+  | { type: 'proposal'; outcome: RunOutcome; view?: PurchaseDetail }
   | { type: 'done'; summary: string }
   | { type: 'error'; message: string };
 
@@ -41,6 +45,51 @@ function toOutcome(value: unknown): RunOutcome | null {
   return { purchaseId, verdict: verdict as RunOutcome['verdict'], status, reasons, approveUrl, receiptId };
 }
 
+const isNumberOrNull = (value: unknown): value is number | null => value === null || typeof value === 'number';
+const isStringList = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
+const oneOf = (value: unknown, options: readonly unknown[]) => options.includes(value);
+
+/** Whether `value` has the shape of a PurchaseDetail, in every field the page reads. */
+function isPurchaseDetail(value: unknown): value is PurchaseDetail {
+  if (!isRecord(value)) return false;
+  const { id, createdAt, seller, sellerSlug, totalCents, items, gateVerdict, finalVerdict, verdict, status, reasons } = value;
+  const { trace, mandate, outcomes, intent, paypal, approveUrl, receipt, cart, change } = value;
+  return (
+    isString(id) &&
+    isString(createdAt) &&
+    isString(seller) &&
+    isStringOrNull(sellerSlug) &&
+    isNumberOrNull(totalCents) &&
+    Array.isArray(items) &&
+    items.every((i) => isRecord(i) && isString(i.sku) && isString(i.title) && typeof i.quantity === 'number' && typeof i.unitPriceCents === 'number') &&
+    oneOf(gateVerdict, VERDICTS) &&
+    (finalVerdict === null || oneOf(finalVerdict, VERDICTS)) &&
+    oneOf(verdict, VERDICTS) &&
+    isString(status) &&
+    isStringList(reasons) &&
+    isRecord(trace) &&
+    TRACE_STEPS.every((step) => oneOf(trace[step], STEP_STATES)) &&
+    isRecord(mandate) &&
+    isString(mandate.id) &&
+    isString(mandate.policyHash) &&
+    isString(mandate.confirmedAt) &&
+    oneOf(mandate.confirmation, ['session', 'passkey']) &&
+    isStringOrNull(mandate.credentialId) &&
+    Array.isArray(outcomes) &&
+    outcomes.every((o) => isRecord(o) && isString(o.rule) && oneOf(o.result, ['pass', 'ask', 'block', 'skip']) && isString(o.detail)) &&
+    (intent === null || (isRecord(intent) && oneOf(intent.verdict, ['consistent', 'needs_human', 'inconsistent', 'unavailable']) && isStringList(intent.reasons))) &&
+    isRecord(paypal) &&
+    isStringOrNull(paypal.orderId) &&
+    isStringOrNull(paypal.captureId) &&
+    isStringOrNull(paypal.capturedAt) &&
+    isStringOrNull(approveUrl) &&
+    (receipt === null ||
+      (isRecord(receipt) && isString(receipt.id) && isString(receipt.keyId) && isString(receipt.jws) && isStringOrNull(receipt.decisionHash))) &&
+    (cart === null || isRecord(cart)) &&
+    (change === null || (isRecord(change) && oneOf(change.kind, ['allowed', 'changes', 'cannot'])))
+  );
+}
+
 /** The event in parsed JSON with only the fields its type defines, or null when it is not an AgentEvent. */
 export function toAgentEvent(value: unknown): AgentEvent | null {
   if (!isRecord(value)) return null;
@@ -51,7 +100,8 @@ export function toAgentEvent(value: unknown): AgentEvent | null {
       return isString(value.name) ? { type: 'tool', name: value.name, input: value.input } : null;
     case 'proposal': {
       const outcome = toOutcome(value.outcome);
-      return outcome ? { type: 'proposal', outcome } : null;
+      if (!outcome) return null;
+      return isPurchaseDetail(value.view) && value.view.id === outcome.purchaseId ? { type: 'proposal', outcome, view: value.view } : { type: 'proposal', outcome };
     }
     case 'done':
       return isString(value.summary) ? { type: 'done', summary: value.summary } : null;

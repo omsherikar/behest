@@ -2,14 +2,16 @@
 
 import type { ColDef, ValueFormatterParams, ValueGetterParams } from 'ag-grid-community';
 import type { CustomCellRendererProps } from 'ag-grid-react';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { formatUsd } from '@/lib/domain/money';
+import { benchmark } from '@/lib/seller-pages/benchmark';
 import type { CatalogRow } from '@/lib/seller-pages/catalog';
 import { SellerGrid } from '../seller-grid';
 
-// The seller's listings. A listing hidden from agents is marked in the column next to its SKU, so
-// the mark is in view on a phone too, with the reason it is hidden.
-
-const usd = ({ value }: ValueFormatterParams<CatalogRow, number | null>) => (typeof value === 'number' ? formatUsd(value) : '');
+// The seller's listings. Each one says whether agents can buy it: listed, or hidden from agents
+// with the reason screening gave, in the column next to its SKU so it is in view on a phone too. Its
+// price sits beside its market benchmark: the median of the same product elsewhere and how far the
+// seller's price is from it, marked when it is far enough above that the buyer is asked first.
 
 /** Price filters take dollars, as the column shows them, rather than the cents behind it. */
 const dollars =
@@ -21,13 +23,37 @@ const dollars =
 
 function AgentsCell({ data }: CustomCellRendererProps<CatalogRow>) {
   if (!data) return null;
-  if (data.hiddenReason === null) return <span className="text-pp-success">Listed</span>;
+  if (data.hiddenReason === null) {
+    return (
+      <StatusBadge tone="seal" label="For agents">
+        Listed
+      </StatusBadge>
+    );
+  }
   return (
-    <span className="inline-flex items-center gap-2">
-      <span className="rounded-full bg-pp-danger px-2 py-0.5 text-xs leading-5 font-semibold text-white">
+    <span className="flex flex-col items-start gap-1 py-2 leading-snug whitespace-normal">
+      <StatusBadge tone="stop" label="For agents">
         Hidden from agents
-      </span>
-      <span className="text-pp-danger">{data.hiddenReason}</span>
+      </StatusBadge>
+      <span className="text-stop">{data.hiddenReason}</span>
+    </span>
+  );
+}
+
+function PriceCell({ data }: CustomCellRendererProps<CatalogRow>) {
+  if (!data) return null;
+  const mark = benchmark(data.priceCents, data.marketMedianCents);
+  return (
+    <span className="flex flex-col items-end py-2 leading-snug whitespace-normal">
+      <span className="font-mono text-text">{formatUsd(data.priceCents)}</span>
+      {mark ? (
+        <span className={mark.asks ? 'text-hold' : 'text-muted'}>
+          {mark.words}
+          {mark.asks && <span className="block">Buyers are asked first</span>}
+        </span>
+      ) : (
+        <span className="text-muted">No market benchmark</span>
+      )}
     </span>
   );
 }
@@ -39,14 +65,17 @@ const columns: ColDef<CatalogRow>[] = [
     headerName: 'For agents',
     valueGetter: ({ data }) => (data?.hiddenReason ? `Hidden from agents: ${data.hiddenReason}` : 'Listed'),
     cellRenderer: AgentsCell,
+    autoHeight: true,
   },
   { field: 'title', headerName: 'Title', maxWidth: 360 },
   { field: 'category', headerName: 'Category' },
   {
     field: 'priceCents',
-    headerName: 'Price',
+    headerName: 'Price and market median',
     type: 'rightAligned',
-    valueFormatter: usd,
+    cellRenderer: PriceCell,
+    autoHeight: true,
+    getQuickFilterText: ({ data }) => (data ? `${formatUsd(data.priceCents)} ${benchmark(data.priceCents, data.marketMedianCents)?.words ?? ''}` : ''),
     filter: 'agNumberColumnFilter',
     filterValueGetter: dollars('priceCents'),
   },
@@ -54,18 +83,10 @@ const columns: ColDef<CatalogRow>[] = [
     field: 'stock',
     headerName: 'Stock',
     type: 'rightAligned',
+    cellClass: 'font-mono',
     valueFormatter: ({ value }: ValueFormatterParams<CatalogRow, number | null>) =>
       value === null || value === undefined ? 'Not counted' : String(value),
     filter: 'agNumberColumnFilter',
-  },
-  {
-    field: 'marketMedianCents',
-    headerName: 'Market median',
-    type: 'rightAligned',
-    valueFormatter: (params: ValueFormatterParams<CatalogRow, number | null>) =>
-      typeof params.value === 'number' ? usd(params) : 'No benchmark',
-    filter: 'agNumberColumnFilter',
-    filterValueGetter: dollars('marketMedianCents'),
   },
 ];
 

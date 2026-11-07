@@ -26,11 +26,12 @@ const avg = (id: string) => ({ id, aggregation: 'avg' as const });
 const countd = (id: string) => ({ id, aggregation: 'countd' as const });
 const withLegend = { style: { theme: { common: { legend: { enabled: true } } } } };
 
-// Same stack as --pp-font in app/globals.css.
-const FONT = '"PayPal Open", "Helvetica Neue", Helvetica, Arial, sans-serif';
+// The app's type (app/globals.css): IBM Plex Sans for words, IBM Plex Mono for the numbers.
+const SANS = 'var(--font-sans-stack)';
+const MONO = 'var(--font-mono-stack)';
 
-const typography = (fontSize: number, fontWeight: 'normal' | 'bold' = 'normal') => ({
-  fontFamily: FONT,
+const typography = (fontSize: number, fontWeight: 'normal' | 'bold' = 'normal', fontFamily = SANS) => ({
+  fontFamily,
   fontSize,
   fontWeight,
   fontStyle: 'normal' as const,
@@ -46,7 +47,7 @@ const kpi = (text: string, value: { id: string; aggregation?: 'sum' | 'avg' | 'c
   format: {
     title: { enabled: true, text, typography: typography(14, 'bold') },
     caption: { enabled: true, text: '', typography: typography(0) },
-    style: { typography: typography(22) },
+    style: { typography: typography(22, 'normal', MONO) },
   },
 });
 

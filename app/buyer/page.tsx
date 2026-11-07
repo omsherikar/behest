@@ -3,22 +3,30 @@ import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { connection } from 'next/server';
+import { JwsView } from '@/components/ui/jws-view';
+import { confirmationFields } from '@/components/ui/mandate-confirmation';
+import { Notice, TONE_KIND } from '@/components/ui/notice';
+import { PageHeader } from '@/components/ui/page-header';
+import { ProofFields } from '@/components/ui/proof-fields';
+import { ProofId } from '@/components/ui/proof-id';
+import { StateGlyph } from '@/components/ui/state-glyph';
 import { appDb, demoBuyerId } from '@/lib/app-deps';
 import { mandates, type WalletStatus, wallets } from '@/lib/db/schema';
+import { mandateCredentialId } from '@/lib/ui/signed-claims';
 import { getPersona, SESSION_COOKIE } from '@/lib/session';
-import { BuyerNav } from './buyer-nav';
 import { MandateForm } from './mandate-form';
 
 export const metadata: Metadata = {
   title: 'Your mandate',
 };
 
-// The buyer's page: their active mandate and wallet, if any, and the form to write a new mandate.
-// PayPal sends the buyer back here with `?wallet=` set to how linking their wallet went.
+// The buyer's page: their active mandate as the signed document it is, the wallet that pays within
+// it, and the form to write a new mandate. PayPal sends the buyer back here with `?wallet=` set to
+// how linking their wallet went.
 
-type Notice = { tone: 'success' | 'warning' | 'danger'; text: string };
+type WalletNotice = { tone: 'success' | 'warning' | 'danger'; text: string };
 
-const WALLET_NOTICES = new Map<string, Notice>([
+const WALLET_NOTICES = new Map<string, WalletNotice>([
   ['linked', { tone: 'success', text: 'Your PayPal wallet is linked. Your agent can now pay within your mandate.' }],
   [
     'cancelled',
@@ -29,12 +37,6 @@ const WALLET_NOTICES = new Map<string, Notice>([
   ],
   ['error', { tone: 'danger', text: "Linking PayPal didn't work. Confirm your mandate again to try once more." }],
 ]);
-
-const NOTICE_STYLES: Record<Notice['tone'], string> = {
-  success: 'border-pp-success text-pp-success',
-  warning: 'border-pp-warning text-pp-warning',
-  danger: 'border-pp-danger text-pp-danger',
-};
 
 const WALLET_LABELS: Record<WalletStatus | 'none', string> = {
   linked: 'PayPal linked',
@@ -56,7 +58,16 @@ export default async function BuyerPage({ searchParams }: PageProps<'/buyer'>) {
   const buyerId = await demoBuyerId(db);
   const [[mandate], [wallet]] = await Promise.all([
     db
-      .select({ sourceText: mandates.sourceText, readback: mandates.readback, confirmedAt: mandates.confirmedAt })
+      .select({
+        id: mandates.id,
+        sourceText: mandates.sourceText,
+        readback: mandates.readback,
+        policyHash: mandates.policyHash,
+        confirmedAt: mandates.confirmedAt,
+        confirmation: mandates.confirmation,
+        expiresAt: mandates.expiresAt,
+        jws: mandates.jws,
+      })
       .from(mandates)
       .where(and(eq(mandates.buyerId, buyerId), eq(mandates.status, 'active'))),
     db.select({ status: wallets.status }).from(wallets).where(eq(wallets.buyerId, buyerId)),
@@ -66,51 +77,93 @@ export default async function BuyerPage({ searchParams }: PageProps<'/buyer'>) {
   const notice = typeof outcome === 'string' ? WALLET_NOTICES.get(outcome) : undefined;
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-10 font-paypal text-pp-ink sm:py-16">
-      <BuyerNav current="/buyer" />
-      <h1 className="mt-6 text-3xl font-semibold text-pp-navy">Your mandate</h1>
-      <p className="mt-3 text-pp-muted">
-        Tell your agent what it may buy, in your own words. Behest reads it back to you, and your agent can only pay
-        within what you confirm.
-      </p>
+    <div className="w-full max-w-3xl">
+      <PageHeader
+        title="Your mandate"
+        purpose="Tell your agent what it may buy, in your own words. Behest reads it back, and your agent can only pay within what you confirm and sign."
+      />
 
       {notice && (
-        <p role="status" className={`mt-6 rounded-xl border bg-pp-surface p-4 text-sm ${NOTICE_STYLES[notice.tone]}`}>
+        <Notice kind={TONE_KIND[notice.tone]} className="mb-6">
           {notice.text}
-        </p>
+        </Notice>
       )}
 
-      {mandate && (
-        <section aria-labelledby="active-heading" className="mt-8 rounded-xl border border-pp-border bg-pp-surface p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 id="active-heading" className="text-lg font-semibold text-pp-navy">
-              Active mandate
-            </h2>
-            <span
-              className={`rounded-full px-3 py-1 text-sm ${
-                wallet?.status === 'linked' ? 'bg-pp-highlight text-pp-blue-dark' : 'bg-pp-canvas text-pp-muted'
-              }`}
-            >
-              {WALLET_LABELS[wallet?.status ?? 'none']}
-            </span>
-          </div>
-          <blockquote className="mt-3 border-l-2 border-pp-border pl-3 text-pp-muted">{mandate.sourceText}</blockquote>
-          <ul className="mt-3 list-disc space-y-1 pl-5">
+      {mandate && <SignedMandate mandate={mandate} wallet={wallet?.status ?? 'none'} />}
+
+      <section aria-labelledby="write-heading" className={mandate ? 'mt-10' : undefined}>
+        <h2 id="write-heading" className="text-lead font-medium text-text">
+          {mandate ? 'Write a new mandate' : 'Write your mandate'}
+        </h2>
+        {mandate && <p className="mt-1 text-body text-muted">Confirming a new mandate replaces the one above.</p>}
+        <MandateForm replacing={mandate !== undefined} />
+      </section>
+    </div>
+  );
+}
+
+// 7 Nov 2026, 09:00, in UTC as the page says.
+const dateTime = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+  timeZone: 'UTC',
+});
+
+type ActiveMandate = {
+  id: string;
+  sourceText: string;
+  readback: string[];
+  policyHash: string;
+  confirmedAt: Date;
+  confirmation: 'session' | 'passkey';
+  expiresAt: Date | null;
+  jws: string;
+};
+
+/**
+ * The active mandate as the signed document it is: the buyer's own words, the readback they
+ * confirmed, the facts that identify it, and the signed token itself, which can be decoded and copied.
+ */
+function SignedMandate({ mandate, wallet }: { mandate: ActiveMandate; wallet: WalletStatus | 'none' }) {
+  return (
+    <section aria-labelledby="active-heading" className="rounded-panel border border-line bg-panel">
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-4 py-3 sm:px-5">
+        <h2 id="active-heading" className="flex items-center gap-2 font-medium text-text">
+          <span className="text-seal">
+            <StateGlyph shape="filled" className="size-4" />
+          </span>
+          Your signed mandate
+        </h2>
+        <span className={`text-meta ${wallet === 'linked' ? 'text-seal' : 'text-muted'}`}>{WALLET_LABELS[wallet]}</span>
+      </header>
+      <div className="grid gap-5 p-4 sm:p-5">
+        <figure>
+          <figcaption className="text-meta text-muted">In your words</figcaption>
+          <blockquote className="mt-1 border-l-2 border-line-strong pl-3 text-body break-words text-text">{mandate.sourceText}</blockquote>
+        </figure>
+        <div>
+          <p className="text-meta text-muted">What your agent may do</p>
+          <ul className="mt-1 grid list-disc gap-1 pl-5 text-body text-text marker:text-muted">
             {mandate.readback.map((line) => (
               <li key={line}>{line}</li>
             ))}
           </ul>
-          <p className="mt-3 text-sm text-pp-muted">Signed on {mandate.confirmedAt.toISOString().slice(0, 10)} (UTC).</p>
-        </section>
-      )}
-
-      <section aria-labelledby="write-heading" className="mt-10">
-        <h2 id="write-heading" className="text-lg font-semibold text-pp-navy">
-          {mandate ? 'Write a new mandate' : 'Write your mandate'}
-        </h2>
-        {mandate && <p className="mt-1 text-sm text-pp-muted">Confirming a new mandate replaces the one above.</p>}
-        <MandateForm replacing={mandate !== undefined} />
-      </section>
-    </main>
+        </div>
+        <ProofFields
+          fields={[
+            { label: 'Mandate id', value: <ProofId value={mandate.id} label="Mandate id" /> },
+            { label: 'Policy hash', value: <ProofId value={mandate.policyHash} label="Policy hash" /> },
+            { label: 'Signed at', value: <span className="font-mono text-meta">{dateTime.format(mandate.confirmedAt)} UTC</span> },
+            ...confirmationFields(mandate.confirmation, mandateCredentialId(mandate.jws)),
+            { label: 'Expires', value: mandate.expiresAt ? `${dateTime.format(mandate.expiresAt)} UTC` : 'Never' },
+          ]}
+        />
+        <JwsView jws={mandate.jws} label="Signed mandate" decoded="folded" token="short" />
+      </div>
+    </section>
   );
 }

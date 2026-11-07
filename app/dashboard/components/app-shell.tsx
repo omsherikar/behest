@@ -33,7 +33,9 @@ function PayPalWordmark({ className = '' }: { className?: string }) {
 function BrandLockup() {
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <span className="text-2xl font-bold tracking-tight text-pp-navy">Behest</span>
+      <Link href="/" aria-label="behest home" className="rounded-control font-mono text-[1.0625rem] font-semibold tracking-tight text-text">
+        behest
+      </Link>
       <span className="hidden h-6 w-px bg-pp-border sm:block" aria-hidden />
       <AgStudioLogo className="-ml-3 hidden h-12 w-auto sm:block" />
       <span className="hidden h-6 w-px bg-pp-border lg:block" aria-hidden />
@@ -46,7 +48,7 @@ function BrandLockup() {
 
 function TopBar({ viewer, onMenu }: { viewer?: Viewer; onMenu: () => void }) {
   return (
-    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-pp-border bg-white px-4 sm:gap-6 sm:px-6">
+    <header className="flex h-16 shrink-0 items-center gap-3 border-b border-pp-border bg-pp-surface px-4 sm:gap-6 sm:px-6">
       <button
         type="button"
         onClick={onMenu}
@@ -66,7 +68,7 @@ function TopBar({ viewer, onMenu }: { viewer?: Viewer; onMenu: () => void }) {
         </span>
         {viewer && (
           <span className="ml-2 flex items-center gap-2">
-            <span className="flex size-9 items-center justify-center rounded-full bg-pp-navy text-sm font-semibold text-white">
+            <span className="flex size-9 items-center justify-center rounded-full bg-pp-highlight text-sm font-semibold text-pp-ink">
               {viewer.initials}
             </span>
             <span className="hidden flex-col leading-tight sm:flex">
@@ -122,9 +124,9 @@ export function AppShell({
     <div className="flex h-dvh flex-col bg-pp-canvas font-paypal text-pp-ink">
       <TopBar viewer={viewer} onMenu={() => setDrawerOpen((open) => !open)} />
       <div className="flex min-h-0 flex-1">
-        {drawerOpen && <div className="fixed inset-0 z-30 bg-pp-navy/40 md:hidden" onClick={close} aria-hidden />}
+        {drawerOpen && <div className="fixed inset-0 z-30 bg-black/60 md:hidden" onClick={close} aria-hidden />}
         <nav
-          className={`w-64 shrink-0 flex-col border-r border-pp-border bg-white md:static md:z-auto md:flex md:shadow-none ${
+          className={`w-64 shrink-0 flex-col border-r border-pp-border bg-pp-surface md:static md:z-auto md:flex md:shadow-none ${
             drawerOpen ? 'fixed inset-y-0 left-0 z-40 flex shadow-xl' : 'hidden'
           }`}
           aria-label="Reports"

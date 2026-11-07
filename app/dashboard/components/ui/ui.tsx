@@ -8,10 +8,10 @@ import { useEffect, useEffectEvent, useRef, type ButtonHTMLAttributes, type Reac
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-pp-blue text-white hover:bg-pp-blue-dark disabled:bg-pp-border disabled:text-pp-muted',
+  primary: 'bg-pp-blue text-on-fill hover:bg-pp-blue-dark disabled:bg-pp-border disabled:text-pp-muted',
   secondary: 'border border-pp-navy text-pp-navy hover:bg-pp-highlight disabled:border-pp-border disabled:text-pp-muted',
   ghost: 'text-pp-blue hover:bg-pp-highlight disabled:text-pp-muted',
-  danger: 'bg-pp-danger text-white hover:brightness-90',
+  danger: 'bg-pp-danger text-on-fill hover:brightness-90',
 };
 
 export function Button({
@@ -68,7 +68,7 @@ export function Dialog({
       ref={ref}
       onClose={onClose}
       onClick={(event) => event.target === ref.current && onClose()}
-      className="m-auto w-[min(440px,calc(100vw-32px))] rounded-lg bg-white p-0 font-paypal text-pp-ink shadow-xl backdrop:bg-pp-navy/40"
+      className="m-auto w-[min(440px,calc(100vw-32px))] rounded-lg bg-pp-surface p-0 font-paypal text-pp-ink shadow-xl backdrop:bg-black/60"
     >
       {open && (
         <div className="p-6">
@@ -112,7 +112,7 @@ export function Menu({
     <div
       ref={ref}
       role="menu"
-      className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-md border border-pp-border bg-white py-1 shadow-lg"
+      className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-md border border-pp-border bg-pp-surface py-1 shadow-lg"
     >
       {children}
     </div>

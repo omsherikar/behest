@@ -121,7 +121,7 @@ function StatusPill({ status }: { status: Status }) {
 
 function ClaimMark({ verified }: { verified: boolean }) {
   return verified ? (
-    <span role="img" aria-label="Verified" className="flex size-5 shrink-0 items-center justify-center rounded-full bg-pp-success text-white">
+    <span role="img" aria-label="Verified" className="flex size-5 shrink-0 items-center justify-center rounded-full bg-pp-success text-on-fill">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-3">
         <path d="m5 12.5 4.5 4.5L19 7.5" />
       </svg>
@@ -134,7 +134,7 @@ function ClaimMark({ verified }: { verified: boolean }) {
 function ClaimList({ title, claims, verified }: { title: string; claims: ReceiptClaim[]; verified: boolean }) {
   return (
     <section>
-      <h3 className="pb-1.5 text-xs font-semibold uppercase tracking-wider text-pp-muted">{title}</h3>
+      <h3 className="pb-1.5 text-xs font-semibold text-pp-muted">{title}</h3>
       <ul className="flex flex-col gap-2">
         {claims.map((claim) => (
           <li key={claim.label} className="flex items-start gap-2.5">

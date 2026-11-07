@@ -7,8 +7,10 @@ import { sellerOrderRows } from '@/lib/seller-pages/orders';
 import { findSeller } from '@/lib/seller-pages/seller';
 import { NotOnboarded } from '../not-onboarded';
 import { requireSeller } from '../require-seller';
-import { SellerNav } from '../seller-nav';
 import { OrdersGrid } from './orders-grid';
+import { fillWindow } from '@/components/shell/app-shell';
+import { EmptyState } from '@/components/ui/empty-state';
+import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = {
   title: 'Your orders',
@@ -28,30 +30,28 @@ export default async function SellerOrdersPage() {
   const accepted = rows.filter((row) => row.status === 'accepted').length;
 
   return (
-    <main className="flex h-dvh flex-col overflow-y-auto bg-pp-canvas px-4 py-6 font-paypal text-pp-ink sm:px-8">
-      <SellerNav current="/seller/orders" />
-      <h1 id="orders-heading" className="mt-4 text-[28px] font-semibold text-pp-navy">
-        Your orders
-      </h1>
-      {seller ? (
-        <>
-          <p className="mt-2 max-w-3xl text-sm text-pp-muted">
-            {plural(rows.length, 'order')} from shopping agents, {accepted} accepted. Each order arrives with a receipt
-            Behest signed when the buyer&apos;s payment went through. The receipt is checked against the cart you
-            received, and an order whose receipt is forged, reused, expired or for a different cart is rejected. Behest
-            pays you for each accepted order through PayPal.
-          </p>
-          {rows.length > 0 ? (
-            <div className="mt-4 flex min-h-0 flex-1 flex-col">
-              <OrdersGrid rows={rows} labelledBy="orders-heading" />
-            </div>
-          ) : (
-            <p className="mt-6 text-pp-muted">No agent has placed an order with you yet.</p>
-          )}
-        </>
-      ) : (
+    <div className={fillWindow}>
+      <PageHeader
+        id="orders-heading"
+        title="Your orders"
+        purpose={
+          seller
+            ? `${plural(rows.length, 'order')} from shopping agents, ${accepted} accepted. Each came with a receipt Behest signed, checked against the cart you received. Select one, or press Enter on it, to inspect its receipt.`
+            : 'The orders agents place with you, each with the receipt Behest signed for it.'
+        }
+      />
+      {!seller ? (
         <NotOnboarded />
+      ) : rows.length > 0 ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <OrdersGrid rows={rows} labelledBy="orders-heading" sellerSlug={seller.slug} />
+        </div>
+      ) : (
+        <EmptyState
+          message="No agent has placed an order with you yet. Orders appear here with their receipts once agents buy from your catalog."
+          action={{ href: '/seller/catalog', label: 'See your catalog' }}
+        />
       )}
-    </main>
+    </div>
   );
 }

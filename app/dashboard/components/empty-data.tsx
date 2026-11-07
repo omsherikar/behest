@@ -22,7 +22,7 @@ export function EmptyData({ persona }: { persona: Persona }) {
       </p>
       <a
         href={next.href}
-        className="mt-6 inline-flex h-10 items-center rounded-full bg-pp-blue px-5 font-semibold text-white hover:bg-pp-blue-dark"
+        className="mt-6 inline-flex h-10 items-center rounded-full bg-pp-blue px-5 font-semibold text-on-fill hover:bg-pp-blue-dark"
       >
         {next.label}
       </a>

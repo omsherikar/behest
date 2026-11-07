@@ -7,8 +7,10 @@ import { sellerCatalogRows } from '@/lib/seller-pages/catalog';
 import { findSeller } from '@/lib/seller-pages/seller';
 import { NotOnboarded } from '../not-onboarded';
 import { requireSeller } from '../require-seller';
-import { SellerNav } from '../seller-nav';
 import { CatalogGrid } from './catalog-grid';
+import { fillWindow } from '@/components/shell/app-shell';
+import { EmptyState } from '@/components/ui/empty-state';
+import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = {
   title: 'Your catalog',
@@ -25,29 +27,25 @@ export default async function SellerCatalogPage() {
   const hidden = rows.filter((row) => row.hiddenReason !== null).length;
 
   return (
-    <main className="flex h-dvh flex-col overflow-y-auto bg-pp-canvas px-4 py-6 font-paypal text-pp-ink sm:px-8">
-      <SellerNav current="/seller/catalog" />
-      <h1 id="catalog-heading" className="mt-4 text-[28px] font-semibold text-pp-navy">
-        Your catalog
-      </h1>
-      {seller ? (
-        <>
-          <p className="mt-2 max-w-3xl text-sm text-pp-muted">
-            {plural(rows.length, 'listing')} at {seller.name}, {hidden} hidden from agents. Behest hides a listing whose
-            text speaks to AI agents: shopping agents cannot see or buy it. The market median is the typical price of
-            the same product elsewhere; when your price is well above it, the buyer is asked before their agent pays.
-          </p>
-          {rows.length > 0 ? (
-            <div className="mt-4 flex min-h-0 flex-1 flex-col">
-              <CatalogGrid rows={rows} labelledBy="catalog-heading" />
-            </div>
-          ) : (
-            <p className="mt-6 text-pp-muted">Your catalog has no listings.</p>
-          )}
-        </>
-      ) : (
+    <div className={fillWindow}>
+      <PageHeader
+        id="catalog-heading"
+        title="Your catalog"
+        purpose={
+          seller
+            ? `${plural(rows.length, 'listing')} at ${seller.name}, ${hidden} hidden from agents. Each price sits beside the market median for the same product; well above it, buyers are asked before their agent pays.`
+            : 'Your listings, whether agents can buy them, and how each price compares with the market.'
+        }
+      />
+      {!seller ? (
         <NotOnboarded />
+      ) : rows.length > 0 ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <CatalogGrid rows={rows} labelledBy="catalog-heading" />
+        </div>
+      ) : (
+        <EmptyState message="Your catalog has no listings yet." action={{ href: '/seller', label: 'Add listings to your shop' }} />
       )}
-    </main>
+    </div>
   );
 }

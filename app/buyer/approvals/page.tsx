@@ -2,12 +2,18 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import { connection } from 'next/server';
+import { PurchaseTrace } from '@/components/purchase/purchase-trace';
+import { buttonClass } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Money } from '@/components/ui/money';
+import { Notice, TONE_KIND } from '@/components/ui/notice';
+import { PageHeader } from '@/components/ui/page-header';
+import { VerdictBadge } from '@/components/ui/verdict-badge';
+import { WhatWouldChange } from '@/components/ui/what-would-change';
 import { appDb, demoBuyerId } from '@/lib/app-deps';
-import { returnNotices, type ReturnNotice } from '@/lib/buyer-pages/notices';
-import { pendingApprovals, type PendingApproval } from '@/lib/buyer-pages/purchases';
+import { purchaseDetails, type PurchaseDetail } from '@/lib/buyer-pages/detail';
+import { returnNotices } from '@/lib/buyer-pages/notices';
 import { qrDataUrl } from '@/lib/buyer-pages/qr';
-import { formatUsd } from '@/lib/domain/money';
-import { BuyerNav } from '../buyer-nav';
 import { requireBuyer } from '../require-buyer';
 
 export const metadata: Metadata = {
@@ -15,20 +21,13 @@ export const metadata: Metadata = {
 };
 
 // The purchases waiting for the buyer, each one over what the mandate lets the agent pay alone or
-// held back by the intent check. The buyer approves each at PayPal, by its link or by scanning its
-// QR code on a phone. PayPal sends the buyer back here with `?approved=` or `?cancelled=` set to the
-// purchase id, or `?pending=` or `?error=` from the return route; each shows Behest's own notice.
-// Seller names, item titles and reasons are shown as text, as they may be a seller's.
+// held back by the intent check. Each card shows the purchase, its authority trace up to PayPal,
+// why Behest asks, what would have let it through, and the approval link with its QR code for a
+// phone. PayPal sends the buyer back here with `?approved=` or `?cancelled=` set to the purchase id,
+// or `?pending=` or `?error=` from the return route; each shows Behest's own notice. Seller names,
+// item titles and reasons may be a seller's, and are shown as text.
 
-const primaryLink =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-white transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
-const NOTICE_STYLES: Record<ReturnNotice['tone'], string> = {
-  success: 'border-pp-success text-pp-success',
-  warning: 'border-pp-warning text-pp-warning',
-  danger: 'border-pp-danger text-pp-danger',
-};
-const textLink =
-  'font-semibold text-pp-blue underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
+const textLink = 'font-medium text-action underline-offset-2 hover:text-action-strong hover:underline';
 
 // 7 Nov 2026, 09:00, in UTC as the page says.
 const dateTime = new Intl.DateTimeFormat('en-GB', {
@@ -42,7 +41,7 @@ const dateTime = new Intl.DateTimeFormat('en-GB', {
 });
 
 /** A QR code of the approval link, or null when there is no link or it could not be drawn. */
-async function qrFor(approval: PendingApproval): Promise<string | null> {
+async function qrFor(approval: PurchaseDetail): Promise<string | null> {
   if (!approval.approveUrl) return null;
   try {
     return await qrDataUrl(approval.approveUrl);
@@ -58,100 +57,102 @@ export default async function ApprovalsPage({ searchParams }: PageProps<'/buyer/
   await requireBuyer();
 
   const db = appDb();
-  const approvals = await pendingApprovals(db, await demoBuyerId(db));
+  const approvals = await purchaseDetails(db, { buyerId: await demoBuyerId(db), status: 'awaiting_approval' }, new Date());
   const codes = await Promise.all(approvals.map(qrFor));
   const notices = returnNotices(await searchParams);
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-10 font-paypal text-pp-ink sm:py-16">
-      <BuyerNav current="/buyer/approvals" />
-      <h1 className="mt-6 text-3xl font-semibold text-pp-navy">Approvals</h1>
-      <p className="mt-3 text-pp-muted">
-        Your agent proposed these purchases, and your mandate says you decide. Nothing is paid until you approve a
-        purchase at PayPal.
-      </p>
+    <div className="w-full max-w-3xl">
+      <PageHeader
+        title="Approvals"
+        purpose="Purchases your mandate asks you about. Nothing is paid until you approve one at PayPal."
+      />
 
-      {notices.map((notice) => (
-        <p
-          key={notice.text}
-          role={notice.tone === 'danger' ? 'alert' : 'status'}
-          className={`mt-6 rounded-xl border bg-pp-surface p-4 text-sm ${NOTICE_STYLES[notice.tone]}`}
-        >
-          {notice.text}
-          {notice.ledger && (
-            <>
-              {' '}
-              <Link href="/buyer/ledger" className={textLink}>
-                Open your ledger
-              </Link>
-            </>
-          )}
-        </p>
-      ))}
+      {notices.length > 0 && (
+        <div className="mb-6 grid gap-3">
+          {notices.map((notice) => (
+            <Notice key={notice.text} kind={TONE_KIND[notice.tone]}>
+              {notice.text}
+              {notice.ledger && (
+                <>
+                  {' '}
+                  <Link href="/buyer/ledger" className={textLink}>
+                    Open your ledger
+                  </Link>
+                </>
+              )}
+            </Notice>
+          ))}
+        </div>
+      )}
 
       {approvals.length === 0 ? (
-        <p className="mt-8 text-pp-muted">
-          Nothing is waiting for your approval.{' '}
-          <Link href="/buyer/shop" className={textLink}>
-            Send your agent shopping
-          </Link>
-          .
-        </p>
+        <EmptyState
+          message="Nothing is waiting for your approval. When your agent proposes a purchase your mandate asks you about, it waits here until you decide."
+          action={{ href: '/buyer/shop', label: 'Send your agent shopping' }}
+        />
       ) : (
-        <ul className="mt-8 flex flex-col gap-6">
+        <ul className="grid gap-5">
           {approvals.map((approval, index) => (
             <Approval key={approval.id} approval={approval} qrCode={codes[index]} />
           ))}
         </ul>
       )}
-    </main>
+    </div>
   );
 }
 
-function Approval({ approval, qrCode }: { approval: PendingApproval; qrCode: string | null }) {
+function Approval({ approval, qrCode }: { approval: PurchaseDetail; qrCode: string | null }) {
+  const headingId = `approval-${approval.id}`;
   return (
-    <li className="rounded-xl border border-pp-border bg-pp-surface p-5">
+    <li aria-labelledby={headingId} className="grid gap-4 rounded-panel border border-line bg-panel p-4 sm:p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="text-lg font-semibold break-words text-pp-navy">
+        <h2 id={headingId} className="text-lead font-medium break-words text-text">
           {approval.seller}
         </h2>
-        <p className="text-lg font-semibold">
-          {approval.totalCents === null ? 'Amount unknown' : formatUsd(approval.totalCents)}
-        </p>
+        <Money cents={approval.totalCents} missing="Amount unknown" className="text-lead font-medium text-text" />
       </div>
-      <p className="mt-1 text-sm text-pp-muted">Proposed {dateTime.format(approval.createdAt)} (UTC)</p>
+      <div className="-mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <VerdictBadge verdict={approval.verdict} />
+        <span className="text-meta text-muted">Proposed {dateTime.format(new Date(approval.createdAt))} UTC</span>
+      </div>
 
       {approval.items.length > 0 && (
-        <>
-          <h3 className="mt-4 text-sm font-semibold text-pp-navy">What it buys</h3>
-          <ul className="mt-1 space-y-1 text-sm">
+        <section aria-label="What it buys">
+          <ul className="grid gap-1 text-body">
             {approval.items.map((item) => (
               <li key={item.sku} className="flex justify-between gap-4">
-                <span className="min-w-0 break-words">
-                  {item.quantity} × {item.title}
+                <span className="min-w-0 break-words text-text">
+                  {item.quantity} × {item.title} <span className="font-mono text-meta text-muted">{item.sku}</span>
                 </span>
-                <span className="shrink-0">{formatUsd(item.unitPriceCents * item.quantity)}</span>
+                <Money cents={item.unitPriceCents * item.quantity} mono className="shrink-0 text-meta text-text" />
               </li>
             ))}
           </ul>
-        </>
+        </section>
       )}
 
+      <PurchaseTrace detail={approval} label={`Authority trace of the purchase from ${approval.seller}`} />
+
       {approval.reasons.length > 0 && (
-        <>
-          <h3 className="mt-4 text-sm font-semibold text-pp-navy">Why Behest asks you</h3>
-          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm break-words">
+        <section aria-labelledby={`${headingId}-why`}>
+          <h3 id={`${headingId}-why`} className="text-meta text-muted">
+            Why Behest asks you
+          </h3>
+          <ul className="mt-1 grid list-disc gap-0.5 pl-4 text-body break-words text-text marker:text-muted">
             {approval.reasons.map((reason, index) => (
               // Two reasons can read the same.
               <li key={index}>{reason}</li>
             ))}
           </ul>
-        </>
+        </section>
       )}
 
+      <WhatWouldChange change={approval.change} reasons={approval.reasons} />
+
       {approval.approveUrl ? (
-        <div className="mt-5 flex flex-col items-start gap-4 sm:flex-row sm:items-center">
-          <a href={approval.approveUrl} className={primaryLink}>
+        <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center">
+          <a href={approval.approveUrl} className={buttonClass('primary')}>
             Approve at PayPal
           </a>
           {qrCode && (
@@ -159,17 +160,17 @@ function Approval({ approval, qrCode }: { approval: PendingApproval; qrCode: str
               <Image
                 src={qrCode}
                 alt="QR code of the PayPal approval link"
-                width={120}
-                height={120}
+                width={112}
+                height={112}
                 unoptimized
-                className="size-30 rounded-lg border border-pp-border"
+                className="size-28 rounded-control border border-line bg-white p-1"
               />
-              <figcaption className="max-w-40 text-sm text-pp-muted">Scan it to approve on your phone.</figcaption>
+              <figcaption className="max-w-40 text-meta text-muted">Scan it to approve on your phone.</figcaption>
             </figure>
           )}
         </div>
       ) : (
-        <p className="mt-5 text-sm text-pp-muted">Approval link unavailable</p>
+        <p className="text-body text-muted">The approval link is not ready yet. Refresh the page in a moment.</p>
       )}
     </li>
   );

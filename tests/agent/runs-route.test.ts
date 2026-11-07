@@ -183,7 +183,12 @@ describe('POST /api/agent/runs', () => {
       { type: 'status', text: 'Your agent is looking for what you asked for.' },
       { type: 'tool', name: 'search_sellers', input: { query: 'turmeric' } },
       { type: 'tool', name: 'propose_purchase', input: proposeCall.input },
-      { type: 'proposal', outcome: expect.objectContaining({ purchaseId: purchase.id, verdict: 'ALLOW', status: purchase.status }) },
+      {
+        type: 'proposal',
+        outcome: expect.objectContaining({ purchaseId: purchase.id, verdict: 'ALLOW', status: purchase.status }),
+        // The page's description of the proposal, read back from the database for this buyer.
+        view: expect.objectContaining({ id: purchase.id, gateVerdict: purchase.gateVerdict, status: purchase.status }),
+      },
       { type: 'done', summary: SUMMARY },
     ]);
     expect(purchase.request).toBe(REQUEST);

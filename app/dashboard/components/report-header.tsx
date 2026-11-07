@@ -41,7 +41,7 @@ export function ReportHeader({
   onEditingChange: (editing: boolean) => void;
 }) {
   return (
-    <div className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b border-pp-border bg-white px-4 py-4 sm:px-8 sm:py-5">
+    <div className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b border-pp-border bg-pp-surface px-4 py-4 sm:px-8 sm:py-5">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-pp-muted">{reportName}</p>
         <h1 className="truncate text-[28px] font-semibold leading-tight text-pp-navy">{pageTitle}</h1>

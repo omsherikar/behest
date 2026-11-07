@@ -2,8 +2,11 @@
 
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
+import { buttonClass } from '@/components/ui/button';
+import { Notice } from '@/components/ui/notice';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { isDeclineAnswer } from '@/lib/mandate/decline';
+import { MandateActions } from './mandate-actions';
 import { SignWithPasskey } from './passkey-sign';
 import { post, type RequestFailed, type Signed } from './requests';
 
@@ -12,6 +15,7 @@ import { post, type RequestFailed, type Signed } from './requests';
 // a wallet is already linked. The buyer can also confirm with a passkey registered to their account
 // signing the mandate.
 // Answers from every round are sent again with each compile, which keeps no state between calls.
+// The readback reads as a draft until it is signed; the signing actions sit in MandateActions.
 
 type Question = { id: string; question: string; options: string[] };
 
@@ -29,10 +33,8 @@ const BUDGET_QUESTION = 'budget_amount';
 
 const PLACEHOLDER = '$60 a month on groceries and spices, ask me above $25, never electronics';
 
-const primaryButton =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-white transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
-const secondaryButton =
-  'inline-flex h-10 items-center justify-center rounded-full border border-pp-blue px-5 font-semibold text-pp-blue transition-colors hover:bg-pp-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
+const primaryButton = buttonClass('primary');
+const secondaryButton = buttonClass('secondary');
 
 export function MandateForm({ replacing }: { replacing: boolean }) {
   const router = useRouter();
@@ -108,10 +110,11 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
 
   if (declined) {
     return (
-      <div className="mt-4 rounded-xl border border-pp-border bg-pp-surface p-5">
-        <p className="font-semibold text-pp-navy">You chose not to set up this mandate.</p>
-        <p className="mt-1 text-sm text-pp-muted">Nothing was signed. You can reword it and try again.</p>
-        <button type="button" onClick={startOver} className={`mt-4 ${secondaryButton}`}>
+      <div className="mt-4 grid gap-3">
+        <Notice kind="info" title="You chose not to set up this mandate.">
+          Nothing was signed. You can reword it and try again.
+        </Notice>
+        <button type="button" onClick={startOver} className={`justify-self-start ${secondaryButton}`}>
           Edit your mandate
         </button>
       </div>
@@ -120,19 +123,16 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
 
   if (signed) {
     return (
-      <div className="mt-4 rounded-xl border border-pp-border bg-pp-surface p-5">
-        <p className="font-semibold text-pp-navy">Your mandate is signed.</p>
-        {signed.approveUrl === null ? (
-          <p className="mt-1 text-sm text-pp-muted">Your linked PayPal wallet pays within it, as shown above.</p>
-        ) : (
-          <>
-            <p className="mt-1 text-sm text-pp-muted">
-              Link your PayPal wallet so your agent can pay within it. You approve this at PayPal, then come back here.
-            </p>
-            <a href={signed.approveUrl} className={`mt-4 ${primaryButton}`}>
-              Link PayPal
-            </a>
-          </>
+      <div className="mt-4 grid gap-3">
+        <Notice kind="success" title="Your mandate is signed.">
+          {signed.approveUrl === null
+            ? 'Your linked PayPal wallet pays within it, as shown above.'
+            : 'Link your PayPal wallet so your agent can pay within it. You approve this at PayPal, then come back here.'}
+        </Notice>
+        {signed.approveUrl !== null && (
+          <a href={signed.approveUrl} className={`justify-self-start ${primaryButton}`}>
+            Link PayPal
+          </a>
         )}
       </div>
     );
@@ -141,7 +141,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
   return (
     <div className="mt-4">
       <form onSubmit={onSubmit}>
-        <label htmlFor="mandate-text" className="block text-sm font-semibold text-pp-navy">
+        <label htmlFor="mandate-text" className="block font-medium text-text">
           {replacing ? 'Your new mandate' : 'Your mandate'}
         </label>
         <textarea
@@ -155,7 +155,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
           rows={3}
           maxLength={2000}
           placeholder={PLACEHOLDER}
-          className="mt-2 w-full rounded-xl border border-pp-border bg-pp-surface p-3 text-pp-ink placeholder:text-pp-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60"
+          className="mt-2 w-full rounded-control border border-line-strong bg-panel p-3 text-text placeholder:text-muted disabled:opacity-60"
         />
         <button type="submit" disabled={busy !== null || text.trim() === ''} className={`mt-3 ${primaryButton}`}>
           {busy === 'compile' && !compiled ? 'Reading it back...' : 'Read it back'}
@@ -163,24 +163,27 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
       </form>
 
       {error && (
-        <p role="alert" className="mt-4 text-sm text-pp-danger">
+        <Notice kind="stop" className="mt-4">
           {error}
-        </p>
+        </Notice>
       )}
 
       {compiled && (
         <div className="mt-6 flex flex-col gap-6">
-          <section aria-labelledby="readback-heading" className="rounded-xl border border-pp-border bg-pp-surface p-5">
-            <h3 id="readback-heading" className="font-semibold text-pp-navy">
-              What your agent may do
-            </h3>
+          <section aria-labelledby="readback-heading" className="rounded-panel border border-dashed border-line-strong bg-panel/60 p-4 sm:p-5">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <h3 id="readback-heading" className="font-medium text-text">
+                What your agent may do
+              </h3>
+              <span className="text-meta text-muted">Draft, not signed yet</span>
+            </div>
             {budgetPending ? (
-              <p className="mt-2 text-sm text-pp-warning">
+              <p className="mt-2 text-body text-hold">
                 Pending: you have not said how much your agent may spend. Answer the question below and Behest reads
                 back your mandate.
               </p>
             ) : (
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-pp-ink">
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-text marker:text-muted">
                 {compiled.result.readback.map((line) => (
                   <li key={line}>{line}</li>
                 ))}
@@ -190,10 +193,10 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
 
           {compiled.result.assumptions.length > 0 && (
             <section aria-labelledby="assumptions-heading">
-              <h3 id="assumptions-heading" className="font-semibold text-pp-navy">
+              <h3 id="assumptions-heading" className="font-medium text-text">
                 What Behest assumed
               </h3>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-pp-muted">
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-body text-muted">
                 {compiled.result.assumptions.map((assumption, index) => (
                   // The model writes these, so two could read the same.
                   <li key={index}>{assumption}</li>
@@ -204,13 +207,13 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
 
           {questions.length > 0 && (
             <section aria-labelledby="questions-heading">
-              <h3 id="questions-heading" className="font-semibold text-pp-navy">
+              <h3 id="questions-heading" className="font-medium text-text">
                 Before you confirm
               </h3>
               <ul className="mt-2 flex flex-col gap-4">
                 {questions.map((question) => (
                   <li key={question.id}>
-                    <p className="text-pp-ink">{question.question}</p>
+                    <p className="text-text">{question.question}</p>
                     {/* Only the buyer can answer a question that offers nothing but to decline, such as an amount. */}
                     {question.options.every(isDeclineAnswer) && (
                       <input
@@ -220,7 +223,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
                         onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
                         disabled={busy !== null}
                         maxLength={500}
-                        className="mt-2 w-full rounded-xl border border-pp-border bg-pp-surface px-3 py-2 text-pp-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60"
+                        className="mt-2 w-full rounded-control border border-line-strong bg-panel px-3 py-2 text-text disabled:opacity-60"
                       />
                     )}
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -233,10 +236,10 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
                             aria-pressed={chosen}
                             disabled={busy !== null}
                             onClick={() => choose(question, option)}
-                            className={`rounded-full border px-3 py-1.5 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60 ${
+                            className={`rounded-control border px-3 py-1.5 text-body transition-colors disabled:opacity-60 ${
                               chosen
-                                ? 'border-pp-blue bg-pp-highlight text-pp-blue-dark'
-                                : 'border-pp-border bg-pp-surface text-pp-ink hover:border-pp-blue'
+                                ? 'border-action bg-action/14 text-text'
+                                : 'border-line-strong bg-panel text-text hover:border-muted hover:bg-raised'
                             }`}
                           >
                             {option}
@@ -258,11 +261,12 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
             </section>
           )}
 
-          <div>
-            <div className="flex flex-wrap gap-3">
-              <button type="button" onClick={() => void confirm()} disabled={busy !== null || !confirmToken} className={primaryButton}>
-                {busy === 'confirm' ? 'Signing...' : 'Confirm and sign'}
-              </button>
+          <MandateActions
+            onConfirm={() => void confirm()}
+            confirming={busy === 'confirm'}
+            disabled={busy !== null || !confirmToken}
+            questionsOpen={questions.length > 0}
+            passkey={
               <SignWithPasskey
                 mandate={confirmToken ? { text: compiled.text, policy: compiled.result.policy, confirmToken } : null}
                 disabled={busy !== null}
@@ -283,15 +287,8 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
                   if (status === 502) router.refresh();
                 }}
               />
-            </div>
-            {questions.length > 0 && (
-              <p className="mt-2 text-sm text-pp-muted">Answer the questions above before you confirm.</p>
-            )}
-            <p className="mt-2 text-sm text-pp-muted">
-              Signing with a passkey adds your passkey&apos;s signature over this exact mandate. Confirming without one rests
-              on your signed-in session alone.
-            </p>
-          </div>
+            }
+          />
         </div>
       )}
     </div>

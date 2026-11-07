@@ -2,36 +2,105 @@
 
 import Link from 'next/link';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
-import { type AgentEvent, type RunOutcome, readAgentEvents } from '@/lib/buyer-pages/agent-events';
-import { aboutMandate, runRefusal, statusWords, toolStep } from '@/lib/buyer-pages/words';
-import { VerdictChip } from '../verdict-chip';
+import { buttonClass } from '@/components/ui/button';
+import { Console, type ConsoleRow } from '@/components/ui/console';
+import { Notice } from '@/components/ui/notice';
+import { ProposalCard } from '@/components/purchase/proposal-card';
+import { type AgentEvent, readAgentEvents, type RunOutcome } from '@/lib/buyer-pages/agent-events';
+import type { PurchaseDetail } from '@/lib/buyer-pages/detail';
+import { aboutMandate, runRefusal, toolArgs, toolStep } from '@/lib/buyer-pages/words';
 
-// The buyer asks the shopping agent for something and follows its run as a timeline: what it is
-// doing, each purchase it proposed with Behest's verdict, the purchase's status and the reasons,
-// and its closing summary. One run at a time; leaving the page stops the stream.
-// Everything here is shown as text: tool inputs and the summary are the agent's, and reasons may
-// quote what a seller wrote.
+// The buyer asks the shopping agent for something and follows its run in a console: each tool call
+// the agent makes, as the call and in plain words; each purchase it proposes, as a card whose
+// authority trace fills in once Behest has decided it; and its closing summary. A proposal's card
+// appears as soon as the agent proposes it and fills in when the decision arrives. One run at a
+// time; leaving the page stops the stream. Tool inputs and the summary are the agent's, and reasons
+// may quote what a seller wrote, so everything here is shown as text.
 
 const PLACEHOLDER = 'Restock turmeric and cumin, one jar of each';
 
 const UNREACHABLE = 'Could not reach Behest. Check your connection and try again.';
 const CUT_OFF = 'The connection closed before your agent finished.';
 
-const primaryButton =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-white transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
-const textLink =
-  'font-semibold text-pp-blue underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
+const textLink = 'font-medium text-action underline-offset-2 hover:text-action-strong hover:underline';
 
 /** Why a run did not end with the agent's own word: refused, unreachable or cut off. */
 type Problem = { text: string; kind: 'refused' | 'session' | 'unreachable' | 'cut_off' };
 
+/** One line of the console: an event as it arrived, or a proposal waiting for its decision. */
+type Line =
+  | { id: number; at: Date; event: Exclude<AgentEvent, { type: 'proposal' }> }
+  | { id: number; at: Date; event: { type: 'proposal'; outcome: RunOutcome | null; view: PurchaseDetail | null } };
+
+/** The console's lines with `event` added: a proposal fills the card its tool call opened. */
+function withEvent(lines: Line[], event: AgentEvent, nextId: () => number): Line[] {
+  const at = new Date();
+  if (event.type === 'proposal') {
+    const index = lines.findLastIndex((line) => line.event.type === 'proposal' && line.event.outcome === null);
+    const filled: Line = {
+      id: index === -1 ? nextId() : lines[index].id,
+      at: index === -1 ? at : lines[index].at,
+      event: { type: 'proposal', outcome: event.outcome, view: event.view ?? null },
+    };
+    return index === -1 ? [...lines, filled] : lines.map((line, i) => (i === index ? filled : line));
+  }
+  const added: Line[] = [{ id: nextId(), at, event }];
+  if (event.type === 'tool' && event.name === 'propose_purchase') {
+    added.push({ id: nextId(), at, event: { type: 'proposal', outcome: null, view: null } });
+  }
+  return [...lines, ...added];
+}
+
+function consoleRow({ id, at, event }: Line): ConsoleRow {
+  const key = String(id);
+  switch (event.type) {
+    case 'status':
+      return { id: key, at, kind: 'status', body: event.text };
+    case 'tool': {
+      const args = toolArgs(event.input);
+      return {
+        id: key,
+        at,
+        kind: 'tool',
+        label: event.name,
+        body: args || 'no arguments',
+        detail: <p className="font-sans text-meta break-words text-muted">{toolStep(event.name, event.input)}</p>,
+      };
+    }
+    case 'proposal':
+      return { id: key, at, kind: 'proposal', label: 'Proposal', wide: true, body: <ProposalCard outcome={event.outcome} view={event.view} /> };
+    case 'done':
+      return { id: key, at, kind: 'summary', label: 'Summary', body: <p className="whitespace-pre-line">{event.summary}</p> };
+    case 'error':
+      return {
+        id: key,
+        at,
+        kind: 'error',
+        label: 'Error',
+        body: (
+          <p>
+            {event.message}{' '}
+            {aboutMandate(event.message) && (
+              <Link href="/buyer" className={textLink}>
+                Go to your mandate
+              </Link>
+            )}
+          </p>
+        ),
+      };
+  }
+}
+
 export function ShopRun() {
   const [request, setRequest] = useState('');
+  const [asked, setAsked] = useState('');
   const [running, setRunning] = useState(false);
-  const [steps, setSteps] = useState<AgentEvent[]>([]);
+  const [lines, setLines] = useState<Line[]>([]);
   const [problem, setProblem] = useState<Problem | null>(null);
   /** Aborts the run's request; held so that leaving the page stops the stream. */
   const run = useRef<AbortController | null>(null);
+  const lastId = useRef(0);
+  const nextId = () => ++lastId.current;
 
   useEffect(() => () => run.current?.abort(), []);
 
@@ -41,7 +110,8 @@ export function ShopRun() {
     const controller = new AbortController();
     run.current = controller;
     setRunning(true);
-    setSteps([]);
+    setLines([]);
+    setAsked(request.trim());
     setProblem(null);
     let answered = false;
     let ended = false;
@@ -61,7 +131,7 @@ export function ShopRun() {
       }
       for await (const step of readAgentEvents(response.body)) {
         if (step.type === 'done' || step.type === 'error') ended = true;
-        setSteps((current) => [...current, step]);
+        setLines((current) => withEvent(current, step, nextId));
       }
       if (!ended) setProblem({ text: CUT_OFF, kind: 'cut_off' });
     } catch {
@@ -75,9 +145,9 @@ export function ShopRun() {
   }
 
   return (
-    <div className="mt-6">
-      <form onSubmit={start}>
-        <label htmlFor="shop-request" className="block text-sm font-semibold text-pp-navy">
+    <div className="grid gap-5">
+      <form onSubmit={start} className="grid gap-2.5">
+        <label htmlFor="shop-request" className="font-medium text-text">
           What should your agent buy?
         </label>
         <textarea
@@ -88,105 +158,57 @@ export function ShopRun() {
           rows={3}
           maxLength={2000}
           placeholder={PLACEHOLDER}
-          className="mt-2 w-full rounded-xl border border-pp-border bg-pp-surface p-3 text-pp-ink placeholder:text-pp-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60"
+          className="w-full rounded-control border border-line-strong bg-panel p-3 text-text placeholder:text-muted disabled:opacity-60"
         />
-        <button type="submit" disabled={running || request.trim() === ''} className={`mt-3 ${primaryButton}`}>
+        <button type="submit" disabled={running || request.trim() === ''} className={buttonClass('primary', 'default', 'justify-self-start')}>
           {running ? 'Your agent is shopping...' : 'Send your agent'}
         </button>
       </form>
 
       {problem && (
-        <div role="alert" className="mt-4 text-sm text-pp-danger">
-          <p>{problem.text}</p>
+        <Notice kind="stop">
+          {problem.text}
           {problem.kind === 'session' && (
-            <Link href="/" className={`mt-1 inline-block ${textLink}`}>
-              Go to the home page
-            </Link>
+            <>
+              {' '}
+              <Link href="/" className={textLink}>
+                Go to the home page
+              </Link>
+            </>
           )}
           {problem.kind === 'cut_off' && (
-            <p className="mt-1 text-pp-ink">
+            <>
+              {' '}
               Any purchase it made is in{' '}
               <Link href="/buyer/ledger" className={textLink}>
                 your ledger
               </Link>
               .
+            </>
+          )}
+        </Notice>
+      )}
+
+      <Console
+        label="Your agent's run"
+        live
+        header={
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-meta">
+            <p className="min-w-0 text-muted">
+              {asked ? (
+                <>
+                  Request <span className="break-words text-text">{asked}</span>
+                </>
+              ) : (
+                'Agent run'
+              )}
             </p>
-          )}
-        </div>
-      )}
-
-      {steps.length > 0 && (
-        <section aria-labelledby="timeline-heading" className="mt-8">
-          <h2 id="timeline-heading" className="text-lg font-semibold text-pp-navy">
-            What your agent did
-          </h2>
-          <ol aria-live="polite" className="mt-3 flex flex-col gap-3">
-            {steps.map((step, index) => (
-              // The timeline only grows, so a step's place in it never changes.
-              <TimelineStep key={index} step={step} />
-            ))}
-          </ol>
-        </section>
-      )}
+            <p className="text-muted">{running ? 'Running' : lines.length > 0 ? 'Finished' : 'Idle'}</p>
+          </div>
+        }
+        empty="When you send your agent, each search it makes and each purchase it proposes appears here, with the trace that authorized it."
+        rows={lines.map(consoleRow)}
+      />
     </div>
-  );
-}
-
-function TimelineStep({ step }: { step: AgentEvent }) {
-  switch (step.type) {
-    case 'status':
-      return <li className="text-sm text-pp-muted">{step.text}</li>;
-    case 'tool':
-      return <li className="text-sm break-words text-pp-muted">{toolStep(step.name, step.input)}</li>;
-    case 'proposal':
-      return <Proposal outcome={step.outcome} />;
-    case 'done':
-      return (
-        <li className="rounded-xl border border-pp-border bg-pp-surface p-4">
-          <p className="text-sm font-semibold text-pp-navy">Your agent says</p>
-          <p className="mt-1 break-words whitespace-pre-line">{step.summary}</p>
-        </li>
-      );
-    case 'error':
-      return (
-        <li role="alert" className="text-sm text-pp-danger">
-          <p>{step.message}</p>
-          {aboutMandate(step.message) && (
-            <Link href="/buyer" className={`mt-1 inline-block ${textLink}`}>
-              Go to your mandate
-            </Link>
-          )}
-        </li>
-      );
-  }
-}
-
-function Proposal({ outcome }: { outcome: RunOutcome }) {
-  const waiting = outcome.verdict === 'ASK' && outcome.status === 'awaiting_approval';
-  return (
-    <li className="rounded-xl border border-pp-border bg-pp-surface p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <VerdictChip verdict={outcome.verdict} />
-        <span className="font-semibold text-pp-navy">{statusWords(outcome.status)}</span>
-      </div>
-      {outcome.reasons.length > 0 && (
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm break-words">
-          {outcome.reasons.map((reason, index) => (
-            // Two reasons can read the same.
-            <li key={index}>{reason}</li>
-          ))}
-        </ul>
-      )}
-      {waiting && (
-        <Link href="/buyer/approvals" className={`mt-3 inline-block text-sm ${textLink}`}>
-          Approve it on your approvals page
-        </Link>
-      )}
-      {outcome.receiptId && (
-        <p className="mt-2 text-xs break-all text-pp-muted">
-          Receipt <span className="font-mono">{outcome.receiptId}</span>
-        </p>
-      )}
-    </li>
   );
 }

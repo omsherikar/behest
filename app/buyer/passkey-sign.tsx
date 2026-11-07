@@ -129,7 +129,7 @@ export function SignWithPasskey({
         type="button"
         onClick={() => void sign(true)}
         disabled={disabled || !mandate}
-        className="text-sm font-semibold text-pp-blue hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+        className="text-body font-medium text-action hover:underline disabled:cursor-not-allowed disabled:opacity-50"
       >
         Use a passkey on this device
       </button>

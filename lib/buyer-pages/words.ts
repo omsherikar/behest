@@ -7,7 +7,7 @@ import { plural } from '@/lib/domain/words';
 const STATUS_WORDS: Record<PurchaseStatus, string> = {
   proposed: 'Being checked',
   charging: 'Confirming payment',
-  awaiting_approval: 'Approve at PayPal',
+  awaiting_approval: 'Waiting for your approval',
   captured: 'Paid',
   accepted: 'Paid',
   settled: 'Paid',
@@ -77,6 +77,42 @@ export function toolStep(name: string, input: unknown): string {
     default:
       return `Using ${name}`;
   }
+}
+
+/** The most characters of one argument the console shows. */
+const ARG_MAX = 48;
+
+/** One argument the agent chose, as the console writes it: text quoted and cut, cart items as `SKU x2`. */
+function argument(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const line = value.replaceAll(/\s+/g, ' ').trim();
+    return JSON.stringify(line.length > ARG_MAX ? `${line.slice(0, ARG_MAX - 3).trim()}...` : line);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    const items = value.map((item) => {
+      const { sku, quantity } = typeof item === 'object' && item !== null ? (item as { sku?: unknown; quantity?: unknown }) : {};
+      return typeof sku === 'string' && typeof quantity === 'number' ? `${sku.slice(0, ARG_MAX)} x${quantity}` : null;
+    });
+    return items.every((item) => item !== null) ? items.join(', ') : plural(value.length, 'item');
+  }
+  return null;
+}
+
+/**
+ * A tool call's arguments as the agent console shows them, such as `query: "turmeric",
+ * maxPriceCents: 2500`. The input is the agent's, so only plain values are written, each cut
+ * short, and anything nested is left out. Empty when there is nothing to show.
+ */
+export function toolArgs(input: unknown): string {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return '';
+  return Object.entries(input)
+    .map(([key, value]) => {
+      const shown = argument(value);
+      return shown === null ? null : `${key.slice(0, ARG_MAX)}: ${shown}`;
+    })
+    .filter((arg): arg is string => arg !== null)
+    .join(', ');
 }
 
 const REFUSALS = new Map<number, string>([

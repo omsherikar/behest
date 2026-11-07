@@ -5,6 +5,9 @@ import { plural } from '@/lib/domain/words';
 import { disputeRows } from '@/lib/ops-pages/disputes';
 import { requireOperator } from '../require-operator';
 import { DisputesGrid } from './disputes-grid';
+import { fillWindow } from '@/components/shell/app-shell';
+import { EmptyState } from '@/components/ui/empty-state';
+import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = {
   title: 'Disputes',
@@ -22,22 +25,22 @@ export default async function DisputesPage() {
   const submitted = rows.filter((row) => row.submitted).length;
 
   return (
-    <main className="flex h-dvh flex-col overflow-y-auto bg-pp-canvas px-4 py-6 font-paypal text-pp-ink sm:px-8">
-      <h1 id="disputes-heading" className="text-[28px] font-semibold text-pp-navy">
-        Disputes
-      </h1>
-      <p className="mt-2 max-w-3xl text-sm text-pp-muted">
-        {plural(rows.length, 'dispute')} opened by buyers at PayPal, {submitted} answered with evidence. Behest answers
-        each one as the merchant of record, with the signed mandate, its readback, the signed receipt, the cart and the
-        purchase log. Open a dispute to draft its narrative, review it and submit it to PayPal.
-      </p>
+    <div className={fillWindow}>
+      <PageHeader
+        id="disputes-heading"
+        title="Disputes"
+        purpose={`${plural(rows.length, 'dispute')} opened by buyers at PayPal, ${submitted} answered with evidence. Behest answers each one as the merchant of record, from its signed records. Open a dispute to draft, review and submit its answer.`}
+      />
       {rows.length > 0 ? (
-        <div className="mt-4 flex min-h-0 flex-1 flex-col">
+        <div className="flex min-h-0 flex-1 flex-col">
           <DisputesGrid rows={rows} labelledBy="disputes-heading" />
         </div>
       ) : (
-        <p className="mt-6 text-pp-muted">No buyer has opened a dispute yet.</p>
+        <EmptyState
+          message="No buyer has opened a dispute yet. When one does, PayPal tells Behest and it appears here, matched to its purchase."
+          action={{ href: '/dashboard', label: 'Open the dashboard' }}
+        />
       )}
-    </main>
+    </div>
   );
 }

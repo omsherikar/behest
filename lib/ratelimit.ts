@@ -20,8 +20,9 @@ export const PUBLIC_READ_LIMIT: Readonly<RateLimitOptions> = { capacity: 60, ref
 export const PUBLIC_WRITE_LIMIT: Readonly<RateLimitOptions> = { capacity: 20, refillPerMinute: 20 };
 
 /**
- * The most keys a limiter tracks. Past it, the keys seen least recently are forgotten; forgetting a
- * key only hands it a full bucket again, which an idle key would have refilled to anyway.
+ * The most keys a limiter ever tracks. Keys seen least recently are forgotten a generation at a time,
+ * so some go before this bound is reached; forgetting a key only hands it a full bucket again, which
+ * an idle key would have refilled to anyway.
  */
 export const MAX_TRACKED_KEYS = 10_000;
 

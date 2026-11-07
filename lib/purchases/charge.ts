@@ -334,7 +334,7 @@ async function applyAnswer(deps: ChargeDeps, purchaseId: string, requestId: stri
       await recordDecline(db, purchaseId, requestId);
       return purchaseOutcome(db, purchaseId);
     case 'NOT_APPROVED':
-      await reopenApproval(db, purchaseId, answer.orderId, requestId);
+      await reopenApproval(db, purchaseId, { orderId: answer.orderId, requestId }, deps.now());
       return purchaseOutcome(db, purchaseId);
   }
 }
@@ -367,13 +367,19 @@ async function recordDecline(db: Db, purchaseId: string, requestId: string): Pro
   }
 }
 
+/** The `approval_order` event's record of when the purchase's approval window closes, if any. */
+const ApprovalWindow = z.object({ expiresAt: z.iso.datetime() });
+
 /**
  * Sends a purchase whose order PayPal would not capture, because its buyer has not approved it, back
  * to `awaiting_approval` for them to approve, logging `approval_pending`. No money moved, and the
  * approval link stays on the purchase. The purchase is locked, and only one still `charging` with no
  * capture recorded goes back, so a capture another call has recorded meanwhile is never set aside.
+ * It also queues a fresh `approval_expiry` job, due when the approval window recorded with the order
+ * closes, or now if that has passed: the first expiry may already have run while the purchase was
+ * `charging`, and done nothing.
  */
-async function reopenApproval(db: Db, purchaseId: string, orderId: string, requestId: string): Promise<void> {
+async function reopenApproval(db: Db, purchaseId: string, { orderId, requestId }: CaptureRequest, now: Date): Promise<void> {
   await db.transaction(async (tx) => {
     const [purchase] = await tx
       .select({ status: purchases.status, captureId: purchases.paypalCaptureId })
@@ -383,6 +389,15 @@ async function reopenApproval(db: Db, purchaseId: string, orderId: string, reque
     if (purchase?.status !== 'charging' || purchase.captureId !== null) return;
     await appendEvent(tx, purchaseId, 'approval_pending', { orderId, requestId });
     await transition(tx, purchaseId, 'charging', 'awaiting_approval', { approver: null });
+    const [order] = await tx
+      .select({ data: purchaseEvents.data })
+      .from(purchaseEvents)
+      .where(and(eq(purchaseEvents.purchaseId, purchaseId), eq(purchaseEvents.kind, 'approval_order')))
+      .limit(1);
+    // Every approval order is recorded with its window. Were one not, the purchase expires now.
+    const recorded = ApprovalWindow.safeParse(order?.data);
+    const closes = recorded.success ? Date.parse(recorded.data.expiresAt) : now.getTime();
+    await enqueue(tx, 'approval_expiry', { purchaseId }, new Date(Math.max(now.getTime(), closes)));
   });
 }
 

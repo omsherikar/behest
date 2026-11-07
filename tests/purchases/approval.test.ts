@@ -51,10 +51,6 @@ async function stepsOf(db: PurchaseDeps['db'], purchaseId: string): Promise<stri
   return (await eventsOf(db, purchaseId)).filter((e) => e.kind !== 'status').map((e) => e.kind);
 }
 
-/** Runs the jobs due by the clock, with expireApproval as the `approval_expiry` handler. */
-function runExpiryJobs(deps: PurchaseDeps, clock: { now: Date }): Promise<number> {
-  return runDueJobs(deps.db, { approval_expiry: (payload, d) => expireApproval(d, String(payload.purchaseId)) }, deps, () => clock.now);
-}
 
 /**
  * The gate's budget check of the buyer's next proposal, ten jars of turmeric for $45.00, with the
@@ -81,9 +77,26 @@ async function budgetCheckOfNextProposal(db: PurchaseDeps['db'], buyerId: string
   return outcomes.find((o) => o.rule === 'budget_remaining');
 }
 
-/** Runs the jobs due by the clock, with retryCharge as the `charge_retry` handler. */
-function runRetryJobs(deps: PurchaseDeps, clock: { now: Date }): Promise<number> {
-  return runDueJobs(deps.db, { charge_retry: (payload, d) => retryCharge(d, String(payload.purchaseId)) }, deps, () => clock.now);
+/** When each `approval_expiry` job still queued is due, in order. */
+async function expiryTimes(db: PurchaseDeps['db']): Promise<Date[]> {
+  const queued = await db
+    .select({ runAt: jobs.runAt })
+    .from(jobs)
+    .where(and(eq(jobs.kind, 'approval_expiry'), eq(jobs.status, 'queued')));
+  return queued.map((j) => j.runAt).sort((a, b) => a.getTime() - b.getTime());
+}
+
+/** Runs the jobs due by the clock, with retryCharge and expireApproval as their handlers. */
+function runJobs(deps: PurchaseDeps, clock: { now: Date }): Promise<number> {
+  return runDueJobs(
+    deps.db,
+    {
+      charge_retry: (payload, d) => retryCharge(d, String(payload.purchaseId)),
+      approval_expiry: (payload, d) => expireApproval(d, String(payload.purchaseId)),
+    },
+    deps,
+    () => clock.now,
+  );
 }
 
 /** The kinds of the queued and finished jobs, sorted. */
@@ -158,7 +171,10 @@ describe('startApproval', () => {
     ]);
     expect(await eventsOf(db, purchaseId)).toEqual([
       { kind: 'status', data: { from: 'proposed', to: 'awaiting_approval' } },
-      { kind: 'approval_order', data: { requestId: approvalRequestId(purchaseId), orderId, approveUrl } },
+      {
+        kind: 'approval_order',
+        data: { requestId: approvalRequestId(purchaseId), orderId, approveUrl, expiresAt: EXPIRES_AT.toISOString() },
+      },
     ]);
   });
 
@@ -374,6 +390,8 @@ describe('completeApproval', () => {
       { kind: 'approval_pending', data: { orderId, requestId: captureRequestId(purchaseId) } },
       { kind: 'status', data: { from: 'charging', to: 'awaiting_approval' } },
     ]);
+    // A fresh expiry, still due when the approval window first opened ends.
+    expect(await expiryTimes(db)).toEqual([EXPIRES_AT, EXPIRES_AT]);
 
     // The buyer approves after all, and the next return captures the order.
     paypal.approve(orderId);
@@ -458,7 +476,7 @@ describe('retrying the capture of an approved order', () => {
     const { db, deps, paypal, clock, purchaseId, orderId } = await setUpUnknownCapture({ lost: true });
     clock.now = RETRY_AT;
 
-    expect(await runRetryJobs(deps, clock)).toBe(1);
+    expect(await runJobs(deps, clock)).toBe(1);
 
     expect(captureCalls(paypal)).toEqual(Array(3).fill([orderId, captureRequestId(purchaseId)]));
     expect(paypal.captures).toHaveLength(1);
@@ -511,10 +529,10 @@ describe('expireApproval', () => {
     const { db, deps, clock, paypal, buyerId, purchaseId } = await setUpAwaiting({ approve: false });
     expect(await budgetCheckOfNextProposal(db, buyerId)).toMatchObject({ result: 'block' });
     clock.now = new Date(EXPIRES_AT.getTime() - 1);
-    expect(await runExpiryJobs(deps, clock)).toBe(0);
+    expect(await runJobs(deps, clock)).toBe(0);
     clock.now = EXPIRES_AT;
 
-    expect(await runExpiryJobs(deps, clock)).toBe(1);
+    expect(await runJobs(deps, clock)).toBe(1);
 
     expect(await db.select({ status: jobs.status }).from(jobs).where(eq(jobs.kind, 'approval_expiry'))).toEqual([{ status: 'done' }]);
     expect(await statusOf(db, purchaseId)).toBe('cancelled');
@@ -584,25 +602,33 @@ describe('expireApproval', () => {
 
     const outcome = await completeApproval(deps, orderId);
 
-    expect(expiries).toEqual(['retry']);
+    expect(expiries).toEqual(['done']);
     expect(outcome.status).toBe('accepted');
     expect(paypal.captures).toHaveLength(1);
     expect(await stepsOf(db, purchaseId)).not.toContain('approval_expired');
     expect(await expireApproval(deps, purchaseId)).toBe('done');
   });
 
-  it('waits for a capture still in flight, then cancels the purchase if PayPal sends it back for approval', async () => {
-    const { db, deps, clock, purchaseId } = await setUpUnknownCapture({ lost: false, approve: false });
-    clock.now = EXPIRES_AT;
-
-    expect(await expireApproval(deps, purchaseId)).toBe('retry');
+  it('cancels a purchase PayPal sends back for approval after its deadline, from the expiry queued then', async () => {
+    const { db, deps, paypal, clock, purchaseId } = await setUpUnknownCapture({ lost: false, approve: false });
+    // PayPal is still unreachable once the deadline has passed: the replay is put off, and the
+    // expiry finds the purchase charging and leaves it.
+    clock.now = new Date(EXPIRES_AT.getTime() + 60_000);
+    paypal.failNext('captureOrder', 'network');
+    paypal.failNext('captureOrder', 'network');
+    expect(await runJobs(deps, clock)).toBe(2);
     expect(await statusOf(db, purchaseId)).toBe('charging');
 
-    await retryCharge(deps, purchaseId);
+    // The next replay reaches PayPal, which says the buyer never approved.
+    clock.now = new Date(clock.now.getTime() + 15_000);
+    expect(await runJobs(deps, clock)).toBe(1);
     expect(await statusOf(db, purchaseId)).toBe('awaiting_approval');
-    expect(await expireApproval(deps, purchaseId)).toBe('done');
+    expect(await expiryTimes(db)).toEqual([clock.now]);
+
+    expect(await runJobs(deps, clock)).toBe(1);
 
     expect(await statusOf(db, purchaseId)).toBe('cancelled');
+    expect(await jobKinds(db)).toEqual(['approval_expiry', 'approval_expiry', 'charge_retry']);
   });
 
   it('leaves a purchase whose capture is pending to the webhook that reports it', async () => {

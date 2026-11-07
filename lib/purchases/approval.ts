@@ -20,6 +20,8 @@ type ApprovalDeps = Pick<PurchaseDeps, 'db' | 'paypal' | 'appUrl' | 'now'>;
 type CaptureDeps = Pick<PurchaseDeps, 'db' | 'paypal' | 'signer' | 'sellers' | 'now'>;
 type ApprovalRequest = Parameters<PaypalPort['createApprovalOrder']>[0];
 type ApprovalOrder = Awaited<ReturnType<PaypalPort['createApprovalOrder']>>;
+/** An `approval_order` event's data: the order PayPal created, and when its approval window closes. */
+type RecordedOrder = { requestId: string; orderId: string; approveUrl: string; expiresAt: string };
 
 /** How long the buyer has to approve a purchase before it is cancelled and its budget released. */
 const APPROVAL_WINDOW_MS = 3 * 60 * 60 * 1000;
@@ -52,8 +54,9 @@ export async function startApproval(deps: ApprovalDeps, purchaseId: string): Pro
   }
   if (purchase.totalCents === null) throw new Error(`purchase ${purchaseId} sent to its buyer has no total`);
 
-  const request = await openApproval(deps, purchaseId, purchase.totalCents);
-  if (!request) return purchaseOutcome(db, purchaseId);
+  const opened = await openApproval(deps, purchaseId, purchase.totalCents);
+  if (!opened) return purchaseOutcome(db, purchaseId);
+  const { request, expiresAt } = opened;
 
   let order: ApprovalOrder;
   try {
@@ -62,7 +65,8 @@ export async function startApproval(deps: ApprovalDeps, purchaseId: string): Pro
     await cancelUnsentApproval(db, purchaseId, request.requestId, error);
     return purchaseOutcome(db, purchaseId);
   }
-  await storeApprovalOrder(db, purchaseId, request.requestId, order);
+  const { orderId, approveUrl } = order;
+  await storeApprovalOrder(db, purchaseId, { requestId: request.requestId, orderId, approveUrl, expiresAt: expiresAt.toISOString() });
   return purchaseOutcome(db, purchaseId);
 }
 
@@ -89,22 +93,20 @@ export async function completeApproval(deps: CaptureDeps, orderId: string): Prom
 
 /**
  * Cancels a purchase its buyer has not approved in time, releasing its budget: the handler of the
- * `approval_expiry` job queued with every approval. With the purchase locked, it moves it from
- * `awaiting_approval` to `cancelled` and logs `approval_expired`, so of an expiry and an approval
- * that race exactly one moves the purchase, and a cancelled purchase is never captured. `done`, and
- * nothing else changes, for a purchase in any other status, except one `charging` with no capture
- * recorded: its capture is still in flight and PayPal may yet send it back for approval, so `retry`
- * checks again after a backoff. Throws for a purchase that does not exist.
+ * `approval_expiry` job queued with every approval, and again whenever PayPal sends a purchase back
+ * for approval. With the purchase locked, it moves it from `awaiting_approval` to `cancelled` and
+ * logs `approval_expired`, so of an expiry and an approval that race exactly one moves the purchase,
+ * and a cancelled purchase is never captured. A purchase in any other status is left as it is.
+ * Always `done`; throws for a purchase that does not exist.
  */
 export async function expireApproval({ db }: Pick<PurchaseDeps, 'db'>, purchaseId: string): Promise<JobOutcome> {
-  return db.transaction(async (tx) => {
+  return db.transaction(async (tx): Promise<JobOutcome> => {
     const [purchase] = await tx
-      .select({ status: purchases.status, captureId: purchases.paypalCaptureId })
+      .select({ status: purchases.status })
       .from(purchases)
       .where(eq(purchases.id, purchaseId))
       .for('update');
     if (!purchase) throw new Error(`there is no purchase ${purchaseId}`);
-    if (purchase.status === 'charging' && purchase.captureId === null) return 'retry';
     if (purchase.status !== 'awaiting_approval') return 'done';
     await appendEvent(tx, purchaseId, 'approval_expired', {});
     await transition(tx, purchaseId, 'awaiting_approval', 'cancelled');
@@ -114,15 +116,16 @@ export async function expireApproval({ db }: Pick<PurchaseDeps, 'db'>, purchaseI
 
 /**
  * Moves the purchase from `proposed` to `awaiting_approval` and queues its `approval_expiry` job,
- * and returns the order to ask PayPal for. If the purchase could not be given its receipt, it fails
- * the purchase instead, through `charging` as a refused charge does, and returns null; it also
- * returns null for a purchase another call has already moved on.
+ * and returns the order to ask PayPal for and when the approval window closes. If the purchase
+ * could not be given its receipt, it fails the purchase instead, through `charging` as a refused
+ * charge does, and returns null; it also returns null for a purchase another call has already
+ * moved on.
  */
 async function openApproval(
   { db, appUrl, now }: ApprovalDeps,
   purchaseId: string,
   totalCents: number,
-): Promise<ApprovalRequest | null> {
+): Promise<{ request: ApprovalRequest; expiresAt: Date } | null> {
   try {
     return await db.transaction(async (tx) => {
       const refusal = await receiptBlocker(tx, purchaseId, now());
@@ -133,8 +136,9 @@ async function openApproval(
         return null;
       }
       await transition(tx, purchaseId, 'proposed', 'awaiting_approval');
-      await enqueue(tx, 'approval_expiry', { purchaseId }, new Date(now().getTime() + APPROVAL_WINDOW_MS));
-      return {
+      const expiresAt = new Date(now().getTime() + APPROVAL_WINDOW_MS);
+      await enqueue(tx, 'approval_expiry', { purchaseId }, expiresAt);
+      const request = {
         amountCents: totalCents,
         description: `Behest order ${purchaseId}`,
         invoiceId: purchaseId,
@@ -142,6 +146,7 @@ async function openApproval(
         cancelUrl: `${appUrl}/buyer/approvals?cancelled=${purchaseId}`,
         requestId: `${purchaseId}:approval`,
       };
+      return { request, expiresAt };
     });
   } catch (error) {
     if (error instanceof StaleTransition) return null;
@@ -182,15 +187,19 @@ async function sendApprovalOrder(paypal: PaypalPort, purchaseId: string, request
   }
 }
 
-/** Stores the order and its approval link and logs `approval_order`, while the purchase still awaits an order. */
-async function storeApprovalOrder(db: Db, purchaseId: string, requestId: string, { orderId, approveUrl }: ApprovalOrder): Promise<void> {
+/**
+ * Stores the order and its approval link and logs them, with when the approval window closes, as
+ * the `approval_order` event, while the purchase still awaits an order. A purchase PayPal sends
+ * back for approval later expires when that window closes (see reopenApproval in charge.ts).
+ */
+async function storeApprovalOrder(db: Db, purchaseId: string, order: RecordedOrder): Promise<void> {
   await db.transaction(async (tx) => {
     const stored = await tx
       .update(purchases)
-      .set({ paypalOrderId: orderId, approveUrl })
+      .set({ paypalOrderId: order.orderId, approveUrl: order.approveUrl })
       .where(and(eq(purchases.id, purchaseId), eq(purchases.status, 'awaiting_approval'), isNull(purchases.paypalOrderId)))
       .returning({ id: purchases.id });
-    if (stored.length > 0) await appendEvent(tx, purchaseId, 'approval_order', { requestId, orderId, approveUrl });
+    if (stored.length > 0) await appendEvent(tx, purchaseId, 'approval_order', order);
   });
 }
 

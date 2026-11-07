@@ -160,6 +160,23 @@ describe('deliverToSeller', () => {
     ]);
   });
 
+  it('refunds nothing and leaves an outside refund of the capture untouched when the seller rejects the order', async () => {
+    const { db, deps, paypal, seller, purchaseId } = await setUpReceipted();
+    seller.mode = 'reject';
+    const outside = { purchaseId, amountCents: 500, paypalRefundId: 'REFUND-OUTSIDE', status: 'COMPLETED', reason: null };
+    await db.insert(refunds).values(outside);
+
+    await deliverToSeller(deps, purchaseId);
+
+    expect(paypal.callsTo('refundCapture')).toEqual([]);
+    expect(await db.select().from(refunds)).toEqual([expect.objectContaining(outside)]);
+    expect(await statusOf(db, purchaseId)).toBe('captured');
+    expect(await eventsAfterReceipt(db, purchaseId)).toEqual([
+      { kind: 'seller_rejected', data: { reason: 'out_of_stock' } },
+      { kind: 'refund_skipped', data: { reason: 'the capture has another refund on record' } },
+    ]);
+  });
+
   it('refunds nothing when the purchase has moved on by the time the seller rejects it', async () => {
     const { db, deps, paypal, seller, purchaseId } = await setUpReceipted();
     seller.mode = 'reject';

@@ -86,10 +86,12 @@ export async function deliverToSeller(deps: DeliverDeps, purchaseId: string): Pr
 /**
  * Refunds the captured amount of an order its seller rejected, logging `seller_rejected` first.
  * With the purchase row locked, it checks that the purchase is still `captured` and that the seller
- * has no payout, since a refund then would pay the money out twice; otherwise it logs
- * `refund_skipped` and leaves the money to an operator. It then writes the refunds row, so the
- * refund is on record before PayPal is asked, and releases the lock: none is held across a PayPal
- * call. A refund PayPal is returning moves the purchase to `refunded`. A refund PayPal answers in
+ * has no payout, since a refund then would pay the money out twice, and that the capture has no
+ * refund on record but Behest's own for this rejection, since another one (such as a partial refund
+ * made at PayPal) would make the full amount wrong; otherwise it logs `refund_skipped` and leaves the
+ * money to an operator. It then writes its own refunds row, or reuses the one an earlier attempt
+ * wrote, so the refund is on record before PayPal is asked, and releases the lock: none is held
+ * across a PayPal call. A refund PayPal is returning moves the purchase to `refunded`. A refund PayPal answers in
  * another status is logged as `refund_failed`, and one whose answer is lost twice as
  * `refund_unknown`; either way the purchase stays `captured`, still counted against the budget.
  */
@@ -113,12 +115,19 @@ async function refundRejectedOrder({ db, paypal }: DeliverDeps, purchaseId: stri
     const { captureId, totalCents } = purchase;
     if (!captureId || totalCents === null) throw new Error(`captured purchase ${purchaseId} has no capture or total to refund`);
 
-    const [existing] = await tx
-      .select({ id: refunds.id, amountCents: refunds.amountCents })
+    // Behest's own refund of a rejection is the row carrying its note. Any other refund of the
+    // capture is left alone, and so is the money, for an operator.
+    const recorded = await tx
+      .select({ id: refunds.id, amountCents: refunds.amountCents, reason: refunds.reason })
       .from(refunds)
       .where(eq(refunds.purchaseId, purchaseId));
+    if (recorded.some((row) => row.reason !== note)) {
+      await appendEvent(tx, purchaseId, 'refund_skipped', { reason: 'the capture has another refund on record' });
+      return null;
+    }
+    const [existing] = recorded;
     const [row] = existing
-      ? [existing]
+      ? [{ id: existing.id, amountCents: existing.amountCents }]
       : await tx
           .insert(refunds)
           .values({ purchaseId, amountCents: totalCents, reason: note })
@@ -135,7 +144,8 @@ async function refundRejectedOrder({ db, paypal }: DeliverDeps, purchaseId: stri
  * same request id, note and amount, so PayPal either reports the refund it already made or makes
  * it now, and never refunds twice; the answer is then recorded as for the first attempt. With the
  * purchase row locked, it checks that the purchase is still `captured`, the seller has no payout and
- * the refunds row still has no PayPal refund id, and releases the lock before PayPal is asked.
+ * Behest's own refunds row (the one carrying its note) still has no PayPal refund id, and releases
+ * the lock before PayPal is asked.
  * Returns whether PayPal was asked.
  */
 export async function retryLostRefund({ db, paypal }: Pick<DeliverDeps, 'db' | 'paypal'>, purchaseId: string): Promise<boolean> {
@@ -151,7 +161,7 @@ export async function retryLostRefund({ db, paypal }: Pick<DeliverDeps, 'db' | '
     const [row] = await tx
       .select({ id: refunds.id, amountCents: refunds.amountCents })
       .from(refunds)
-      .where(and(eq(refunds.purchaseId, purchaseId), isNull(refunds.paypalRefundId)));
+      .where(and(eq(refunds.purchaseId, purchaseId), isNull(refunds.paypalRefundId), eq(refunds.reason, refundNote(purchaseId))));
     return row ? { ...row, captureId: purchase.captureId } : null;
   });
   if (!refund) return false;

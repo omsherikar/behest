@@ -109,9 +109,9 @@ function OrderPanel({ order, sellerSlug, onClose }: { order: SellerOrderRow | nu
             <CheckBadge check={order.check} />
             <PayoutBadge row={order} />
           </div>
-          {order.reason && <p className="-mt-2 text-body text-stop">{order.reason}.</p>}
+          {order.reason && <p className="-mt-3 text-body text-stop">{order.reason}.</p>}
           {order.check === 'replayed' && (
-            <p className="-mt-3 text-body text-muted">
+            <p className="-mt-4 text-body text-muted">
               The receipt itself may be genuine: it was refused because an earlier order already used it.
             </p>
           )}
@@ -120,11 +120,11 @@ function OrderPanel({ order, sellerSlug, onClose }: { order: SellerOrderRow | nu
             <h3 id="order-items" className="text-meta text-muted">
               What was ordered
             </h3>
-            <ul className="mt-1 grid gap-1 text-body">
+            <ul className="mt-2 divide-y divide-line rounded-panel border border-line">
               {order.cart.items.map((item) => (
-                <li key={item.sku} className="flex justify-between gap-4">
+                <li key={item.sku} className="flex items-baseline justify-between gap-4 px-4 py-3 text-body">
                   <span className="min-w-0 break-words text-text">
-                    {item.quantity} × {item.title} <span className="font-mono text-meta text-muted">{item.sku}</span>
+                    {item.quantity} × {item.title} <span className="ml-1 font-mono text-meta text-muted">{item.sku}</span>
                   </span>
                   <Money cents={item.unitPriceCents * item.quantity} mono className="shrink-0 text-meta text-text" />
                 </li>

@@ -1,10 +1,10 @@
 import { asc, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Db } from '@/lib/db/client';
-import { buyers, products, sellers } from '@/lib/db/schema';
+import { buyers, products, purchases, sellers, wallets } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME, DEMO_SELLER_SLUG } from '@/lib/demo/personas';
-import { seedDemo } from '@/lib/demo/seed';
-import { rowCounts, seededRows } from '@/tests/helpers/demo-activity';
+import { resetDemo, seedDemo } from '@/lib/demo/seed';
+import { addDemoActivity, rowCounts, seededRows } from '@/tests/helpers/demo-activity';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 const PAYEE = 'payee@business.example.com';
@@ -45,6 +45,19 @@ const SEEDED_LISTINGS = [
 ];
 
 const SEEDED = { buyers: 1, sellers: 2, products: 7, flagged: 1 };
+
+const NOTHING_REMOVED = {
+  purchases: 0,
+  purchaseEvents: 0,
+  receipts: 0,
+  sellerOrders: 0,
+  payouts: 0,
+  refunds: 0,
+  disputes: 0,
+  jobs: 0,
+  mandates: 0,
+  wallets: 0,
+};
 
 let db: Db;
 
@@ -131,5 +144,97 @@ describe('seedDemo', () => {
 
     const counts = await rowCounts(db);
     expect([counts.buyers, counts.sellers, counts.products]).toEqual([0, 0, 0]);
+  });
+});
+
+describe('resetDemo', () => {
+  it('removes the demo activity, keeps the linked wallet, the model call log and the webhook record, and reseeds', async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    await addDemoActivity(db);
+    await db.update(products).set({ stock: 0 }).where(eq(products.sku, 'TUR-100'));
+    const [linked] = await db.select().from(wallets);
+
+    expect(await resetDemo(db, { payeeEmail: PAYEE })).toEqual({
+      removed: {
+        purchases: 1,
+        purchaseEvents: 1,
+        receipts: 1,
+        sellerOrders: 1,
+        payouts: 1,
+        refunds: 1,
+        disputes: 1,
+        jobs: 1,
+        mandates: 1,
+        wallets: 0,
+      },
+      seeded: SEEDED,
+    });
+
+    expect(await rowCounts(db)).toEqual({
+      buyers: 1,
+      wallets: 1,
+      mandates: 0,
+      sellers: 2,
+      products: 7,
+      purchases: 0,
+      purchaseEvents: 0,
+      receipts: 0,
+      sellerOrders: 0,
+      payouts: 0,
+      refunds: 0,
+      disputes: 0,
+      webhookEvents: 1,
+      jobs: 0,
+      llmCalls: 1,
+    });
+    expect(await db.select().from(wallets)).toEqual([linked]);
+    expect(await listings(db)).toEqual(SEEDED_LISTINGS);
+  });
+
+  it('removes the linked wallet too when full', async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    await addDemoActivity(db);
+
+    const { removed } = await resetDemo(db, { payeeEmail: PAYEE, full: true });
+
+    expect(removed.wallets).toBe(1);
+    expect(await rowCounts(db)).toMatchObject({ wallets: 0, buyers: 1, webhookEvents: 1, llmCalls: 1 });
+  });
+
+  it.each(['pending', 'revoked'] as const)('removes a %s wallet, which has nothing to keep', async (status) => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    await addDemoActivity(db, { wallet: status });
+
+    const { removed } = await resetDemo(db, { payeeEmail: PAYEE });
+
+    expect(removed.wallets).toBe(1);
+    expect(await db.$count(wallets)).toBe(0);
+  });
+
+  it('is stable when run twice', async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    await addDemoActivity(db);
+    await resetDemo(db, { payeeEmail: PAYEE });
+    const first = { rows: await seededRows(db), counts: await rowCounts(db) };
+
+    expect(await resetDemo(db, { payeeEmail: PAYEE })).toEqual({ removed: NOTHING_REMOVED, seeded: SEEDED });
+
+    expect({ rows: await seededRows(db), counts: await rowCounts(db) }).toEqual(first);
+  });
+
+  it('seeds an empty database', async () => {
+    expect(await resetDemo(db, { payeeEmail: PAYEE })).toEqual({ removed: NOTHING_REMOVED, seeded: SEEDED });
+    expect(await listings(db)).toEqual(SEEDED_LISTINGS);
+  });
+
+  it('removes nothing when the payee email is missing', async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    await addDemoActivity(db);
+    const before = await rowCounts(db);
+
+    await expect(resetDemo(db, { payeeEmail: '', full: true })).rejects.toThrow('PAYEE_EMAIL must be set');
+
+    expect(await rowCounts(db)).toEqual(before);
+    expect(await db.$count(purchases)).toBe(1);
   });
 });

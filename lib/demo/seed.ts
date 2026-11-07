@@ -1,12 +1,26 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { demoBuyerId } from '@/lib/app-deps';
 import { parseCatalogCsv } from '@/lib/catalog/csv';
 import { AGENT_INSTRUCTIONS_FLAG } from '@/lib/catalog/onboard';
 import { screenText } from '@/lib/catalog/screen';
 import type { Db } from '@/lib/db/client';
-import { products, sellers } from '@/lib/db/schema';
+import {
+  disputes,
+  jobs,
+  mandates,
+  payouts,
+  products,
+  purchaseEvents,
+  purchases,
+  receipts,
+  refunds,
+  sellerOrders,
+  sellers,
+  wallets,
+} from '@/lib/db/schema';
 import { type Category, isCategory } from '@/lib/domain/categories';
 import { DEMO_SELLER_SLUG } from './personas';
 
@@ -14,6 +28,7 @@ import { DEMO_SELLER_SLUG } from './personas';
 // and Gadget Hub with one pair of earbuds. Nothing here calls a model or the market: listings are
 // read from the CSV as the seller wrote them and screened by the fixed screen alone, so seeding is
 // free and gives the same rows every time. There is no mandate, because the buyer signs one live.
+// Resetting removes what a run of the demo left behind and seeds again, so the demo can be rerun.
 
 /** Ravi's catalog, the same file the catalog tests read. */
 const RAVI_CSV = path.join('tests', 'fixtures', 'catalog', 'ravi-spices.csv');
@@ -81,6 +96,61 @@ export async function seedDemo(db: Db, deps: SeedDeps): Promise<SeedResult> {
       products: listings.length,
       flagged: listings.filter((listing) => listing.flags.length > 0).length,
     };
+  });
+}
+
+export type ResetOptions = SeedDeps & {
+  /** Also remove a linked wallet, which the buyer then has to link again at PayPal. */
+  full?: boolean;
+};
+
+/** How many rows of each kind a reset removed. */
+export type Removed = {
+  purchases: number;
+  purchaseEvents: number;
+  receipts: number;
+  sellerOrders: number;
+  payouts: number;
+  refunds: number;
+  disputes: number;
+  jobs: number;
+  mandates: number;
+  wallets: number;
+};
+
+export type ResetResult = { removed: Removed; seeded: SeedResult };
+
+/**
+ * Puts the demo back to where the seed leaves it: removes every purchase with its events, receipt,
+ * payouts, refunds and disputes, every seller order, job and mandate, and every wallet that is not
+ * linked, then seeds again, all in one transaction. A linked wallet is kept, because linking again
+ * needs the buyer to approve at PayPal in a browser; `full` removes it too. Buyers, sellers and
+ * products stay, and so do the model call log, which the daily spend cap sums, and the webhook
+ * events, which keep each PayPal event from being processed twice. Throws, removing nothing, when
+ * the payee email is missing or not an email.
+ */
+export async function resetDemo(db: Db, options: ResetOptions): Promise<ResetResult> {
+  const payeeEmail = checkedPayeeEmail(options.payeeEmail);
+  return db.transaction(async (tx) => {
+    // Deleted one table at a time in the order written, each before the tables its rows refer to.
+    const removed: Removed = {
+      purchaseEvents: (await tx.delete(purchaseEvents).returning({ id: purchaseEvents.id })).length,
+      receipts: (await tx.delete(receipts).returning({ id: receipts.id })).length,
+      payouts: (await tx.delete(payouts).returning({ id: payouts.id })).length,
+      refunds: (await tx.delete(refunds).returning({ id: refunds.id })).length,
+      disputes: (await tx.delete(disputes).returning({ id: disputes.id })).length,
+      sellerOrders: (await tx.delete(sellerOrders).returning({ id: sellerOrders.id })).length,
+      jobs: (await tx.delete(jobs).returning({ id: jobs.id })).length,
+      purchases: (await tx.delete(purchases).returning({ id: purchases.id })).length,
+      mandates: (await tx.delete(mandates).returning({ id: mandates.id })).length,
+      wallets: (
+        await tx
+          .delete(wallets)
+          .where(options.full ? undefined : ne(wallets.status, 'linked'))
+          .returning({ id: wallets.id })
+      ).length,
+    };
+    return { removed, seeded: await seedDemo(tx, { payeeEmail }) };
   });
 }
 

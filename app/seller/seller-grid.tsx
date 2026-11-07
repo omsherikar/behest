@@ -39,17 +39,32 @@ const modules = [
   RowAutoHeightModule,
 ];
 
-// Same tokens as the dashboard (app/globals.css), on AG Grid's dark colour scheme.
+// The Behest tokens (app/globals.css) on AG Grid's dark colour scheme: panel rows with hairline
+// dividers, a raised header and hover, and the action colour for focus and selection.
 const theme = themeQuartz.withPart(colorSchemeDark).withParams({
-  fontFamily: 'var(--pp-font)',
-  backgroundColor: 'var(--pp-surface)',
-  headerBackgroundColor: 'var(--pp-surface)',
-  accentColor: 'var(--pp-blue)',
-  foregroundColor: 'var(--pp-ink)',
-  borderColor: 'var(--pp-border)',
-  headerFontWeight: 600,
-  headerTextColor: 'var(--pp-muted)',
-  rowHoverColor: 'var(--pp-highlight)',
+  fontFamily: 'var(--font-sans-stack)',
+  fontSize: 13,
+  backgroundColor: 'var(--panel)',
+  foregroundColor: 'var(--text)',
+  cellTextColor: 'var(--text)',
+  accentColor: 'var(--action)',
+  borderColor: 'var(--line)',
+  chromeBackgroundColor: 'var(--raised)',
+  headerBackgroundColor: 'var(--raised)',
+  headerTextColor: 'var(--muted)',
+  headerFontWeight: 500,
+  headerCellHoverBackgroundColor: 'var(--raised)',
+  rowHoverColor: 'var(--raised)',
+  oddRowBackgroundColor: 'var(--panel)',
+  selectedRowBackgroundColor: 'color-mix(in srgb, var(--action) 14%, transparent)',
+  rowBorder: { color: 'var(--line)' },
+  columnBorder: false,
+  headerColumnBorder: false,
+  wrapperBorderRadius: 8,
+  borderRadius: 4,
+  menuBackgroundColor: 'var(--raised)',
+  inputBackgroundColor: 'var(--bg)',
+  inputBorder: { color: 'var(--line-strong)' },
 });
 
 const defaultColDef: ColDef = { filter: true };
@@ -64,6 +79,7 @@ export function SellerGrid<Row extends { id: string }>({
   columns,
   label,
   labelledBy,
+  onOpen,
 }: {
   rows: Row[];
   columns: ColDef<Row>[];
@@ -71,6 +87,8 @@ export function SellerGrid<Row extends { id: string }>({
   label: string;
   /** The id of the element that names the grid, such as the page heading. */
   labelledBy: string;
+  /** Opens a row, such as its detail: called on a click on the row or Enter on one of its cells. */
+  onOpen?: (row: Row) => void;
 }) {
   const [search, setSearch] = useState('');
   const box = useRef<HTMLDivElement>(null);
@@ -88,9 +106,9 @@ export function SellerGrid<Row extends { id: string }>({
         onChange={(event) => setSearch(event.target.value)}
         placeholder={`Search ${label}...`}
         aria-label={`Search ${label}`}
-        className="h-10 w-full rounded border border-line-strong bg-pp-surface px-3 text-sm outline-none focus:border-pp-blue sm:w-72"
+        className="h-9 w-full rounded-control border border-line-strong bg-panel px-3 text-body text-text placeholder:text-muted sm:w-72"
       />
-      <div ref={box} className="min-h-72 flex-1">
+      <div ref={box} className={`min-h-72 flex-1 ${onOpen ? '[&_.ag-row]:cursor-pointer' : ''}`}>
         <AgGridProvider modules={modules}>
           <AgGridReact<Row>
             theme={theme}
@@ -102,6 +120,14 @@ export function SellerGrid<Row extends { id: string }>({
             autoSizeStrategy={autoSizeStrategy}
             enableCellTextSelection
             onGridReady={nameGrid}
+            onRowClicked={onOpen ? (event) => event.data && onOpen(event.data) : undefined}
+            onCellKeyDown={
+              onOpen
+                ? (event) => {
+                    if (event.event instanceof KeyboardEvent && event.event.key === 'Enter' && event.data) onOpen(event.data);
+                  }
+                : undefined
+            }
           />
         </AgGridProvider>
       </div>

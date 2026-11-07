@@ -22,7 +22,9 @@ export function TryIt() {
 export function Footer() {
   return (
     <footer className="border-t border-line">
-      <div className="container-page grid gap-10 py-14 sm:grid-cols-[minmax(0,1fr)_auto] lg:py-16">
+      {/* Two columns only from 1024 px: the link columns take their full width, so below that they
+          squeezed the text column to a word per line. */}
+      <div className="container-page grid gap-10 py-14 lg:grid-cols-[minmax(0,1fr)_auto] lg:py-16">
         <div>
           <p className="font-mono text-[1.0625rem] font-semibold tracking-[-0.03em] text-text">behest</p>
           <p className="mt-3 max-w-[40ch] text-body text-muted">Signed proof of what you authorized, on every purchase your AI agent makes.</p>

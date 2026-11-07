@@ -153,7 +153,7 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
   return (
     <form onSubmit={submit} className="mt-8 flex flex-col gap-8">
       <fieldset className="flex flex-col gap-5" disabled={disabled}>
-        <legend className="text-lg font-semibold text-pp-navy">Your shop</legend>
+        <legend className="text-lg font-semibold text-pp-navy">Shop details</legend>
         <div>
           <label htmlFor="shop-name" className="block text-sm font-semibold text-pp-navy">
             Shop name
@@ -222,12 +222,9 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
           className={fileInput}
         />
         {csv && (
-          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-pp-ink">
-            <span className="min-w-0 break-all">{csv.fileName}</span>
-            <button type="button" onClick={removeCsv} className={linkButton}>
-              Remove
-            </button>
-          </p>
+          <button type="button" onClick={removeCsv} className={`self-start ${linkButton}`}>
+            Remove {csv.fileName}
+          </button>
         )}
       </fieldset>
 

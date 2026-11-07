@@ -1,8 +1,9 @@
 'use client';
 
-// The AG Grid behind the seller's catalog and orders pages and the operator's disputes list, styled
-// like the app's other grids (app/(endpoints)/data-grid.tsx). Each page defines its columns in its
-// own client component, so they can format values and render cells; the rows come from the server.
+// The AG Grid behind the seller's catalog and orders pages, the operator's disputes list and the
+// buyer's ledger, styled like the app's other grids (app/(endpoints)/data-grid.tsx). Each page
+// defines its columns in its own client component, so they can format values and render cells; the
+// rows come from the server.
 
 import { useCallback, useRef, useState } from 'react';
 import {
@@ -12,6 +13,7 @@ import {
   enableDevValidations,
   NumberFilterModule,
   QuickFilterModule,
+  RowAutoHeightModule,
   TextFilterModule,
   themeQuartz,
   type ColDef,
@@ -24,7 +26,8 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // Only the grid features these pages use: in-memory rows, text and number filters, the search box
-// (quick filter), sizing columns to their content and cell classes (right-aligned amounts, SKUs).
+// (quick filter), sizing columns to their content, cell classes (right-aligned amounts, SKUs) and
+// rows as tall as their wrapped text (the ledger's reasons).
 const modules = [
   ClientSideRowModelModule,
   TextFilterModule,
@@ -32,6 +35,7 @@ const modules = [
   QuickFilterModule,
   ColumnAutoSizeModule,
   CellStyleModule,
+  RowAutoHeightModule,
 ];
 
 // Same PayPal tokens as the dashboard (app/globals.css).

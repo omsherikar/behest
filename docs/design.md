@@ -23,7 +23,7 @@ Every purchase shows the chain that authorized it, in order, as a trace:
 4. **PayPal**: the charge or the buyer's approval. Proof: order id, capture id, captured at.
 5. **Receipt**: signed by Behest, verified by the seller. Proof: receipt id, key id, and the compact JWS shown as three coloured segments (header, payload, signature) with the decoded header and payload beside it, plus a "Verify" action that calls the public verify route.
 
-Collapsed, the trace is one line of five nodes joined by a rail; the rail segments take each step's state colour. Expanded, each node opens to its proof. The landing page shows it in a product frame right under the hero. When the agent streams a proposal, the trace fills node by node as events arrive: the single orchestrated motion, disabled under reduced motion.
+Collapsed, the trace is one line of five nodes joined by a neutral rail: only the nodes carry state colour, and a segment is solid into a step the purchase reached and dashed into one it never reached. Expanded, each node opens to its proof. The landing page shows it in a product frame right under the hero. When the agent streams a proposal, the trace fills node by node as events arrive: the single orchestrated motion, disabled under reduced motion.
 
 ## The agent console
 

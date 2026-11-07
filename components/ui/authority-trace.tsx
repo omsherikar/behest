@@ -5,8 +5,9 @@ import { STATE_WORDS, STEP_NAMES, type StepState, type TraceStates, type TraceSt
 import { STATE_SHAPES, STATE_TEXT, StateGlyph } from './state-glyph';
 
 // The authority trace: the five steps that authorized a purchase, as one line of nodes joined by a
-// rail, numbered because the order is the point. Each rail segment takes the colour of the step it
-// leads into. A node with proof is a disclosure button that opens the proof under the trace (under
+// rail, numbered because the order is the point. The rail is neutral so only the nodes carry colour:
+// a solid segment leads into a step the purchase reached, a dashed one into a step it never reached.
+// A node with proof is a disclosure button that opens the proof under the trace (under
 // the node itself when the trace is narrow and runs down the page); one node is open at a time.
 //
 // Motion: a node animates when its state changes after the first render, as when a streamed
@@ -31,14 +32,12 @@ type Props = {
 /** How long the demonstration waits between one node and the next, in milliseconds. */
 const PLAY_STEP_MS = 380;
 
-const RAIL: Record<StepState, string> = {
-  done: 'bg-seal',
-  current: 'bg-text/70',
-  held: 'bg-hold',
-  stopped: 'bg-stop',
+/** A rail segment, by the state of the step it leads into: solid when reached, dashed when not. */
+function rail(state: StepState, side: 'top' | 'left'): string {
   // Not reached: a dashed line, drawn with a border instead of a fill.
-  not_reached: 'border-dashed border-line-strong',
-};
+  if (state === 'not_reached') return `${side === 'top' ? 'border-t-2' : 'border-l-2'} border-dashed border-line-strong`;
+  return 'bg-line-strong';
+}
 
 /** The steps whose state differs between two traces. */
 function changedSteps(before: TraceStates, after: TraceStates): TraceStep[] {
@@ -100,7 +99,7 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                     <span
                       key={states[next]}
                       className={`absolute inset-0 origin-left transition-colors duration-300 ${
-                        states[next] === 'not_reached' ? `border-t-2 ${RAIL.not_reached}` : RAIL[states[next]]
+                        rail(states[next], 'top')
                       } ${play || changed.includes(next) ? 'motion-safe:animate-trace-rail-x' : ''}`}
                       style={changed.includes(next) ? arrival(next, -PLAY_STEP_MS * 0.45) : delay(PLAY_STEP_MS * 0.55)}
                     />
@@ -158,7 +157,7 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                   <span
                     key={states[next]}
                     className={`absolute inset-0 origin-top transition-colors duration-300 ${
-                      states[next] === 'not_reached' ? `border-l-2 ${RAIL.not_reached}` : RAIL[states[next]]
+                      rail(states[next], 'left')
                     } ${play || changed.includes(next) ? 'motion-safe:animate-trace-rail-y' : ''}`}
                     style={changed.includes(next) ? arrival(next, -PLAY_STEP_MS * 0.45) : delay(PLAY_STEP_MS * 0.55)}
                   />

@@ -5,16 +5,19 @@ import { type FormEvent, useState } from 'react';
 import { CitationChip, evidenceStyle } from '@/components/ops/evidence-style';
 import { buttonClass } from '@/components/ui/button';
 import { Notice } from '@/components/ui/notice';
-import { type Draft, type DraftItem, draftOutcome, submitOutcome } from '@/lib/ops-pages/dispute-outcomes';
+import { type Draft, type DraftItem, draftOutcome, messageOutcome, offeredAnswer, submitOutcome } from '@/lib/ops-pages/dispute-outcomes';
 import { narrativeProblem, submittableNarrative, toggleCitation } from '@/lib/ops-pages/narrative-edit';
 import { EvidenceItems } from './evidence-items';
 import { fieldClass } from '@/components/ui/field';
 import { textLink } from '@/components/ui/link';
 
-// The operator drafts a dispute's narrative, edits it and submits it to PayPal. A draft is a paid
-// model call, so the button says so, and a second draft asks first. The route stores the evidence
-// pack but never the draft, so the narrative lives here until it is submitted. After a failed draft
-// the page reloads the stored evidence items, and the operator can write the narrative from them.
+// The operator drafts a dispute's narrative, edits it and answers with it as PayPal allows: submits it
+// as evidence once the dispute is a claim, or sends it to the buyer as a message while it is an
+// inquiry. A draft is a paid model call, so the button says so, and a second draft asks first. The
+// route stores the evidence pack but never the draft, so the narrative lives here until it is
+// submitted or sent. A message keeps the narrative here and on the dispute, for the evidence once
+// PayPal takes it. After a failed draft the page reloads the stored evidence items, and the operator
+// can write the narrative from them.
 
 type Claim = { key: number; text: string; evidenceIds: string[] };
 type Narrative = { summary: string; claims: Claim[] };
@@ -37,6 +40,13 @@ function editable(narrative: Draft['narrative']): Narrative {
     claims: narrative.claims.map((claim, key) => ({ key, text: claim.text, evidenceIds: [...claim.evidenceIds] })),
   };
 }
+
+/** An instant as "7 Nov 2026, 13:49 UTC", as the rest of the app writes times. */
+const utcMinute = (iso: string) =>
+  `${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }).format(new Date(iso))} UTC`;
+
+/** The later of two ISO instants, or the one that is set. */
+const later = (a: string | null, b: string | null) => (a === null ? b : b === null || a > b ? a : b);
 
 /** POSTs to a route and returns its status and parsed JSON body; the status is null when nothing came back. */
 async function post(url: string, body?: unknown): Promise<{ status: number | null; body: unknown }> {
@@ -64,31 +74,41 @@ export function DisputeEvidence({
   disputeId,
   items: storedItems,
   startFrom,
+  actions,
+  messagedAt,
 }: {
   disputeId: string;
   /** The evidence items of the pack the last draft stored, or null before any draft. */
   items: DraftItem[] | null;
-  /** A narrative to start editing from, such as one PayPal did not take, or null. */
+  /** A narrative to start editing from, such as one PayPal did not take or one sent to the buyer, or null. */
   startFrom: Draft['narrative'] | null;
+  /** What PayPal last said Behest may do with the dispute, or null before it was read with them. */
+  actions: string[] | null;
+  /** When the answer last went to the buyer as a message, as an ISO timestamp, or null. */
+  messagedAt: string | null;
 }) {
   const router = useRouter();
   /** The items of a draft made on this page, which replace the stored ones until the page reloads them. */
   const [draftedItems, setDraftedItems] = useState<DraftItem[] | null>(null);
   const [narrative, setNarrative] = useState<Narrative>(() => editable(startFrom ?? { summary: '', claims: [] }));
-  const [busy, setBusy] = useState<'draft' | 'submit' | null>(null);
+  const [busy, setBusy] = useState<'draft' | 'submit' | 'message' | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [draftNotice, setDraftNotice] = useState<Outcome | null>(null);
-  const [submitNotice, setSubmitNotice] = useState<Outcome | null>(null);
+  const [answerNotice, setAnswerNotice] = useState<Outcome | null>(null);
+  /** When a message sent from this page reached PayPal, until the reload brings it as `messagedAt`. */
+  const [sentAt, setSentAt] = useState<string | null>(null);
 
   const items = draftedItems ?? storedItems;
   const packIds = items?.map((item) => item.id) ?? [];
-  const problem = narrativeProblem(narrative, packIds);
+  const offered = offeredAnswer(actions);
+  const problem = narrativeProblem(narrative, packIds, offered === 'message' ? 'send' : 'submit');
+  const lastSent = later(sentAt, messagedAt);
 
   async function draft() {
     setConfirming(false);
     setBusy('draft');
     setDraftNotice(null);
-    setSubmitNotice(null);
+    setAnswerNotice(null);
     const answer = await post(`/api/disputes/${disputeId}/draft`);
     const outcome = draftOutcome(answer.status, answer.body);
     if (outcome.ok) {
@@ -106,16 +126,29 @@ export function DisputeEvidence({
     setBusy(null);
   }
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  /** Answers with the narrative the way PayPal allows now: as evidence, or as a message to the buyer. */
+  async function answer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (problem !== null) return;
-    setBusy('submit');
-    setSubmitNotice(null);
-    const answer = await post(`/api/disputes/${disputeId}/evidence`, submittableNarrative(narrative, packIds));
-    const outcome = submitOutcome(answer.status, answer.body);
-    setSubmitNotice({ tone: outcome.ok ? 'success' : 'danger', text: outcome.message });
-    // After a submission the page reloads to show it read-only in place of this form.
-    if (outcome.refresh) router.refresh();
+    if (problem !== null || offered === 'none') return;
+    setAnswerNotice(null);
+    const body = submittableNarrative(narrative, packIds);
+    if (offered === 'evidence') {
+      setBusy('submit');
+      const reply = await post(`/api/disputes/${disputeId}/evidence`, body);
+      const outcome = submitOutcome(reply.status, reply.body);
+      setAnswerNotice({ tone: outcome.ok ? 'success' : 'danger', text: outcome.message });
+      // After a submission the page reloads to show it read-only in place of this form, and after a
+      // refusal for the dispute's stage it reloads to offer what PayPal takes instead.
+      if (outcome.refresh) router.refresh();
+    } else {
+      setBusy('message');
+      const reply = await post(`/api/disputes/${disputeId}/message`, body);
+      const outcome = messageOutcome(reply.status, reply.body);
+      if (!outcome.ok) setAnswerNotice({ tone: 'danger', text: outcome.message });
+      else if (outcome.sentAt) setSentAt(outcome.sentAt);
+      // The draft stays: a reload keeps this editor's state and brings the message into the timeline.
+      if (outcome.refresh) router.refresh();
+    }
     setBusy(null);
   }
 
@@ -179,12 +212,12 @@ export function DisputeEvidence({
         <p className="mt-2 text-meta text-muted">
           {busy === 'draft'
             ? 'This can take a minute.'
-            : 'Each draft is a model call that Behest pays for. A draft is not saved: reloading this page clears the narrative until it is submitted.'}
+            : 'Each draft is a model call that Behest pays for. A draft is not saved: reloading this page clears the narrative until it is submitted or sent to the buyer.'}
         </p>
         <OutcomeNotice outcome={draftNotice} />
 
         {items && (
-          <form onSubmit={submit} className="mt-6 border-t border-line pt-5">
+          <form onSubmit={answer} className="mt-6 border-t border-line pt-5">
             <label htmlFor="narrative-summary" className="block font-medium text-text">
               Summary
             </label>
@@ -254,23 +287,50 @@ export function DisputeEvidence({
             </button>
 
             <div className="mt-6 border-t border-line pt-5">
-              {problem && (
-                <div id="submit-problem" className="mb-3">
-                  <Notice kind="hold">{problem}</Notice>
-                </div>
+              {offered === 'none' ? (
+                <Notice kind="info">
+                  PayPal is not taking an answer from Behest on this dispute right now, so there is nothing to send.
+                </Notice>
+              ) : (
+                <>
+                  {offered === 'message' && (
+                    <p className="mb-4 max-w-[68ch] text-body text-pretty text-muted">
+                      This dispute is still an inquiry, and PayPal takes evidence once it becomes a claim. Until then,
+                      send the buyer your answer as a message.
+                    </p>
+                  )}
+                  {problem && (
+                    <div id="answer-problem" className="mb-3">
+                      <Notice kind="hold">{problem}</Notice>
+                    </div>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={locked || problem !== null}
+                    aria-describedby={problem ? 'answer-problem' : undefined}
+                    className={primaryButton}
+                  >
+                    {offered === 'evidence'
+                      ? busy === 'submit'
+                        ? 'Submitting...'
+                        : 'Submit evidence to PayPal'
+                      : busy === 'message'
+                        ? 'Sending...'
+                        : 'Send to the buyer as a message'}
+                  </button>
+                  <p className="mt-2 text-meta text-muted">
+                    {offered === 'evidence'
+                      ? 'PayPal takes one answer per dispute. Once it is submitted, this page shows it read-only.'
+                      : 'The buyer reads it at PayPal. The narrative stays here, to submit as evidence once PayPal takes it.'}
+                  </p>
+                </>
               )}
-              <button
-                type="submit"
-                disabled={locked || problem !== null}
-                aria-describedby={problem ? 'submit-problem' : undefined}
-                className={primaryButton}
-              >
-                {busy === 'submit' ? 'Submitting...' : 'Submit evidence to PayPal'}
-              </button>
-              <p className="mt-2 text-meta text-muted">
-                PayPal takes one answer per dispute. Once it is submitted, this page shows it read-only.
-              </p>
-              <OutcomeNotice outcome={submitNotice} />
+              {lastSent && (
+                <Notice kind="success" className="mt-3">
+                  Sent to the buyer at PayPal on {utcMinute(lastSent)}.
+                </Notice>
+              )}
+              <OutcomeNotice outcome={answerNotice} />
             </div>
           </form>
         )}

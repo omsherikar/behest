@@ -49,8 +49,9 @@ export const buyers = pgTable('buyers', {
 });
 
 /**
- * A buyer's passkey (a WebAuthn credential). The buyer's device holds the private key; Behest keeps
- * the public key so anyone can check that the buyer, not Behest, signed a mandate.
+ * A buyer's passkey (a WebAuthn credential). The authenticator holds the private key; Behest keeps
+ * the public key so anyone can check that a passkey registered to the buyer's account signed a
+ * mandate's hashes.
  */
 export const buyerPasskeys = pgTable(
   'buyer_passkeys',

@@ -176,7 +176,9 @@ Two edges need a word. Once PayPal has been asked, only a decline or a denial fa
 
 Mandates and receipts are JSON Web Signatures in compact form, signed with Ed25519 (`alg: EdDSA`). Any JOSE library can verify them against Behest's public keys at `/.well-known/jwks.json`. Hashes of policies and carts are SHA-256 over RFC 8785 canonical JSON, so a seller can recompute a cart hash from the cart they received.
 
-**Signed mandate payload:** mandate id, buyer reference, policy hash, readback hash, confirmation time and method, expiry.
+**Signed mandate payload:** mandate id, buyer reference, policy hash, readback hash, confirmation time, expiry, and `confirmation`, which is `session` or `passkey`. A `passkey` mandate also names the passkey that signed it, `passkey: { credentialId, publicKey, alg }`, with the COSE public key in base64url and its COSE algorithm, so the signature can be checked without Behest.
+
+**Passkey confirmation.** A buyer may also sign a mandate with a passkey registered to their account. Behest issues a WebAuthn challenge, the base64url SHA-256 of the canonical JSON of `{ policyHash, readbackHash, nonce, exp }`, valid for five minutes, and checks the assertion against the passkey's stored public key and counter before it signs the mandate. The assertion is stored with the mandate, with its nonce and expiry and the origin and RP id it was made for, and each one confirms one mandate. Anyone can check it from the mandate alone: recompute the challenge, check that the mandate's confirmation time falls in the five minutes before `exp`, and verify the assertion at that origin and RP id with the public key the mandate names. A verified signature shows that a passkey registered to the buyer's account signed that mandate's hashes with the user present; whether the authenticator also verified the user is reported, not required.
 
 **Receipt payload:**
 
@@ -188,6 +190,9 @@ Mandates and receipts are JSON Web Signatures in compact form, signed with Ed255
 | `cart` | Cart hash, total in cents, currency, item count |
 | `decision` | Purchase id, verdict, approver (`policy` or `human`), gate rule version, each rule's outcome |
 | `payment` | Processor, PayPal order id, capture id, amount, capture time |
+| `agent` | Optional. Present when the shopping agent proposed the purchase: `decisionHash`, the hash of the agent's decision record |
+
+**Decision record.** While the shopping agent runs, Behest records each search and lookup it makes: what it asked, and for each listing or market result the seller slug, SKU, price, stock, median or cheapest price as they apply, with every title a seller or the market wrote kept only as its SHA-256. When the agent proposes a purchase, the record so far, the choice and the agent's rationale are stored with the purchase, and the receipt carries the record's hash as `agent.decisionHash`. Sellers need not read it, and a receipt without it verifies as before.
 
 **Seller verification** uses only the public key, the receipt and the cart the seller received: signature valid, issued within 15 minutes, seller slug matches, cart hash matches, amount matches, receipt id not seen before.
 
@@ -201,7 +206,7 @@ Mandates and receipts are JSON Web Signatures in compact form, signed with Ed255
 
 1. A webhook or a scheduled pull finds a new dispute and matches it to a purchase by capture id.
 2. The evidence agent (section 7.5) gathers the dispute details and Behest's records with read-only tools, including shipment tracking where PayPal holds it, and drafts a narrative in which every claim cites an evidence item.
-3. Deterministic code assembles the pack: signed mandate, its readback, the receipt, the cart, the purchase event log, and approval proof for ASK purchases. Behest records no shipment tracking itself, so the pack has no tracking item.
+3. Deterministic code assembles the pack: signed mandate, its readback, the receipt, the cart, the agent's decision record for a purchase the agent proposed, the purchase event log, and approval proof for ASK purchases. The mandate item says how the buyer confirmed it and, for a passkey, holds the signature and the result of checking it; the decision item says whether the receipt, verified against Behest's public keys, carries the record's hash. Behest records no shipment tracking itself, so the pack has no tracking item.
 4. An operator reviews it and submits it through PayPal's provide-evidence endpoint. Submission is never automatic.
 
 ### 5.6 Jobs (`lib/jobs`)
@@ -346,6 +351,7 @@ Tool results are truncated to fixed lengths, cleared of hidden characters, have 
 ```mermaid
 erDiagram
   buyers ||--o| wallets : links
+  buyers ||--o{ buyer_passkeys : registers
   buyers ||--o{ mandates : signs
   mandates ||--o{ purchases : authorizes
   sellers ||--o{ products : lists
@@ -361,11 +367,12 @@ erDiagram
 | Table | Purpose and key columns |
 |---|---|
 | `buyers` | Demo buyer identity |
+| `buyer_passkeys` | Credential id, COSE public key, signature counter, transports, last use |
 | `wallets` | PayPal customer id, payment token id, status, linked time |
-| `mandates` | Source text, policy JSON, policy hash, readback, signed JWS, status, expiry |
+| `mandates` | Source text, policy JSON, policy hash, readback, signed JWS, confirmation (`session` or `passkey`) and passkey assertion, status, expiry |
 | `sellers` | Slug, name, payout email |
 | `products` | Seller, SKU, title, description, category, price in cents, stock, screening flags, Channel3 match and benchmark |
-| `purchases` | Buyer, mandate, seller, canonical cart and hash, total, gate verdict and reasons, intent result, final verdict, approver, status, PayPal order and capture ids |
+| `purchases` | Buyer, mandate, seller, the agent's decision record, canonical cart and hash, total, gate verdict and reasons, intent result, final verdict, approver, status, PayPal order and capture ids |
 | `purchase_events` | Append-only transitions and agent steps with payloads |
 | `receipts` | Purchase, JWS, payload hash, key id |
 | `seller_orders` | Seller-side record of a presented receipt: accepted or rejected, and why |
@@ -391,7 +398,10 @@ Money is integer cents with an ISO currency code. Timestamps are UTC. Budget per
 | Route | Purpose |
 |---|---|
 | `POST /api/mandates/compile` | Draft policy, readback and questions from text |
-| `POST /api/mandates/confirm` | Sign the mandate and start the wallet link |
+| `POST /api/mandates/confirm` | Sign the mandate, by session or with a passkey signature, and start the wallet link |
+| `POST /api/mandates/sign/options` | WebAuthn options and a ticket for a passkey to sign the mandate |
+| `POST /api/passkeys/register/options` | WebAuthn options and a ticket for registering a passkey |
+| `POST /api/passkeys/register/verify` | Verify and store a new passkey for the buyer |
 | `GET /api/wallet/return` | PayPal return after wallet approval |
 | `POST /api/agent/runs` | Start a shopping run; streams progress |
 | `GET /api/purchases/return` | PayPal return after an ASK approval |
@@ -435,7 +445,7 @@ AG Studio renders the buyer, seller and operator views from Behest's tables:
 - Long agent runs stream over HTTP from a long-lived Node server, so there is no serverless time limit to work around.
 - PayPal webhooks point at the deployed URL. Locally, return-URL handlers cover the same transitions.
 
-**What production would add:** PayPal approval for saving wallets and for Payouts, a marketplace setup with seller identity checks, risk data collection (PayPal FraudNet) for saved-wallet charges, passkey-signed mandates so the buyer's own device signs the policy hash, per-seller payout holds against disputes, and multiple service instances with a separate worker.
+**What production would add:** PayPal approval for saving wallets and for Payouts, a marketplace setup with seller identity checks, risk data collection (PayPal FraudNet) for saved-wallet charges, per-seller payout holds against disputes, and multiple service instances with a separate worker.
 
 ## 14. Decision record
 

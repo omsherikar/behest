@@ -1,17 +1,21 @@
 import { connection, NextRequest } from 'next/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/mandates/confirm/route';
+import { POST as signOptions } from '@/app/api/mandates/sign/options/route';
 import { appDb, appPaypal, appSigner, demoBuyerId } from '@/lib/app-deps';
 import type { Db } from '@/lib/db/client';
-import { buyers, mandates, wallets } from '@/lib/db/schema';
+import { buyerPasskeys, buyers, mandates, wallets } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME } from '@/lib/demo/personas';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { MandatePayload } from '@/lib/domain/receipt';
 import { confirmToken } from '@/lib/mandate/confirm-token';
+import { verifyMandatePasskey } from '@/lib/mandate/passkey';
+import { registerPasskey, registrationOptions } from '@/lib/passkeys/register';
 import { generateSigningKey, loadSigningKey, publicJwks } from '@/lib/receipts/keys';
 import { createSigner, verifyJws } from '@/lib/receipts/sign';
 import { MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
+import { TestAuthenticator } from '@/tests/helpers/authenticator';
 import { FakePaypal } from '@/tests/helpers/fake-paypal';
 import { demoPolicy } from '@/tests/helpers/fixtures';
 import { createTestDb } from '@/tests/helpers/test-db';
@@ -79,6 +83,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.clearAllMocks();
   vi.restoreAllMocks();
@@ -312,5 +317,125 @@ describe('POST /api/mandates/confirm', () => {
     expect(await db.select().from(mandates)).toEqual([]);
     expect(paypal.calls).toEqual([]);
     expect(rateLimit).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/mandates/confirm with a passkey', () => {
+  const PASSKEY_FAILED = {
+    status: 400,
+    body: { error: { message: 'Your passkey signature could not be verified, so your mandate was not signed. Try again.' } },
+  };
+
+  /** A software passkey registered to `buyerId`. */
+  async function registered(buyerId: string): Promise<TestAuthenticator> {
+    const deps = { db, origin: APP_URL, now: () => new Date() };
+    const authenticator = new TestAuthenticator(APP_URL);
+    const { options, ticket } = await registrationOptions(deps, buyerId);
+    await registerPasskey(deps, { buyerId, response: authenticator.register(options), ticket });
+    return authenticator;
+  }
+
+  /** The options and ticket the sign route hands out for confirming `policy`. */
+  async function signFor(policy: MandatePolicy = demoPolicy) {
+    const { status, body } = await answer(await signOptions(await request(confirmed(policy))));
+    expect(status).toBe(200);
+    return body;
+  }
+
+  /** Asserts that nothing was signed, stored, spent or sent to PayPal. */
+  async function nothingSigned() {
+    expect(await db.select().from(mandates)).toEqual([]);
+    expect(await db.select().from(wallets)).toEqual([]);
+    expect(paypal.calls).toEqual([]);
+    for (const passkey of await db.select().from(buyerPasskeys)) expect(passkey.lastUsedAt).toBeNull();
+  }
+
+  it("signs the mandate the buyer's passkey signed, keeping the signature and naming the passkey", async () => {
+    const buyerId = await addDemoBuyer();
+    const authenticator = await registered(buyerId);
+    const { options, ticket } = await signFor();
+
+    const { status, body } = await answer(await POST(await request({ ...confirmed(), assertion: authenticator.assert(options), ticket })));
+
+    expect(status).toBe(200);
+    expect(body).toEqual({ mandateId: expect.any(String), approveUrl: APPROVE_URL });
+    const [mandate] = await db.select().from(mandates);
+    expect(mandate).toMatchObject({
+      id: body.mandateId,
+      confirmation: 'passkey',
+      buyerAssertion: { credentialId: authenticator.credentialId, challenge: options.challenge },
+    });
+    const payload = await verifyJws(mandate.jws, 'behest-mandate+jws', publicJwks([key]), MandatePayload);
+    expect(payload).toMatchObject({ confirmation: 'passkey', passkey: { credentialId: authenticator.credentialId, alg: -7 } });
+    expect(await verifyMandatePasskey(mandate, APP_URL)).toEqual({ verified: true, credentialId: authenticator.credentialId });
+    expect(await db.select().from(buyerPasskeys)).toEqual([expect.objectContaining({ counter: 1, lastUsedAt: expect.any(Date) })]);
+  });
+
+  it('refuses a signature over another policy, so a tampered policy is never signed', async () => {
+    const buyerId = await addDemoBuyer();
+    const authenticator = await registered(buyerId);
+    const { options, ticket } = await signFor(demoPolicy);
+    const wider: MandatePolicy = { ...demoPolicy, budget: { amountCents: 600_000, period: 'month' }, perPurchaseMaxCents: 600_000 };
+
+    expect(await answer(await POST(await request({ ...confirmed(wider), assertion: authenticator.assert(options), ticket })))).toEqual(
+      PASSKEY_FAILED,
+    );
+    await nothingSigned();
+  });
+
+  it('refuses a ticket once it has expired', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const buyerId = await addDemoBuyer();
+    const authenticator = await registered(buyerId);
+    const { options, ticket } = await signFor();
+    const assertion = authenticator.assert(options);
+    vi.setSystemTime(Date.now() + 5 * 60 * 1000);
+
+    expect(await answer(await POST(await request({ ...confirmed(), assertion, ticket })))).toEqual(PASSKEY_FAILED);
+    await nothingSigned();
+  });
+
+  it('refuses the same signature a second time', async () => {
+    const buyerId = await addDemoBuyer();
+    const authenticator = await registered(buyerId);
+    const { options, ticket } = await signFor();
+    const signed = { ...confirmed(), assertion: authenticator.assert(options), ticket };
+    expect((await POST(await request(signed))).status).toBe(200);
+
+    expect(await answer(await POST(await request(signed)))).toEqual(PASSKEY_FAILED);
+    expect(await db.select().from(mandates)).toEqual([expect.objectContaining({ status: 'active' })]);
+  });
+
+  it("refuses another buyer's passkey", async () => {
+    const buyerId = await addDemoBuyer();
+    await registered(buyerId);
+    const [other] = await db.insert(buyers).values({ name: 'Sam' }).returning();
+    const theirs = await registered(other.id);
+    const { options, ticket } = await signFor();
+
+    expect(await answer(await POST(await request({ ...confirmed(), assertion: theirs.assert(options), ticket })))).toEqual(PASSKEY_FAILED);
+    await nothingSigned();
+  });
+
+  it('refuses a passkey whose counter has gone backwards', async () => {
+    const buyerId = await addDemoBuyer();
+    const authenticator = await registered(buyerId);
+    await db.update(buyerPasskeys).set({ counter: 5 });
+    const { options, ticket } = await signFor();
+
+    expect(
+      await answer(await POST(await request({ ...confirmed(), assertion: authenticator.assert(options, { counter: 3 }), ticket }))),
+    ).toEqual(PASSKEY_FAILED);
+    await nothingSigned();
+  });
+
+  it('refuses an assertion without its ticket, and a ticket without an assertion', async () => {
+    const buyerId = await addDemoBuyer();
+    const authenticator = await registered(buyerId);
+    const { options, ticket } = await signFor();
+
+    expect(await answer(await POST(await request({ ...confirmed(), assertion: authenticator.assert(options) })))).toEqual(PASSKEY_FAILED);
+    expect(await answer(await POST(await request({ ...confirmed(), ticket })))).toEqual(PASSKEY_FAILED);
+    await nothingSigned();
   });
 });

@@ -13,17 +13,24 @@ const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLa
 
 export function StatsCounter({
   value,
-  format = (n) => Math.round(n).toLocaleString('en-US'),
+  prefix = '',
+  suffix = '',
+  decimals = 0,
   duration = 1.4,
   className,
 }: {
   value: number;
-  /** How a value is written, such as "$0.31". It is called for every frame of the count. */
-  format?: (value: number) => string;
+  /** Written before the number, such as "$". */
+  prefix?: string;
+  suffix?: string;
+  /** Digits after the decimal point. */
+  decimals?: number;
   /** Seconds the count takes. */
   duration?: number;
   className?: string;
 }) {
+  const format = (n: number) =>
+    `${prefix}${n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}${suffix}`;
   const ref = useRef<HTMLSpanElement>(null);
   const inView = useInView(ref, { once: true, margin: '-80px' });
   const reduceMotion = useReducedMotion();

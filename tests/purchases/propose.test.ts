@@ -529,18 +529,24 @@ it('counts only purchases made since the budget period began', async () => {
 });
 
 it('counts purchases still in flight, and no others, toward the velocity limit', async () => {
-  const s = await setUp({ policy: { ...demoPolicy, velocity: { maxPurchases: 1, windowHours: 24 } } });
+  const s = await setUp({ policy: { ...demoPolicy, velocity: { maxPurchases: 2, windowHours: 24 } } });
+  // In the window: one still awaiting its buyer, which counts, and one blocked, which does not.
+  await addEarlierPurchase(s, 'awaiting_approval', 900, hoursAgo(2));
   await addEarlierPurchase(s, 'blocked', 900, hoursAgo(1));
+  // Before the window.
   await addEarlierPurchase(s, 'accepted', 900, hoursAgo(25));
 
+  // Counting the blocked or the older purchase too would already reach the limit of 2.
   const first = await propose(s, proposal(['TUR-100', 2]));
+  // The purchase awaiting approval and the first one now reach it. Were the one awaiting approval
+  // not counted, the first alone would leave room.
   const second = await propose(s, proposal(['TUR-100', 2]));
 
   expect(first).toMatchObject({ verdict: 'ALLOW', status: 'accepted' });
   expect(second).toMatchObject({
     verdict: 'BLOCK',
     status: 'blocked',
-    reasons: ['Your limit of 1 purchase in 24 hours is already reached'],
+    reasons: ['Your limit of 2 purchases in 24 hours is already reached'],
   });
 });
 

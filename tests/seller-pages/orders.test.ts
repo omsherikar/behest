@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import { payouts, purchases, receipts, sellerOrders, sellers } from '@/lib/db/schema';
-import { payoutLabel, rejectionLabel, sellerOrderRows, sellerOrdersQuery } from '@/lib/seller-pages/orders';
+import { payoutLabel, payoutState, rejectionLabel, sellerOrderRows, sellerOrdersQuery } from '@/lib/seller-pages/orders';
 import { seededCart, seedPurchase } from '@/tests/helpers/seed-purchase';
 import { createTestDb } from '@/tests/helpers/test-db';
 
@@ -70,41 +70,61 @@ describe('sellerOrderRows', () => {
         createdAt: '2026-11-06T12:05:00.000Z',
         receiptId: 'not-a-receipt-id',
         status: 'rejected',
+        check: 'rejected',
         reason: 'The signature did not verify',
         totalCents: 1875,
         payout: null,
+        payoutState: null,
+        receiptJws: 'presented.receipt.jws',
+        cart: seededCart,
       },
       {
         createdAt: '2026-11-06T12:04:00.000Z',
         receiptId: null,
         status: 'rejected',
+        check: 'rejected',
         reason: 'The receipt could not be read',
         totalCents: 1875,
         payout: null,
+        payoutState: null,
+        receiptJws: 'presented.receipt.jws',
+        cart: seededCart,
       },
       {
         createdAt: '2026-11-06T12:03:00.000Z',
         receiptId: UNPAID_RECEIPT,
         status: 'accepted',
+        check: 'verified',
         reason: null,
         totalCents: 1875,
         payout: 'Not sent yet',
+        payoutState: 'pending',
+        receiptJws: 'presented.receipt.jws',
+        cart: seededCart,
       },
       {
         createdAt: '2026-11-06T12:02:00.000Z',
         receiptId: PAID_RECEIPT,
         status: 'rejected',
+        check: 'replayed',
         reason: 'The receipt was already used',
         totalCents: 1875,
         payout: null,
+        payoutState: null,
+        receiptJws: 'presented.receipt.jws',
+        cart: seededCart,
       },
       {
         createdAt: '2026-11-06T12:01:00.000Z',
         receiptId: PAID_RECEIPT,
         status: 'accepted',
+        check: 'verified',
         reason: null,
         totalCents: 1875,
         payout: 'Paid',
+        payoutState: 'paid',
+        receiptJws: 'presented.receipt.jws',
+        cart: seededCart,
       },
     ]);
   });
@@ -117,7 +137,19 @@ describe('sellerOrderRows', () => {
   it('carries nothing about the buyer: no request, reasons, intent or mandate', async () => {
     const rows = await sellerOrderRows(db, sellerId);
     for (const row of rows) {
-      expect(Object.keys(row).sort()).toEqual(['createdAt', 'id', 'payout', 'reason', 'receiptId', 'status', 'totalCents']);
+      expect(Object.keys(row).sort()).toEqual([
+        'cart',
+        'check',
+        'createdAt',
+        'id',
+        'payout',
+        'payoutState',
+        'reason',
+        'receiptId',
+        'receiptJws',
+        'status',
+        'totalCents',
+      ]);
     }
     const text = JSON.stringify(rows);
     expect(text).not.toContain('Restock turmeric and cumin');
@@ -137,6 +169,7 @@ describe('sellerOrdersQuery', () => {
       'seller_orders.id',
       'seller_orders.reason',
       'seller_orders.receipt_id',
+      'seller_orders.receipt_jws',
       'seller_orders.status',
     ]);
     expect(sql).not.toMatch(/"(purchases|purchase_events|mandates|buyers|wallets)"/);
@@ -163,5 +196,17 @@ describe('labels', () => {
     expect(payoutLabel('CANCELED')).toBe('Cancelled');
     expect(payoutLabel('RETURNED')).toBe('Returned');
     expect(payoutLabel('SOME_NEW_STATUS')).toBe('Some new status');
+  });
+});
+
+describe('payoutState', () => {
+  it('is paid, held, failed or pending as PayPal reports it', () => {
+    expect(payoutState('SUCCESS')).toBe('paid');
+    expect(payoutState('ONHOLD')).toBe('held');
+    for (const status of ['FAILED', 'RETURNED', 'REVERSED', 'BLOCKED', 'DENIED', 'REFUNDED', 'CANCELED', 'UNCLAIMED']) {
+      expect(payoutState(status)).toBe('failed');
+    }
+    expect(payoutState('PENDING')).toBe('pending');
+    expect(payoutState(null)).toBe('pending');
   });
 });

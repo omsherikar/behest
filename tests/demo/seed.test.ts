@@ -1,14 +1,24 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import Anthropic from '@anthropic-ai/sdk';
 import { asc, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildListings, screenRow } from '@/lib/catalog/build';
+import { parseCatalogCsv } from '@/lib/catalog/csv';
 import type { Db } from '@/lib/db/client';
 import { buyers, products, purchases, sellers, wallets } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME, DEMO_SELLER_SLUG } from '@/lib/demo/personas';
 import { RAVI_CATALOG_CSV, resetDemo, seedDemo } from '@/lib/demo/seed';
 import nextConfig from '@/next.config';
 import { addDemoActivity, rowCounts, seededRows } from '@/tests/helpers/demo-activity';
+import { fakeClaude, messageJson } from '@/tests/helpers/fake-claude';
 import { createTestDb } from '@/tests/helpers/test-db';
+
+// The catalog builder's row screen as it is, watched, so a test can tell the seed screens with it.
+vi.mock('@/lib/catalog/build', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/catalog/build')>();
+  return { ...actual, screenRow: vi.fn(actual.screenRow) };
+});
 
 const PAYEE = 'payee@business.example.com';
 
@@ -80,6 +90,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
 
 describe('the demo catalog', () => {
@@ -111,6 +122,21 @@ describe('seedDemo', () => {
     expect(counts.mandates).toBe(0);
     expect(counts.wallets).toBe(0);
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('screens each catalog row with the rule the catalog builder uses, and flags what the builder flags', async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    const { rows } = parseCatalogCsv(await readFile(join(process.cwd(), RAVI_CATALOG_CSV), 'utf8'));
+    expect(vi.mocked(screenRow).mock.calls.map(([row]) => row.sku)).toEqual(rows.map((row) => row.sku));
+
+    // With a reply that lists nothing, the builder drafts every row from the seller's own text.
+    const claude = new Anthropic({ apiKey: 'test', fetch: fakeClaude([messageJson({ json: { items: [] } })]).fetch, maxRetries: 0 });
+    const built = await buildListings({ db, claude, now: () => new Date(), env: { NODE_ENV: 'test' } }, { rows });
+    if (!built.ok) throw new Error(`The build failed with ${built.error}`);
+    const seeded = await listings(db);
+    expect(built.value.map((draft) => [draft.sku, draft.screening.suspicious])).toEqual(
+      rows.map((row) => [row.sku, seeded.find((listing) => listing.sku === row.sku)?.flags.includes('agent_instructions')]),
+    );
   });
 
   it('keeps the CSV description, the injected instruction included, on the flagged listing', async () => {

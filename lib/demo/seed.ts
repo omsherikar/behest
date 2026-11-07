@@ -3,9 +3,9 @@ import path from 'node:path';
 import { ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { demoBuyerId } from '@/lib/app-deps';
+import { screenRow } from '@/lib/catalog/build';
 import { parseCatalogCsv } from '@/lib/catalog/csv';
 import { AGENT_INSTRUCTIONS_FLAG } from '@/lib/catalog/onboard';
-import { screenText } from '@/lib/catalog/screen';
 import type { Db } from '@/lib/db/client';
 import {
   disputes,
@@ -167,9 +167,9 @@ function checkedPayeeEmail(payeeEmail: string): string {
 }
 
 /**
- * Ravi's Spice Co. with a listing for each row of its catalog CSV, as the seller wrote it. A listing
- * whose name and description the fixed screen finds aimed at AI agents carries the flag that keeps
- * agents from buying it.
+ * Ravi's Spice Co. with a listing for each row of its catalog CSV, as the seller wrote it. A row the
+ * catalog builder's own fixed screen finds aimed at AI agents carries the flag that keeps agents
+ * from buying it, so the seed and an onboarding never disagree on what to flag.
  */
 async function raviSpices(): Promise<DemoSeller> {
   const { rows, rejected } = parseCatalogCsv(await readFile(path.join(process.cwd(), RAVI_CATALOG_CSV), 'utf8'));
@@ -185,7 +185,7 @@ async function raviSpices(): Promise<DemoSeller> {
       category: row.category,
       priceCents: row.priceCents,
       stock: row.stock,
-      flags: screenText(`${row.name}\n${row.description}`).suspicious ? [AGENT_INSTRUCTIONS_FLAG] : [],
+      flags: screenRow(row) ? [AGENT_INSTRUCTIONS_FLAG] : [],
     };
   });
   return { slug: DEMO_SELLER_SLUG, name: "Ravi's Spice Co.", listings };

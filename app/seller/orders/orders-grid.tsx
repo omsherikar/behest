@@ -9,7 +9,7 @@ import { SellerGrid } from '../seller-grid';
 // The seller's agent orders, newest first: whether the receipt presented with each one checked out,
 // why not when it did not, the cart total and, for an accepted order, the payout.
 
-// 6 Nov 2026, 11:20 UTC
+// 6 Nov 2026, 11:20, in UTC as the column header says.
 const dateTime = new Intl.DateTimeFormat('en-GB', {
   day: 'numeric',
   month: 'short',
@@ -38,7 +38,7 @@ const columns: ColDef<SellerOrderRow>[] = [
     headerName: 'Time (UTC)',
     sort: 'desc',
     valueFormatter: ({ value }: ValueFormatterParams<SellerOrderRow, string>) =>
-      value ? `${dateTime.format(new Date(value))} UTC` : '',
+      value ? dateTime.format(new Date(value)) : '',
     getQuickFilterText: ({ value }) => (value ? dateTime.format(new Date(value)) : ''),
   },
   {

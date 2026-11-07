@@ -72,7 +72,7 @@ export const LIMITS: { title: string; detail: string }[] = [
   {
     title: 'Seller names are compared as text, not as they look.',
     detail:
-      "Onboarding refuses a seller whose name reads the same as an existing seller's once compatibility forms, case, punctuation and a trailing Co, Company, Inc, LLC or Ltd are set aside, and refuses a name or shop address written as instructions to AI agents. It does not catch a lookalike spelled differently, such as Ravi's Spices, or one using accented letters or letters from another script that look alike. Each seller has its own slug, which the agent sees and the receipt names, and a mandate that lists the sellers it allows blocks every other; the demo mandate allows any seller.",
+      "Onboarding refuses a seller whose name reads the same as an existing seller's once compatibility forms, case, punctuation and any trailing Co, Company, Inc, LLC or Ltd words are set aside, and refuses a name or shop address written as instructions to AI agents. It does not catch a lookalike spelled differently, such as Ravi's Spices, or one using accented letters or letters from another script that look alike. Each seller has its own slug, which the agent sees and the receipt names, and a mandate that lists the sellers it allows blocks every other; the demo mandate allows any seller.",
   },
   {
     title: 'The price check needs a market benchmark.',

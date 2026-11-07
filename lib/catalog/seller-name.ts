@@ -9,20 +9,28 @@ import { screenText } from './screen';
 // the agent reads the name and the address too, so either one written as instructions to AI agents is
 // refused, by the phrases that flag a listing.
 
-/** Company suffixes a name may end with, longest first. One is taken off before names are compared. */
-const SUFFIXES = ['company', 'inc', 'llc', 'ltd', 'co'];
+/** Company suffix words a name may end with. All of them are taken off before names are compared. */
+const SUFFIXES = new Set(['company', 'inc', 'llc', 'ltd', 'co']);
 
 /**
- * The name as names are compared: compatibility forms such as full-width letters folded (NFKC),
- * case folded, everything but letters and digits removed, then one trailing company suffix taken
- * off, unless the name is nothing but the suffix. `Ravi's Spice Co.` and `RAVIS SPICE COMPANY` both
- * read as `ravisspice`. Accented and look-alike letters from other scripts are kept as they are.
+ * The name as names are compared: compatibility forms such as full-width letters folded (NFKC), case
+ * folded, split into words of letters and digits, every trailing company suffix word taken off unless
+ * nothing else is left, and the words joined. `Ravi's Spice Co.`, `RAVIS SPICE COMPANY` and `Ravi's
+ * Spice Co. Ltd` all read as `ravisspice`, while `Taco` stays `taco`. A name with no letter or digit is
+ * compared as written, so two different ones do not collide. Accented and look-alike letters from
+ * other scripts are kept as they are.
  */
 export function sellerNameKey(name: string): string {
+  const normalized = name.normalize('NFKC');
   // Upper then lower case, so that, for one, `ß` folds to `ss` as it does in full case folding.
-  const folded = name.normalize('NFKC').toUpperCase().toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-  const suffix = SUFFIXES.find((s) => folded.endsWith(s) && folded.length > s.length);
-  return suffix === undefined ? folded : folded.slice(0, -suffix.length);
+  const words = normalized
+    .toUpperCase()
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word !== '');
+  while (words.length > 1 && SUFFIXES.has(words[words.length - 1])) words.pop();
+  // A key of letters and digits never holds `=`, so a name compared as written cannot meet one.
+  return words.length > 0 ? words.join('') : `=${normalized.trim()}`;
 }
 
 export type SellerNameRefusal =

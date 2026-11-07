@@ -19,13 +19,25 @@ describe('sellerNameKey', () => {
     ['ravis-spice ltd', 'ravisspice'],
     ['Straße Spices', 'strassespices'],
     ['Gadget Hub', 'gadgethub'],
+    ["Ravi's Spice Co. Ltd", 'ravisspice'],
+    ['Taco', 'taco'],
+    ['Zinc', 'zinc'],
+    ['Costco', 'costco'],
+    ['Ta Co', 'ta'],
   ])('reads %j as %j', (name, key) => {
     expect(sellerNameKey(name)).toBe(key);
   });
 
-  it('takes off one trailing company suffix only, and keeps a name that is nothing but one', () => {
-    expect(sellerNameKey('Taco Co Inc')).toBe('tacoco');
+  it('takes off every trailing company suffix word, and keeps a name that is nothing but suffixes', () => {
+    expect(sellerNameKey('Taco Co Inc')).toBe('taco');
     expect(sellerNameKey('Co.')).toBe('co');
+    expect(sellerNameKey('Co. Ltd')).toBe('co');
+  });
+
+  it('compares a name with no letters or digits as written, so two different ones do not collide', () => {
+    expect(sellerNameKey('\u2605\u2605\u2605')).not.toBe(sellerNameKey('\u2606\u2606\u2606'));
+    expect(sellerNameKey(' \u2605\u2605\u2605 ')).toBe(sellerNameKey('\u2605\u2605\u2605'));
+    expect(sellerNameKey('\u2605\u2605\u2605')).not.toBe('');
   });
 });
 
@@ -42,13 +54,20 @@ describe('sellerNameRefusal', () => {
     await expect(sellerNameRefusal(db, "Ravi's Spice Bazaar", 'ravis-spice-bazaar')).resolves.toBeNull();
   });
 
-  it("refuses a name too close to an existing seller's, naming that seller", async () => {
+  it.each(["Ravi's Spice Co", "Ravi's Spice Co. Ltd"])("refuses %j as too close to an existing seller's name, naming that seller", async (name) => {
     const db = await withRavi();
 
-    await expect(sellerNameRefusal(db, "Ravi's Spice Co", 'ravis-spice-co')).resolves.toEqual({
+    await expect(sellerNameRefusal(db, name, 'ravis-spice-co')).resolves.toEqual({
       code: 'name_taken',
       existing: "Ravi's Spice Co.",
     });
+  });
+
+  it('lets in a name that only shares letters with a suffix, such as Ta Co beside Taco', async () => {
+    const db = await createTestDb();
+    await db.insert(sellers).values({ slug: 'taco', name: 'Taco', payoutEmail: 'taco@example.com' });
+
+    await expect(sellerNameRefusal(db, 'Ta Co', 'ta-co')).resolves.toBeNull();
   });
 
   it('refuses a name or shop address that reads as instructions to AI agents, as a listing would be flagged', async () => {

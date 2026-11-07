@@ -19,29 +19,62 @@ export const PUBLIC_READ_LIMIT: Readonly<RateLimitOptions> = { capacity: 60, ref
 /** The limit for public writes, such as an agent placing an order: bursts of 20, then 20 a minute. */
 export const PUBLIC_WRITE_LIMIT: Readonly<RateLimitOptions> = { capacity: 20, refillPerMinute: 20 };
 
+/**
+ * The most keys a limiter tracks. Past it, the least recently seen key is forgotten; forgetting a
+ * key only hands it a full bucket again, which an idle key would have refilled to anyway.
+ */
+export const MAX_TRACKED_KEYS = 10_000;
+
 type Bucket = { tokens: number; at: number };
 
-/** A rate limiter on the given clock (milliseconds). Tests pass their own clock. */
-export function createRateLimiter(now: () => number = () => Date.now()) {
+/**
+ * A rate limiter on the given clock (milliseconds), tracking at most `maxKeys` keys. Tests pass
+ * their own clock and bound. `tracked()` is how many keys it holds.
+ */
+export function createRateLimiter(now: () => number = () => Date.now(), maxKeys: number = MAX_TRACKED_KEYS) {
+  // A Map keeps insertion order, and every call moves its key to the end, so the first key is the
+  // one seen least recently.
   const buckets = new Map<string, Bucket>();
 
+  /** Keeps `bucket` for `key` as the most recently seen key, forgetting the least recent past the bound. */
+  function keep(key: string, bucket: Bucket): void {
+    buckets.delete(key);
+    buckets.set(key, bucket);
+    for (const oldest of buckets.keys()) {
+      if (buckets.size <= maxKeys) break;
+      buckets.delete(oldest);
+    }
+  }
+
   /** Spends a token for `key` and returns true, or returns false when the bucket is empty. */
-  return function rateLimit(key: string, { capacity, refillPerMinute }: RateLimitOptions): boolean {
+  function rateLimit(key: string, { capacity, refillPerMinute }: RateLimitOptions): boolean {
     const at = now();
     const last = buckets.get(key);
     const tokens = last ? Math.min(capacity, last.tokens + ((at - last.at) * refillPerMinute) / 60_000) : capacity;
-    // A refusal changes nothing, so the refill is always measured from the last spent token. That
-    // keeps a clock that steps backwards from crediting the same time twice.
-    if (tokens < 1) return false;
-    buckets.set(key, { tokens: tokens - 1, at });
+    // A refusal leaves the bucket as it was, so the refill is always measured from the last spent
+    // token. That keeps a clock that steps backwards from crediting the same time twice. The key
+    // still counts as just seen, so a client that keeps asking is never forgotten into a full bucket.
+    if (tokens < 1) {
+      if (last) keep(key, last);
+      return false;
+    }
+    keep(key, { tokens: tokens - 1, at });
     return true;
-  };
+  }
+
+  return Object.assign(rateLimit, { tracked: () => buckets.size });
 }
 
 /** The app's rate limiter, on the system clock. */
 export const rateLimit = createRateLimiter();
 
-/** The client's address as the hosting platform reports it, which sets both headers itself. */
+/**
+ * The client's address. The hosting proxy appends the address it saw to x-forwarded-for, so the
+ * right-most entry is the one a client cannot choose; anything before it may be the client's own
+ * claim. x-real-ip is read only when there is no x-forwarded-for.
+ */
 export function clientAddress(request: Request): string {
-  return request.headers.get('x-real-ip') ?? request.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
+  const forwarded = request.headers.get('x-forwarded-for')?.split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (forwarded && forwarded.length > 0) return forwarded[forwarded.length - 1];
+  return request.headers.get('x-real-ip')?.trim() || 'unknown';
 }

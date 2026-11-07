@@ -41,7 +41,7 @@ const RAVI_CSV = readFileSync(join(import.meta.dirname, '../fixtures/catalog/rav
 const RAVI = { name: "Ravi's Spice Co.", slug: 'ravi-spices', payoutEmail: 'ravi@example.com', csvText: RAVI_CSV };
 
 async function request(body: unknown, { persona = 'seller' }: { persona?: Persona | 'forged' | null } = {}) {
-  const headers = new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7, 10.0.0.1' });
+  const headers = new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '10.0.0.1, 203.0.113.7' });
   if (persona === 'forged') headers.set('cookie', `${SESSION_COOKIE}=not-a-signed-cookie`);
   else if (persona) headers.set('cookie', `${SESSION_COOKIE}=${await sessionCookie(persona)}`);
   return new NextRequest('http://localhost/api/sellers/onboard', {

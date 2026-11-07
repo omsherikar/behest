@@ -32,7 +32,7 @@ const verify = (body: unknown) =>
   POST(
     new NextRequest('http://localhost/api/receipts/verify', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.4, 10.0.0.1' },
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '10.0.0.1, 198.51.100.4' },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
   );

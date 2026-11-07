@@ -25,7 +25,7 @@ vi.mock('@/lib/ratelimit', async (importOriginal) => ({
 const catalogOf = (slug: string) =>
   GET(
     new NextRequest(`http://localhost/api/sellers/${slug}/catalog`, {
-      headers: { 'x-forwarded-for': '198.51.100.4, 10.0.0.1' },
+      headers: { 'x-forwarded-for': '10.0.0.1, 198.51.100.4' },
     }),
     { params: Promise.resolve({ slug }) },
   );

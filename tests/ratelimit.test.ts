@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   clientAddress,
   createRateLimiter,
+  MAX_TRACKED_KEYS,
   MODEL_ROUTE_LIMIT,
   PUBLIC_READ_LIMIT,
   PUBLIC_WRITE_LIMIT,
@@ -79,6 +80,42 @@ describe('rate limiter', () => {
     expect(limit('visitor', MODEL_ROUTE_LIMIT)).toBe(true);
   });
 
+  it('tracks at most 10,000 keys however many it sees', () => {
+    const { limit } = limiterAt();
+    for (let i = 0; i < 25_000; i += 1) limit(`visitor-${i}`, MODEL_ROUTE_LIMIT);
+
+    expect(MAX_TRACKED_KEYS).toBe(10_000);
+    expect(limit.tracked()).toBe(10_000);
+  });
+
+  it('forgets the least recently seen key first, which then starts again with a full bucket', () => {
+    const limit = createRateLimiter(() => 0, 3);
+    const once = { capacity: 1, refillPerMinute: 1 };
+    expect(limit('a', once)).toBe(true);
+    expect(limit('a', once)).toBe(false);
+    limit('b', once);
+    limit('c', once);
+    expect(limit.tracked()).toBe(3);
+
+    limit('d', once);
+
+    expect(limit.tracked()).toBe(3);
+    expect(limit('a', once)).toBe(true);
+  });
+
+  it('keeps a key that is still being refused, so asking again never resets its bucket', () => {
+    const limit = createRateLimiter(() => 0, 2);
+    const once = { capacity: 1, refillPerMinute: 1 };
+    limit('a', once);
+    limit('b', once);
+    expect(limit('a', once)).toBe(false);
+
+    limit('c', once);
+
+    expect(limit('a', once)).toBe(false);
+    expect(limit('b', once)).toBe(true);
+  });
+
   it('exports a ready limiter on the system clock', () => {
     const opts = { capacity: 1, refillPerMinute: 1 };
     const key = `system-clock-${Math.random()}`;
@@ -90,12 +127,24 @@ describe('rate limiter', () => {
 describe('client address', () => {
   const requestWith = (headers: Record<string, string>) => new Request('http://localhost/api', { headers });
 
-  it('takes the address the platform sets in x-real-ip', () => {
-    expect(clientAddress(requestWith({ 'x-real-ip': '198.51.100.4', 'x-forwarded-for': '203.0.113.7' }))).toBe('198.51.100.4');
+  it('takes the right-most x-forwarded-for entry, the one the hosting proxy appends', () => {
+    expect(clientAddress(requestWith({ 'x-forwarded-for': ' 10.0.0.1 , 203.0.113.7 ' }))).toBe('203.0.113.7');
+    expect(clientAddress(requestWith({ 'x-forwarded-for': '203.0.113.7' }))).toBe('203.0.113.7');
   });
 
-  it('takes the first x-forwarded-for address when there is no x-real-ip', () => {
-    expect(clientAddress(requestWith({ 'x-forwarded-for': ' 203.0.113.7 , 10.0.0.1' }))).toBe('203.0.113.7');
+  it('gives the same address whatever a client writes in the entries before it', () => {
+    for (const claimed of ['198.51.100.4', '1.1.1.1, 2.2.2.2', 'unknown', '']) {
+      const forwarded = claimed === '' ? '203.0.113.7' : `${claimed}, 203.0.113.7`;
+      expect(clientAddress(requestWith({ 'x-forwarded-for': forwarded }))).toBe('203.0.113.7');
+    }
+  });
+
+  it('ignores x-real-ip when x-forwarded-for is set', () => {
+    expect(clientAddress(requestWith({ 'x-real-ip': '198.51.100.4', 'x-forwarded-for': '203.0.113.7' }))).toBe('203.0.113.7');
+  });
+
+  it('takes x-real-ip when there is no x-forwarded-for', () => {
+    expect(clientAddress(requestWith({ 'x-real-ip': ' 198.51.100.4 ' }))).toBe('198.51.100.4');
   });
 
   it('reads unknown when neither header is set', () => {

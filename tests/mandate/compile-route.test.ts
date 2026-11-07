@@ -39,7 +39,7 @@ const PER_PURCHASE_ASSUMPTION =
   'No limit was given for a single purchase, so one purchase can use the whole $60 monthly budget.';
 
 async function request(body: unknown, { persona = 'buyer' }: { persona?: Persona | 'forged' | null } = {}) {
-  const headers = new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7, 10.0.0.1' });
+  const headers = new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '10.0.0.1, 203.0.113.7' });
   if (persona === 'forged') headers.set('cookie', `${SESSION_COOKIE}=not-a-signed-cookie`);
   else if (persona) headers.set('cookie', `${SESSION_COOKIE}=${await sessionCookie(persona)}`);
   return new NextRequest('http://localhost/api/mandates/compile', {

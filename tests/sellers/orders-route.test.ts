@@ -30,7 +30,7 @@ const placeOrder = (body: unknown, slug = 'ravi-spices') =>
   POST(
     new NextRequest(`http://localhost/api/sellers/${slug}/orders`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.4, 10.0.0.1' },
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '10.0.0.1, 198.51.100.4' },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     }),
     { params: Promise.resolve({ slug }) },

@@ -108,8 +108,9 @@ function describeFailure(error: unknown): string {
 }
 
 /** A listing as the decision record keeps it: its title only as a hash. */
-function recordedListing(row: { sellerSlug: string; sku: string; priceCents: number; stock: number | null; title: string }): DecisionListing {
-  return { sellerSlug: row.sellerSlug, sku: row.sku, priceCents: row.priceCents, stock: row.stock, titleHash: sha256Hex(row.title) };
+function recordedListing(row: Omit<DecisionListing, 'titleHash'> & { title: string }): DecisionListing {
+  const { sellerSlug, sku, priceCents, stock, title } = row;
+  return { sellerSlug, sku, priceCents, stock, titleHash: sha256Hex(title) };
 }
 
 /** `query` as an ILIKE pattern matching it anywhere, with its wildcards and escape character matched literally. */

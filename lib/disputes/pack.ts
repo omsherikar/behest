@@ -285,23 +285,27 @@ function decisionBody(
     switch (step.tool) {
       case 'search_sellers': {
         const { query, category, maxPriceCents } = step.input;
-        const filters = `${category ? `, in ${category}` : ''}${maxPriceCents === undefined ? '' : `, at most ${formatUsd(maxPriceCents)}`}`;
+        const inCategory = category ? `, in ${category}` : '';
+        const atMost = maxPriceCents === undefined ? '' : `, at most ${formatUsd(maxPriceCents)}`;
+        const found = plural(step.listings.length, 'listing', 'listings');
         return [
-          `${n} Searched Behest sellers for ${agentQuote(query)}${filters}: ${plural(step.listings.length, 'listing', 'listings')}.`,
+          `${n} Searched Behest sellers for ${agentQuote(query)}${inCategory}${atMost}: ${found}.`,
           ...step.listings.map(listingLine),
         ];
       }
-      case 'search_market':
+      case 'search_market': {
         if (step.results === null) {
           return [`${n} Looked up market prices for ${agentQuote(step.input.query)}: market prices were not available.`];
         }
+        const found = plural(step.results.length, 'result', 'results');
         return [
-          `${n} Looked up market prices for ${agentQuote(step.input.query)}: ${plural(step.results.length, 'result', 'results')}.`,
+          `${n} Looked up market prices for ${agentQuote(step.input.query)}: ${found}.`,
           ...step.results.map(
             (result) =>
               `   - median ${price(result.medianPriceCents)}, cheapest ${price(result.cheapestCents)}, title hash ${result.titleHash}`,
           ),
         ];
+      }
       case 'get_product': {
         const asked = agentQuote(`${step.input.sellerSlug} ${step.input.sku}`);
         return step.listing

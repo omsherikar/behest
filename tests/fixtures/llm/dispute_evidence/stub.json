@@ -1,0 +1,22 @@
+{
+  "id": "msg_stub_dispute_evidence",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"summary\":\"The buyer confirmed a spending mandate, which Behest signed, before the agent bought anything, and the purchase stayed within it. Behest signed a receipt for exactly the cart PayPal captured, and its purchase log records each step.\",\"claims\":[{\"text\":\"The buyer confirmed the spending mandate in their own words, and Behest signed it before the purchase was made.\",\"evidenceIds\":[\"mandate\"]},{\"text\":\"Behest enforced the limits the buyer confirmed in the readback of that mandate.\",\"evidenceIds\":[\"readback\",\"purchase_log\"]},{\"text\":\"The cart lists the seller, the items, their quantities and prices, and the total that was bought.\",\"evidenceIds\":[\"cart\"]},{\"text\":\"Behest signed a receipt over that cart when PayPal captured the payment, and anyone can verify it with Behest's public key.\",\"evidenceIds\":[\"receipt\",\"cart\"]},{\"text\":\"The purchase log records every step of the purchase in order, with times in UTC.\",\"evidenceIds\":[\"purchase_log\"]}]}",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

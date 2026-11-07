@@ -57,8 +57,20 @@ it('accepts a mandate payload with or without an expiry', () => {
   expect(MandatePayload.safeParse({ ...mandate, expiresAt: '2026-12-31T23:59:59Z' }).success).toBe(true);
 });
 
+/** The buyer's passkey as a passkey-confirmed mandate names it. */
+const passkey = { credentialId: 'Y3JlZGVudGlhbA', publicKey: 'cHVibGljLWtleQ', alg: -7 };
+
+it("accepts a mandate confirmed by the buyer's passkey, naming the passkey", () => {
+  expect(MandatePayload.safeParse({ ...mandate, confirmation: 'passkey', passkey }).success).toBe(true);
+});
+
 it.each([
   ['another confirmation method', { ...mandate, confirmation: 'email' }],
   ['a confirmation time that is not ISO', { ...mandate, confirmedAt: 'today' }],
   ['unknown keys', { ...mandate, policy: {} }],
+  ['a passkey confirmation that names no passkey', { ...mandate, confirmation: 'passkey' }],
+  ['a session confirmation that names a passkey', { ...mandate, passkey }],
+  ['a passkey with unknown keys', { ...mandate, confirmation: 'passkey', passkey: { ...passkey, counter: 1 } }],
+  ['a passkey algorithm that is not a number', { ...mandate, confirmation: 'passkey', passkey: { ...passkey, alg: 'ES256' } }],
+  ['a passkey with no public key', { ...mandate, confirmation: 'passkey', passkey: { ...passkey, publicKey: '' } }],
 ])('rejects a mandate with %s', (_, input) => expect(MandatePayload.safeParse(input).success).toBe(false));

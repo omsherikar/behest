@@ -66,7 +66,7 @@ const decisions: PageState = {
       dataMapping: { value: [{ id: 'purchases.verdictWords' }] },
       format: {
         ...title('Verdict'),
-        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 96 } },
+        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 56 } },
       },
     },
     ledger: {
@@ -103,15 +103,16 @@ const decisions: PageState = {
     },
   },
   widgetLayout: {
-    'kpi-proposals': at(0, 0, 4, 7),
-    'kpi-allowed': at(4, 0, 4, 7),
-    'kpi-asked': at(8, 0, 4, 7),
-    'kpi-blocked': at(12, 0, 4, 7),
-    verdict: at(16, 0, 8, 7),
-    ledger: at(0, 7, 24, 30),
-    receipt: at(0, 37, 9, 36),
-    'rule-outcomes': at(9, 37, 15, 18),
-    'intent-check': at(9, 55, 15, 18),
+    'kpi-proposals': at(0, 0, 6, 7),
+    'kpi-allowed': at(6, 0, 6, 7),
+    'kpi-asked': at(12, 0, 6, 7),
+    'kpi-blocked': at(18, 0, 6, 7),
+    // A row of its own, so "Needs approval" has room beside the other two verdicts.
+    verdict: at(0, 7, 24, 7),
+    ledger: at(0, 14, 24, 30),
+    receipt: at(0, 44, 9, 36),
+    'rule-outcomes': at(9, 44, 15, 18),
+    'intent-check': at(9, 62, 15, 18),
   },
   filter: {
     // Passing and skipped rules would drown out the few that decided anything.
@@ -246,7 +247,7 @@ const sellerOrders: PageState = {
       dataMapping: { value: [{ id: 'purchases.verdictWords' }] },
       format: {
         ...title('Verdict'),
-        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 96 } },
+        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 56 } },
       },
     },
     ledger: {
@@ -286,15 +287,16 @@ const sellerOrders: PageState = {
     },
   },
   widgetLayout: {
-    'kpi-orders': at(0, 0, 4, 7),
-    'kpi-allowed': at(4, 0, 4, 7),
-    'kpi-asked': at(8, 0, 4, 7),
-    'kpi-blocked': at(12, 0, 4, 7),
-    verdict: at(16, 0, 8, 7),
-    ledger: at(0, 7, 24, 26),
-    receipt: at(0, 33, 9, 36),
-    items: at(9, 33, 15, 18),
-    'sales-by-item': at(9, 51, 15, 18),
+    'kpi-orders': at(0, 0, 6, 7),
+    'kpi-allowed': at(6, 0, 6, 7),
+    'kpi-asked': at(12, 0, 6, 7),
+    'kpi-blocked': at(18, 0, 6, 7),
+    // A row of its own, so "Needs approval" has room beside the other two verdicts.
+    verdict: at(0, 7, 24, 7),
+    ledger: at(0, 14, 24, 26),
+    receipt: at(0, 40, 9, 36),
+    items: at(9, 40, 15, 18),
+    'sales-by-item': at(9, 58, 15, 18),
   },
   filter: {
     widget: {

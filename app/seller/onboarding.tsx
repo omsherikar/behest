@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { type ChangeEvent, type FormEvent, type ReactNode, useRef, useState } from 'react';
 import { buttonClass } from '@/components/ui/button';
+import { Notice } from '@/components/ui/notice';
 import { plural } from '@/lib/domain/words';
 import { onboardOutcome, type OnboardOutcome } from '@/lib/seller-pages/onboard-outcome';
 import {
@@ -30,11 +31,12 @@ type Csv = { fileName: string; text: string };
 
 const primaryButton = buttonClass('primary');
 const textInput =
-  'mt-2 w-full rounded-xl border border-line-strong bg-pp-surface px-3 py-2 text-pp-ink placeholder:text-pp-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60';
+  'mt-2 w-full rounded-control border border-line-strong bg-panel px-3 py-2 text-body text-text placeholder:text-muted disabled:opacity-60';
 const fileInput =
-  'mt-2 block w-full text-sm text-pp-muted file:mr-3 file:rounded-full file:border file:border-pp-blue file:bg-pp-surface file:px-4 file:py-2 file:font-semibold file:text-pp-blue hover:file:bg-pp-highlight disabled:opacity-60';
-const linkButton =
-  'text-sm font-semibold text-pp-blue hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60';
+  'mt-2 block w-full text-meta text-muted file:mr-3 file:h-9 file:rounded-control file:border file:border-line-strong file:bg-panel file:px-4 file:text-body file:font-medium file:text-text hover:file:bg-raised disabled:opacity-60';
+const linkButton = 'text-meta font-medium text-action hover:text-action-strong hover:underline disabled:opacity-60';
+/** Each part of the form is a panel of its own. */
+const panel = 'rounded-panel border border-line bg-panel p-4 sm:p-5';
 
 /** MB of image held by `chars` characters of base64, to two places. */
 const mb = (chars: number) => imageMb(chars).toFixed(2);
@@ -160,11 +162,11 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
   const disabled = busy !== null;
 
   return (
-    <form onSubmit={submit} className="mt-8 flex flex-col gap-8">
-      <fieldset className="flex flex-col gap-5" disabled={disabled}>
-        <legend className="text-lg font-semibold text-pp-navy">Shop details</legend>
+    <form onSubmit={submit} className="flex flex-col gap-5">
+      <fieldset className={`flex flex-col gap-5 ${panel}`} disabled={disabled}>
+        <legend className="float-left mb-3 w-full text-lead font-medium text-text">Shop details</legend>
         <div>
-          <label htmlFor="shop-name" className="block text-sm font-semibold text-pp-navy">
+          <label htmlFor="shop-name" className="block text-body font-medium text-text">
             Shop name
           </label>
           <input
@@ -179,7 +181,7 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
           />
         </div>
         <div>
-          <label htmlFor="shop-slug" className="block text-sm font-semibold text-pp-navy">
+          <label htmlFor="shop-slug" className="block text-body font-medium text-text">
             Shop slug
           </label>
           <input
@@ -187,14 +189,14 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
             value={slug}
             readOnly
             aria-describedby="shop-slug-hint"
-            className={`${textInput} bg-pp-canvas font-mono text-sm`}
+            className={`${textInput} bg-bg font-mono text-meta text-muted`}
           />
-          <p id="shop-slug-hint" className="mt-1 text-sm text-pp-muted">
+          <p id="shop-slug-hint" className="mt-1 text-meta text-muted">
             Buyers name your shop by this in their mandates. It is fixed for this demo&apos;s seller.
           </p>
         </div>
         <div>
-          <label htmlFor="payout-email" className="block text-sm font-semibold text-pp-navy">
+          <label htmlFor="payout-email" className="block text-body font-medium text-text">
             PayPal payout email
           </label>
           <input
@@ -209,15 +211,15 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
             aria-describedby="payout-email-hint"
             className={textInput}
           />
-          <p id="payout-email-hint" className="mt-1 text-sm text-pp-muted">
+          <p id="payout-email-hint" className="mt-1 text-meta text-muted">
             Behest pays you for each order you accept into this PayPal account.
           </p>
         </div>
       </fieldset>
 
-      <fieldset className="flex flex-col gap-2" disabled={disabled}>
-        <legend className="text-lg font-semibold text-pp-navy">Catalog CSV</legend>
-        <p id="csv-hint" className="text-sm text-pp-muted">
+      <fieldset className={`flex flex-col gap-2 ${panel}`} disabled={disabled}>
+        <legend className="float-left mb-3 w-full text-lead font-medium text-text">Catalog CSV</legend>
+        <p id="csv-hint" className="text-meta text-muted">
           One product per row, up to {CSV_ROW_LIMIT} rows and {CSV_MB} MB. Name and price columns are needed; sku,
           description, stock and category are read when present.
         </p>
@@ -237,9 +239,9 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
         )}
       </fieldset>
 
-      <fieldset className="flex flex-col gap-2" disabled={disabled}>
-        <legend className="text-lg font-semibold text-pp-navy">Product photos</legend>
-        <p id="photos-hint" className="text-sm text-pp-muted">
+      <fieldset className={`flex flex-col gap-2 ${panel}`} disabled={disabled}>
+        <legend className="float-left mb-3 w-full text-lead font-medium text-text">Product photos</legend>
+        <p id="photos-hint" className="text-meta text-muted">
           Up to {MAX_PHOTOS} photos, one product each, with the price you sell it for. Your browser resizes each photo to
           at most {PHOTO_LONG_EDGE} px on its long edge and saves it as a JPEG. After resizing, a photo can be about{' '}
           {PHOTO_MB} MB and all of them {PHOTOS_MB} MB together.
@@ -255,12 +257,12 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
           className={fileInput}
         />
         {busy === 'resizing' && (
-          <p role="status" className="text-sm text-pp-muted">
+          <p role="status" className="text-meta text-muted">
             Resizing your photos...
           </p>
         )}
         {photoNote && (
-          <p role="status" className="text-sm text-pp-warning">
+          <p role="status" className="text-meta text-hold">
             {photoNote}
           </p>
         )}
@@ -268,7 +270,7 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
           <>
             <ul className="mt-2 flex flex-col gap-3">
               {photos.map((photo, index) => (
-                <li key={photo.key} className="rounded-xl border border-pp-border bg-pp-surface p-3">
+                <li key={photo.key} className="rounded-control border border-line bg-bg/50 p-3">
                   <div className="flex items-start gap-3">
                     <Image
                       src={`data:${photo.mediaType};base64,${photo.base64}`}
@@ -276,12 +278,12 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
                       width={64}
                       height={64}
                       unoptimized
-                      className="size-16 shrink-0 rounded-lg border border-pp-border object-cover"
+                      className="size-16 shrink-0 rounded-control border border-line object-cover"
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-pp-navy">Photo {index + 1}</p>
-                      <p className="truncate text-sm text-pp-muted">{photo.fileName}</p>
-                      <p className="text-sm text-pp-muted">{mb(photo.base64.length)} MB after resizing</p>
+                      <p className="text-body font-medium text-text">Photo {index + 1}</p>
+                      <p className="truncate text-meta text-muted">{photo.fileName}</p>
+                      <p className="text-meta text-muted">{mb(photo.base64.length)} MB after resizing</p>
                     </div>
                     <button
                       type="button"
@@ -293,7 +295,7 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
                     </button>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-3">
-                    <label className="block text-sm font-semibold text-pp-navy">
+                    <label className="block text-body font-medium text-text">
                       Price in dollars
                       <input
                         value={photo.price}
@@ -305,7 +307,7 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
                         className={`${textInput} font-normal`}
                       />
                     </label>
-                    <label className="block text-sm font-semibold text-pp-navy">
+                    <label className="block text-body font-medium text-text">
                       Stock, if you count it
                       <input
                         value={photo.stock}
@@ -321,7 +323,7 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
                 </li>
               ))}
             </ul>
-            <p className="text-sm text-pp-muted">
+            <p className="text-meta text-muted">
               {plural(photos.length, 'photo')}, {mb(photoTotal)} of {PHOTOS_MB} MB.
             </p>
           </>
@@ -333,15 +335,15 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
           {busy === 'sending' ? 'Building your catalog...' : 'Onboard my shop'}
         </button>
         {busy === 'sending' && (
-          <p role="status" className="mt-2 text-sm text-pp-muted">
+          <p role="status" className="mt-2 text-meta text-muted">
             Behest is writing your listings, screening each one for text aimed at AI agents and checking market
             prices. This can take a minute.
           </p>
         )}
         {error && (
-          <p role="alert" className="mt-4 text-sm text-pp-danger">
+          <Notice kind="stop" className="mt-4">
             {error}
-          </p>
+          </Notice>
         )}
         {outcome && <OutcomePanel outcome={outcome} />}
       </div>
@@ -353,29 +355,24 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
 function OutcomePanel({ outcome }: { outcome: OnboardOutcome }) {
   if (!outcome.ok) {
     return (
-      <p role="alert" className="mt-6 rounded-xl border border-pp-danger bg-pp-surface p-4 text-sm text-pp-danger">
+      <Notice kind="stop" className="mt-6">
         {outcome.message}
-      </p>
+      </Notice>
     );
   }
   return (
-    <section role="status" aria-labelledby="outcome-heading" className="mt-6 rounded-xl border border-pp-success bg-pp-surface p-5">
-      <h2 id="outcome-heading" className="font-semibold text-pp-success">
-        {outcome.headline}
-      </h2>
-      {outcome.flaggedNote && <p className="mt-2 text-sm text-pp-warning">{outcome.flaggedNote}</p>}
+    <Notice kind="success" title={outcome.headline} className="mt-6">
+      {outcome.flaggedNote && <p className="text-hold">{outcome.flaggedNote}</p>}
       {outcome.rejected.length > 0 && (
-        <div className="mt-3">
-          <p className="text-sm font-semibold text-pp-navy">
-            {plural(outcome.rejected.length, 'row')} of your CSV could not be listed:
-          </p>
-          <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-pp-muted">
+        <div className="mt-2">
+          <p className="text-text">{plural(outcome.rejected.length, 'row')} of your CSV could not be listed:</p>
+          <ul className="mt-1 list-disc space-y-1 pl-5">
             {outcome.rejected.map((line, index) => (
               <li key={index}>{line}</li>
             ))}
           </ul>
         </div>
       )}
-    </section>
+    </Notice>
   );
 }

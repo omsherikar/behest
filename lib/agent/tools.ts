@@ -6,8 +6,10 @@ import { buyable } from '@/lib/catalog/buyable';
 import type { Db } from '@/lib/db/client';
 import { products, sellers } from '@/lib/db/schema';
 import { CATEGORIES } from '@/lib/domain/categories';
+import type { DecisionListing, DecisionStep } from '@/lib/domain/decision';
 import { PurchaseProposal } from '@/lib/domain/proposal';
 import type { ProposalOutcome } from '@/lib/purchases/deps';
+import { sha256Hex } from '@/lib/receipts/canonical';
 import { quoteUntrusted } from './quote';
 
 // The shopping agent's four tools. The agent finds products at Behest sellers, compares market prices
@@ -15,6 +17,8 @@ import { quoteUntrusted } from './quote';
 // and the purchase flow prices the cart from the catalog. Every string a seller or the market wrote
 // reaches the model quoted as untrusted data. Prices, stock, SKUs and slugs are plain fields. The
 // agent sees only products that can be bought, by the rule the public seller catalogs list them by.
+// Each search and lookup is also recorded for the run's decision record, with every title a seller
+// or the market wrote kept only as its hash.
 
 /** Market prices for a search, from Channel3. */
 export type MarketSearch = (
@@ -33,6 +37,8 @@ export type ShoppingToolsContext = {
   propose: (proposal: PurchaseProposal) => Promise<ProposalOutcome>;
   /** Without it, the agent is told that market prices are not available. */
   search?: MarketSearch;
+  /** Keeps each search and lookup for the run's decision record. Must not throw. */
+  record: (step: DecisionStep) => void;
 };
 
 const SELLER_RESULTS = 10;
@@ -101,6 +107,11 @@ function describeFailure(error: unknown): string {
   return String(error);
 }
 
+/** A listing as the decision record keeps it: its title only as a hash. */
+function recordedListing(row: { sellerSlug: string; sku: string; priceCents: number; stock: number | null; title: string }): DecisionListing {
+  return { sellerSlug: row.sellerSlug, sku: row.sku, priceCents: row.priceCents, stock: row.stock, titleHash: sha256Hex(row.title) };
+}
+
 /** `query` as an ILIKE pattern matching it anywhere, with its wildcards and escape character matched literally. */
 function containsPattern(query: string): string {
   return `%${query.replaceAll(/[\\%_]/g, (char) => `\\${char}`)}%`;
@@ -140,6 +151,16 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<
         )
         .orderBy(asc(products.priceCents), asc(sellers.slug), asc(products.sku))
         .limit(SELLER_RESULTS);
+      ctx.record({
+        tool: 'search_sellers',
+        // Only the filters the agent gave, so the record holds no empty fields.
+        input: {
+          query,
+          ...(category === undefined ? {} : { category }),
+          ...(maxPriceCents === undefined ? {} : { maxPriceCents }),
+        },
+        listings: rows.map(recordedListing),
+      });
       return JSON.stringify(
         rows.map((row) => ({
           ...row,
@@ -157,22 +178,36 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<
     inputSchema: SearchMarketInput,
     strict: true,
     run: async ({ query }) => {
-      if (!ctx.search) return MARKET_UNAVAILABLE;
+      const unavailable = () => {
+        ctx.record({ tool: 'search_market', input: { query }, results: null });
+        return MARKET_UNAVAILABLE;
+      };
+      if (!ctx.search) return unavailable();
       let results: Awaited<ReturnType<MarketSearch>>;
       try {
         results = await ctx.search(query);
       } catch (error) {
         // The error may carry text from the market's response, which must not reach the model unquoted.
         console.error(`Shopping agent: market search failed: ${describeFailure(error)}`);
-        return MARKET_UNAVAILABLE;
+        return unavailable();
       }
+      const shown = results.slice(0, MARKET_RESULTS).map((result) => ({
+        title: result.title,
+        medianPriceCents: result.medianPriceCents,
+        cheapestCents: result.offers.length > 0 ? Math.min(...result.offers.map((offer) => offer.priceCents)) : null,
+      }));
+      ctx.record({
+        tool: 'search_market',
+        input: { query },
+        results: shown.map(({ title, medianPriceCents, cheapestCents }) => ({
+          titleHash: sha256Hex(title),
+          medianPriceCents,
+          cheapestCents,
+        })),
+      });
       return JSON.stringify({
         note: MARKET_NOTE,
-        results: results.slice(0, MARKET_RESULTS).map((result) => ({
-          title: quoteUntrusted('market', result.title),
-          medianPriceCents: result.medianPriceCents,
-          cheapestCents: result.offers.length > 0 ? Math.min(...result.offers.map((offer) => offer.priceCents)) : null,
-        })),
+        results: shown.map((result) => ({ ...result, title: quoteUntrusted('market', result.title) })),
       });
     },
   });
@@ -199,6 +234,7 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<
         .from(products)
         .innerJoin(sellers, eq(products.sellerId, sellers.id))
         .where(and(eq(sellers.slug, sellerSlug), eq(products.sku, sku), buyable));
+      ctx.record({ tool: 'get_product', input: { sellerSlug, sku }, listing: row ? recordedListing(row) : null });
       if (!row) return PRODUCT_NOT_FOUND;
       return JSON.stringify({
         ...row,

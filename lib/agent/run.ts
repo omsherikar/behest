@@ -4,6 +4,7 @@ import type { BetaMessage } from '@anthropic-ai/sdk/resources/beta/messages';
 import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import { mandates } from '@/lib/db/schema';
+import type { DecisionRecord, DecisionStep } from '@/lib/domain/decision';
 import type { PurchaseProposal } from '@/lib/domain/proposal';
 import type { LlmDeps, LlmFailure } from '@/lib/llm/client';
 import { runToolLoop } from '@/lib/llm/tool-loop';
@@ -16,6 +17,8 @@ import { buildShoppingTools, type MarketSearch } from './tools';
 // tools and proposes purchases; each proposal goes through the purchase flow, which charges it, asks
 // the buyer, or blocks it. The run reports its progress as events for the buyer's page. Every message
 // in an event is Behest's own, apart from the tool inputs the agent chose and its closing summary.
+// The run keeps every search and lookup the agent makes, and each proposal carries a snapshot of
+// them, with what it chose and why, as its decision record.
 
 /** What a run tells the buyer's page as it goes. */
 export type AgentEvent =
@@ -110,13 +113,25 @@ function summaryOf(reply: BetaMessage): string {
   return text || NO_SUMMARY;
 }
 
+/** The decision record of `proposal`: the run's searches and lookups so far, a copy, then what the agent chose and why. */
+function decisionRecord(runId: string, steps: DecisionStep[], proposal: PurchaseProposal): DecisionRecord {
+  return {
+    v: 1,
+    runId,
+    steps: structuredClone(steps),
+    choice: { sellerSlug: proposal.sellerSlug, items: proposal.items.map(({ sku, quantity }) => ({ sku, quantity })) },
+    rationale: proposal.rationale,
+  };
+}
+
 /**
  * Runs the shopping agent on the buyer's request for at most 12 turns. A buyer without an active
  * mandate that has not reached its end gets the error "Sign a mandate first." and no model is called.
  * Otherwise the agent gets the request and the mandate's readback, and each proposal it makes goes
  * through proposePurchase under a new run id, with the buyer's own request beside it, never the
- * agent's words; each outcome is a `proposal` event. A run ends with `done` and the agent's summary,
- * or with one `error` whose message is Behest's own, logged on the server.
+ * agent's words, and with its decision record; each outcome is a `proposal` event. A run ends with
+ * `done` and the agent's summary, or with one `error` whose message is Behest's own, logged on the
+ * server.
  *
  * Once `signal` aborts the run stops at the next turn boundary and emits nothing more: a proposal
  * already running finishes, and its outcome is recorded. Throws on misconfiguration and database
@@ -132,13 +147,25 @@ export async function runShoppingAgent(deps: AgentDeps, i: AgentRequest): Promis
   }
   i.onEvent({ type: 'status', text: STARTED });
 
+  const steps: DecisionStep[] = [];
   const propose = async (proposal: PurchaseProposal) => {
-    const outcome = await proposePurchase(deps.purchases, { buyerId: i.buyerId, runId, request: i.request, proposal });
+    const decision = decisionRecord(runId, steps, proposal);
+    const outcome = await proposePurchase(deps.purchases, { buyerId: i.buyerId, runId, request: i.request, proposal, decision });
     outcomes.push(outcome);
     i.onEvent({ type: 'proposal', outcome });
     return outcome;
   };
-  const tools = buildShoppingTools({ db: deps.db, buyerId: i.buyerId, runId, request: i.request, propose, search: deps.search });
+  const tools = buildShoppingTools({
+    db: deps.db,
+    buyerId: i.buyerId,
+    runId,
+    request: i.request,
+    propose,
+    search: deps.search,
+    record: (step) => {
+      steps.push(step);
+    },
+  });
 
   const result = await runToolLoop(deps, 'shopping_agent', {
     system: SHOPPING_SYSTEM_PROMPT,

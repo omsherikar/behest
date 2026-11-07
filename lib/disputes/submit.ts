@@ -71,8 +71,8 @@ const isRefusal = (failure: unknown) =>
 /**
  * Sends the narrative to PayPal as the evidence for the dispute whose row id is `disputeId`, and
  * stores it with the time from `deps.now`. The receipt's verification URL is built on
- * `deps.appUrl`, Behest's public origin. The caller has already kept only the citations of items
- * the dispute's evidence pack holds. Throws a SubmitEvidenceError, sending and storing nothing, for
+ * `deps.appUrl`, Behest's public origin. The caller has already checked that every citation names
+ * an item of the dispute's evidence pack. Throws a SubmitEvidenceError, sending and storing nothing, for
  * a dispute that does not exist, is not matched to a purchase or was already submitted, and for
  * notes longer than PayPal takes. When PayPal's call throws, it logs PayPal's error, releases the
  * submission and throws one with code `paypal_refused` or `paypal_failed`. If the release fails too,

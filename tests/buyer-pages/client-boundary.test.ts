@@ -9,7 +9,14 @@ import { describe, expect, it } from 'vitest';
 
 const ROOT = path.join(import.meta.dirname, '..', '..');
 /** Packages a browser bundle of the buyer's pages may take. */
-const BROWSER_PACKAGES = new Set(['react', 'next/link', 'next/navigation', 'ag-grid-community', 'ag-grid-react']);
+const BROWSER_PACKAGES = new Set([
+  'react',
+  'next/link',
+  'next/navigation',
+  'ag-grid-community',
+  'ag-grid-react',
+  '@simplewebauthn/browser',
+]);
 
 /** Every file under `dir`, recursively. */
 function filesIn(dir: string): string[] {
@@ -58,9 +65,14 @@ const clientFiles = filesIn(path.join(ROOT, 'app', 'buyer')).filter(
 );
 
 describe("the buyer's client components", () => {
-  it('include the shop run, the ledger grid and the mandate form', () => {
+  it('include the shop run, the ledger grid, the mandate form and its passkey signing', () => {
     const names = clientFiles.map((file) => path.relative(ROOT, file)).sort();
-    expect(names).toEqual(['app/buyer/ledger/ledger-grid.tsx', 'app/buyer/mandate-form.tsx', 'app/buyer/shop/shop-run.tsx']);
+    expect(names).toEqual([
+      'app/buyer/ledger/ledger-grid.tsx',
+      'app/buyer/mandate-form.tsx',
+      'app/buyer/passkey-sign.tsx',
+      'app/buyer/shop/shop-run.tsx',
+    ]);
   });
 
   it.each(clientFiles.map((file) => [path.relative(ROOT, file), file]))('%s reaches only browser packages', (_, file) => {

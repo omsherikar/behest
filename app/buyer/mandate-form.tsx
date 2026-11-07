@@ -4,10 +4,11 @@ import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { isDeclineAnswer } from '@/lib/mandate/decline';
+import { SignWithPasskey } from './passkey-sign';
 
 // The buyer writes a mandate, Behest reads back the policy compiled from it, the buyer answers any
 // open questions until none is left, then confirms, which signs the mandate, and links PayPal unless
-// a wallet is already linked.
+// a wallet is already linked. The buyer can also confirm by signing the mandate with their passkey.
 // Answers from every round are sent again with each compile, which keeps no state between calls.
 
 type Question = { id: string; question: string; options: string[] };
@@ -74,7 +75,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [declined, setDeclined] = useState(false);
   const [signed, setSigned] = useState<Signed | null>(null);
-  const [busy, setBusy] = useState<'compile' | 'confirm' | null>(null);
+  const [busy, setBusy] = useState<'compile' | 'confirm' | 'passkey' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const questions = compiled?.result.questions ?? [];
@@ -291,12 +292,38 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
           )}
 
           <div>
-            <button type="button" onClick={() => void confirm()} disabled={busy !== null || !confirmToken} className={primaryButton}>
-              {busy === 'confirm' ? 'Signing...' : 'Confirm and sign'}
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button type="button" onClick={() => void confirm()} disabled={busy !== null || !confirmToken} className={primaryButton}>
+                {busy === 'confirm' ? 'Signing...' : 'Confirm and sign'}
+              </button>
+              <SignWithPasskey
+                mandate={confirmToken ? { text: compiled.text, policy: compiled.result.policy, confirmToken } : null}
+                disabled={busy !== null}
+                className={secondaryButton}
+                onStart={() => {
+                  setBusy('passkey');
+                  setError(null);
+                }}
+                onSigned={(result) => {
+                  setBusy(null);
+                  setSigned(result);
+                  router.refresh();
+                }}
+                onFailed={(message, status) => {
+                  setBusy(null);
+                  setError(message);
+                  // A 502 means the mandate was signed, replacing the old one, before PayPal failed.
+                  if (status === 502) router.refresh();
+                }}
+              />
+            </div>
             {questions.length > 0 && (
               <p className="mt-2 text-sm text-pp-muted">Answer the questions above before you confirm.</p>
             )}
+            <p className="mt-2 text-sm text-pp-muted">
+              Signing with a passkey shows that your own device approved this exact mandate. Confirming without one rests on
+              your signed-in session alone.
+            </p>
           </div>
         </div>
       )}

@@ -1,10 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { and, asc, eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { products, sellers } from '@/lib/db/schema';
 import { GATE_RULES } from '@/lib/gate/rules';
-import { ATTACKS, type Attack, type AttackId } from '@/lib/security/attacks';
+import { ATTACKS, type Attack, type AttackId, REPLAY_MANDATE } from '@/lib/security/attacks';
 import { openReplayCatalog, replayAttacks } from '@/lib/security/replay';
 import type { ReplayResult } from '@/lib/security/results';
+import { readResults } from '@/lib/security/view';
 
 const attack = (id: AttackId) => ATTACKS.find((a) => a.id === id)!;
 
@@ -125,6 +128,15 @@ describe('replayAttacks', () => {
     expect(r.gate.rules.find((rule) => rule.rule === 'seller_allowed')?.detail).toBe(
       "Ravi's Spice Co is allowed by your mandate",
     );
+  });
+});
+
+describe('lib/security/results.json', () => {
+  it('holds what a fresh replay records, under the replay mandate, so the page shows what the code does', () => {
+    const file = readResults(JSON.parse(readFileSync(join(process.cwd(), 'lib', 'security', 'results.json'), 'utf8')));
+
+    expect(file.deterministic).toEqual(results);
+    expect(file.mandate).toEqual(REPLAY_MANDATE.readback);
   });
 });
 

@@ -1,23 +1,23 @@
 @import "tailwindcss";
 
 /*
- * Behest design tokens (docs/design.md). One dark theme. Every text colour below keeps at least
- * 4.5:1 against bg, panel, raised and the 12 percent state tints.
+ * Behest design tokens (docs/design.md). One theme: pure black, neutral greys, colour only for state.
+ * Text tokens keep at least 4.5:1 on bg, surface, raised and the 12 percent state tints; `faint`
+ * does not, so it never carries words a person needs to read.
  */
 :root {
   color-scheme: dark;
 
-  --bg: #0a1220;
-  --panel: #0f192c;
-  --raised: #15223a;
-  --line: #22314c;
-  /* Borders that identify a control, such as an input or a secondary button: 3:1 on bg, panel and raised. */
-  --line-strong: #5a6e92;
-  --text: #e4ebf5;
-  --muted: #8e9db8;
-  --action: #5b9bff;
-  /* Hover on the action colour: lighter, as the theme is dark. */
-  --action-strong: #8ab8ff;
+  --bg: #000000;
+  --surface: #0a0a0b;
+  --raised: #111113;
+  /* Floating glass: the top bar, menus and popovers, always with a backdrop blur. */
+  --overlay: rgba(17, 17, 19, 0.72);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.14);
+  --text: #ededef;
+  --muted: #8b8b93;
+  --faint: #5c5c66;
   --seal: #3fd0a1;
   --hold: #f4b95a;
   --stop: #ff7a7a;
@@ -25,14 +25,33 @@
   --jws-payload: #c9a7ff;
   --jws-signature: #6fd6d0;
 
-  --font-sans-stack: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono-stack: var(--font-plex-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /*
+   * The action colour of the first design was blue. Buttons are now white and glass pills and links
+   * are text, so `action` names the text colour: pages not yet restyled keep working without a blue.
+   */
+  --action: var(--text);
+  --action-strong: #ffffff;
+
+  /* The panel's 1 px inner top highlight. */
+  --highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  --font-sans-stack: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono-stack: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* The page gutter: 16 px on a phone, 24 px from 640 px. */
+  --gutter: 1rem;
+}
+
+@media (min-width: 40rem) {
+  :root {
+    --gutter: 1.5rem;
+  }
 }
 
 /*
  * The PayPal tokens predate the Behest tokens. AG Studio (app/dashboard/studio/theme.ts), AG Grid
  * (app/seller/seller-grid.tsx, app/(endpoints)/data-grid.tsx) and the pages not yet restyled read
- * them, so each one points at its dark equivalent and everything follows one theme.
+ * them, so each one points at its equivalent here and everything follows one theme.
  */
 :root {
   --pp-navy: var(--text);
@@ -41,9 +60,9 @@
   --pp-sky: #009cde;
   --pp-highlight: var(--raised);
   --pp-canvas: var(--bg);
-  --pp-surface: var(--panel);
-  --pp-border: var(--line);
-  --pp-gridline: #1a2740;
+  --pp-surface: var(--surface);
+  --pp-border: var(--line-strong);
+  --pp-gridline: #161618;
   --pp-ink: var(--text);
   --pp-muted: var(--muted);
   --pp-success: var(--seal);
@@ -51,27 +70,31 @@
   --pp-danger: var(--stop);
   --pp-font: var(--font-sans-stack);
 
-  /* Chart series, chosen to read on the dark panels. */
-  --pp-chart-1: #5b9bff;
+  /* Chart series, chosen to read on black. */
+  --pp-chart-1: #9db4ff;
   --pp-chart-2: #c9a7ff;
-  --pp-chart-3: #3fc9c9;
+  --pp-chart-3: #6fd6d0;
   --pp-chart-4: #f4b95a;
   --pp-chart-5: #9d8cff;
   --pp-chart-6: #ff8a80;
   --pp-chart-7: #7fd3ff;
   --pp-chart-8: #3fd0a1;
   --pp-chart-9: #d49cf0;
-  --pp-chart-10: #8e9db8;
+  --pp-chart-10: #8b8b93;
 }
 
 @theme inline {
   --color-bg: var(--bg);
-  --color-panel: var(--panel);
+  --color-surface: var(--surface);
+  /* The first design's name for `surface`, kept until every page uses the new name. */
+  --color-panel: var(--surface);
   --color-raised: var(--raised);
+  --color-overlay: var(--overlay);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-text: var(--text);
   --color-muted: var(--muted);
+  --color-faint: var(--faint);
   --color-action: var(--action);
   --color-action-strong: var(--action-strong);
   --color-seal: var(--seal);
@@ -80,26 +103,39 @@
   --color-jws-header: var(--jws-header);
   --color-jws-payload: var(--jws-payload);
   --color-jws-signature: var(--jws-signature);
-  /* Text on a filled action or state colour. */
+  /* Text on a white or state-coloured fill. */
   --color-on-fill: var(--bg);
 
   --font-sans: var(--font-sans-stack);
   --font-mono: var(--font-mono-stack);
 
-  /* Type scale (rem): meta, body, lead, page title, home title. */
-  --text-meta: 0.75rem;
-  --text-meta--line-height: 1.125rem;
-  --text-body: 0.875rem;
-  --text-body--line-height: 1.375rem;
-  --text-lead: 1rem;
-  --text-lead--line-height: 1.5rem;
-  --text-title: 1.375rem;
-  --text-title--line-height: 1.875rem;
-  --text-display: 2rem;
-  --text-display--line-height: 2.5rem;
+  /*
+   * Type scale. Meta, body and lead are the reading sizes; heading names a card or a panel; title is
+   * an app page's title; section and display are the landing page's statements and its headline.
+   */
+  --text-meta: 0.8125rem;
+  --text-meta--line-height: 1.25rem;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.5rem;
+  --text-lead: 1.0625rem;
+  --text-lead--line-height: 1.75rem;
+  --text-heading: 1.375rem;
+  --text-heading--line-height: 1.75rem;
+  --text-heading--letter-spacing: -0.02em;
+  --text-title: 2.125rem;
+  --text-title--line-height: 2.5rem;
+  --text-title--letter-spacing: -0.03em;
+  --text-section: clamp(2.5rem, 4.4vw, 3.5rem);
+  --text-section--line-height: 1.04;
+  --text-section--letter-spacing: -0.035em;
+  --text-display: clamp(3rem, 6.2vw, 5.5rem);
+  --text-display--line-height: 1.02;
+  --text-display--letter-spacing: -0.04em;
 
-  --radius-control: 4px;
-  --radius-panel: 8px;
+  /* Inputs and small blocks; panels; the landing page's cards and frames. Pills are rounded-full. */
+  --radius-control: 12px;
+  --radius-panel: 16px;
+  --radius-frame: 20px;
 
   /*
    * The trace's motion: a node arriving at a new state, a node still in progress, and the
@@ -175,13 +211,63 @@
   }
 }
 
-/* The home page's faint 24 px grid, a quiet nod to schematic paper. */
-@utility bg-schematic {
-  background-image:
-    linear-gradient(to right, color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in srgb, var(--line) 45%, transparent) 1px, transparent 1px);
-  background-size: 24px 24px;
-  background-position: -1px -1px;
+/* The one container: 1200 px of content, centred, with the page gutter outside it. */
+@utility container-page {
+  width: 100%;
+  max-width: calc(1200px + 2 * var(--gutter));
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+/* Floating glass for the top bar and overlays: the overlay fill, a blur, a hairline and a top highlight. */
+@utility glass {
+  background: var(--overlay);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid var(--line);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+/* A panel: the surface, a hairline and the 1 px inner top highlight. No drop shadow. */
+@utility panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--highlight);
+}
+
+/*
+ * The receipt's glowing border (components/vui/glow-border-card.tsx): a conic gradient of the three
+ * JWS colours turning slowly behind the card. Still under reduced motion.
+ */
+@property --glow-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes glow-turn {
+  to {
+    --glow-angle: 360deg;
+  }
+}
+
+@utility glow-conic {
+  border-color: transparent;
+  background: conic-gradient(
+      from var(--glow-angle),
+      var(--glow-color-1),
+      var(--glow-color-2),
+      var(--glow-color-3),
+      var(--glow-color-4),
+      var(--glow-color-1)
+    )
+    border-box;
+  mask:
+    linear-gradient(#000 0 0) padding-box exclude,
+    linear-gradient(#000 0 0) border-box;
+  animation: glow-turn var(--glow-animation-duration, 8s) linear infinite;
 }
 
 @layer base {
@@ -194,18 +280,18 @@
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-sans-stack);
-    font-size: 0.875rem;
-    line-height: 1.375rem;
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
   }
 
-  /* One visible focus ring for everything focusable, in the action colour. */
+  /* One visible focus ring for everything focusable, in the text colour. */
   :focus-visible {
-    outline: 2px solid var(--action);
+    outline: 2px solid var(--text);
     outline-offset: 2px;
   }
 
   ::selection {
-    background: color-mix(in srgb, var(--action) 35%, transparent);
+    background: rgba(255, 255, 255, 0.22);
   }
 }
 

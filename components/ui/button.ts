@@ -1,23 +1,26 @@
-// The one button style, as classes for a <button>, a <Link> or an <a>: primary for the action a page
-// is for, secondary beside it, quiet for small actions in a row or a panel. Each has a visible focus
-// ring in the action colour.
+// The one button style, as classes for a <button>, a <Link> or an <a>. Every button is a pill:
+// primary is white with black text, for the action a page is for; secondary is dark glass with a
+// hairline, beside it; quiet is text on no fill, for small actions in a row or a panel. Each has the
+// global focus ring.
 
 export type ButtonVariant = 'primary' | 'secondary' | 'quiet';
-export type ButtonSize = 'default' | 'small';
+export type ButtonSize = 'default' | 'small' | 'large';
 
 const BASE =
-  'inline-flex shrink-0 items-center justify-center gap-2 rounded-control font-medium whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action disabled:cursor-not-allowed';
+  'inline-flex shrink-0 items-center justify-center gap-2 rounded-full font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed';
 
 const SIZES: Record<ButtonSize, string> = {
-  default: 'h-9 px-4 text-body',
-  small: 'h-7 px-2.5 text-meta',
+  default: 'h-10 px-5 text-body',
+  small: 'h-8 px-3.5 text-meta',
+  large: 'h-12 px-6 text-body',
 };
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  // Disabled, a primary button turns neutral rather than a faded blue, and keeps its label legible.
-  primary: 'bg-action text-on-fill hover:bg-action-strong disabled:bg-raised disabled:text-muted',
-  secondary: 'border border-line-strong text-text hover:border-muted hover:bg-raised disabled:opacity-50 disabled:hover:bg-transparent',
-  quiet: 'text-action hover:bg-raised hover:text-action-strong disabled:opacity-50',
+  // Disabled, a primary button turns to the raised grey and keeps its label legible.
+  primary: 'bg-text text-on-fill hover:bg-white disabled:bg-raised disabled:text-muted',
+  secondary:
+    'border border-line-strong bg-overlay text-text backdrop-blur-md hover:border-white/25 hover:bg-raised disabled:opacity-50 disabled:hover:bg-overlay',
+  quiet: 'text-text hover:bg-white/[0.06] disabled:opacity-50 disabled:hover:bg-transparent',
 };
 
 /** The classes of a button in `variant` and `size`, followed by any `extra` classes. */

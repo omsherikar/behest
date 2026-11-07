@@ -20,6 +20,11 @@ export type ConsoleRow = {
   body: ReactNode;
   /** Shown under the body, such as a proposal's authority trace. */
   detail?: ReactNode;
+  /**
+   * Puts the body under its kind, across the kind and body columns (and the whole width on a
+   * phone), for a wide card such as a proposal.
+   */
+  wide?: boolean;
 };
 
 const BODY: Record<ConsoleKind, string> = {
@@ -79,12 +84,22 @@ export function Console({
                   {time ?? '--:--:--'}
                 </time>
                 {row.label ? (
-                  <span className={`col-start-2 min-w-0 break-words ${LABEL[row.kind]}`}>{row.label}</span>
+                  <span className={`col-start-2 min-w-0 break-words ${row.wide ? 'sm:col-span-2' : ''} ${LABEL[row.kind]}`}>{row.label}</span>
                 ) : (
                   <span aria-hidden className="hidden sm:block" />
                 )}
-                <div className={`col-start-2 min-w-0 break-words sm:col-start-3 sm:row-start-1 ${BODY[row.kind]}`}>{row.body}</div>
-                {row.detail && <div className="col-start-2 min-w-0 pt-1 sm:col-start-3">{row.detail}</div>}
+                <div
+                  className={`col-start-2 min-w-0 break-words ${
+                    row.wide ? 'col-span-full col-start-1 sm:col-span-2 sm:col-start-2' : 'sm:col-start-3 sm:row-start-1'
+                  } ${BODY[row.kind]}`}
+                >
+                  {row.body}
+                </div>
+                {row.detail && (
+                  <div className={`min-w-0 pt-1 ${row.wide ? 'col-span-full col-start-1 sm:col-span-2 sm:col-start-2' : 'col-start-2 sm:col-start-3'}`}>
+                    {row.detail}
+                  </div>
+                )}
               </li>
             );
           })}

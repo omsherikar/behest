@@ -17,6 +17,8 @@
   --overlay: rgba(17, 17, 19, 0.72);
   --line: rgba(255, 255, 255, 0.08);
   --line-strong: rgba(255, 255, 255, 0.14);
+  /* The border of a form control (input, select, textarea, checkbox): about 3:1 on black, as WCAG asks. */
+  --control: #5c5c66;
   --text: #ededef;
   --muted: #8b8b93;
   --faint: #5c5c66;
@@ -94,6 +96,7 @@
   --color-overlay: var(--overlay);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
+  --color-control: var(--control);
   --color-text: var(--text);
   --color-muted: var(--muted);
   --color-faint: var(--faint);

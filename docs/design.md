@@ -52,7 +52,8 @@ One theme, pure black. Grey carries the structure; colour appears only for state
 | `raised` | #111113 | Hover, selected rows, an open trace step, inputs |
 | `overlay` | rgba(17,17,19,0.72) | Floating glass: the top bar, menus, popovers. Always with a backdrop blur |
 | `line` | rgba(255,255,255,0.08) | Hairlines, dividers, panel borders |
-| `line-strong` | rgba(255,255,255,0.14) | Borders of controls and glass pills |
+| `line-strong` | rgba(255,255,255,0.14) | Stronger dividers, the borders of glass pills and secondary buttons (their label identifies them) |
+| `control` | #5C5C66 | The border of a form control: input, select, textarea, checkbox. About 3:1 on black, so the control's edge passes WCAG 1.4.11 |
 | `text` | #EDEDEF | Primary text, the primary button's fill |
 | `muted` | #8B8B93 | Secondary text: 5.9:1 on `surface`, 5.6:1 on `raised` |
 | `faint` | #5C5C66 | Decoration only: rails, separators, counters beside a label. About 3:1, so never words a person must read |

@@ -32,6 +32,13 @@ describe('checkReceipt', () => {
     });
   });
 
+  it('passes on why the verifier refused the request itself', async () => {
+    expect(await checkReceipt(request, answer(400, { error: { message: 'Cart totalCents must be the sum of its items' } }))).toEqual({
+      state: 'unavailable',
+      message: 'The verifier could not check it: cart totalCents must be the sum of its items.',
+    });
+  });
+
   it('says when the verifier could not answer', async () => {
     expect((await checkReceipt(request, answer(429, { error: { message: 'Too many' } }))).state).toBe('unavailable');
     expect((await checkReceipt(request, answer(500, null))).state).toBe('unavailable');

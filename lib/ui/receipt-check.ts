@@ -53,5 +53,11 @@ export async function checkReceipt(
     return { state: 'rejected', reason: rejectionWords(body.reason) };
   }
   if (response.status === 429) return { state: 'unavailable', message: 'The verifier is busy. Wait a minute and try again.' };
+  // The verifier refused the request itself, such as a cart that is not one, and said why.
+  const error = isRecord(body) && isRecord(body.error) ? body.error.message : undefined;
+  if (typeof error === 'string' && error.trim() !== '') {
+    const text = error.trim();
+    return { state: 'unavailable', message: `The verifier could not check it: ${text.charAt(0).toLowerCase()}${text.slice(1).replace(/[.!?]?$/, '.')}` };
+  }
   return { state: 'unavailable', message: 'The receipt verifier did not give an answer. Try again in a minute.' };
 }

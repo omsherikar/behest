@@ -26,7 +26,7 @@ export function PersonaPicker() {
                 {pending === persona && <span className="text-meta text-muted">Opening...</span>}
               </span>
               <span className="text-body text-muted">{does}</span>
-              <span className="mt-1 font-mono text-meta text-muted">{nav.map((item) => item.label).join(', ')}</span>
+              <span className="mt-1 text-meta text-muted">{nav.map((item) => item.label).join(', ')}</span>
             </button>
           </li>
         ))}

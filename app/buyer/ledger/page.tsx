@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { connection } from 'next/server';
-import type { ReactNode } from 'react';
 import { buttonClass } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Figure, Figures } from '@/components/ui/figures';
 import { Money } from '@/components/ui/money';
 import { PageHeader } from '@/components/ui/page-header';
 import { appDb, demoBuyerId } from '@/lib/app-deps';
@@ -21,26 +21,16 @@ export const metadata: Metadata = {
 // then the full-width grid with Behest's verdict, its trace, the reasons and the signed receipt of
 // each paid one. Each row opens the full trace and its proof, read here on the server as plain data.
 
-function Stat({ label, children }: { label: string; children: ReactNode }) {
+function LedgerFigures({ stats }: { stats: LedgerStats }) {
   return (
-    // The label leads for a screen reader; the figure leads on screen.
-    <div className="flex flex-col bg-surface px-5 py-4 sm:px-6 sm:py-5">
-      <dt className="order-last mt-1 text-meta text-muted">{label}</dt>
-      <dd className="text-[1.75rem] leading-9 font-medium tracking-[-0.03em] text-text tabular-nums">{children}</dd>
-    </div>
-  );
-}
-
-function Figures({ stats }: { stats: LedgerStats }) {
-  return (
-    <dl className="mb-6 grid grid-cols-2 gap-px overflow-hidden rounded-frame border border-line bg-line lg:grid-cols-4">
-      <Stat label="Proposed by your agent">{stats.proposed}</Stat>
-      <Stat label={`Paid, across ${plural(stats.paid, 'purchase')}`}>
+    <Figures>
+      <Figure label="Proposed by your agent">{stats.proposed}</Figure>
+      <Figure label={`Paid, across ${plural(stats.paid, 'purchase')}`}>
         <Money cents={stats.paidCents} />
-      </Stat>
-      <Stat label="Waiting for your approval">{stats.waiting}</Stat>
-      <Stat label="Blocked">{stats.blocked}</Stat>
-    </dl>
+      </Figure>
+      <Figure label="Waiting for your approval">{stats.waiting}</Figure>
+      <Figure label="Blocked">{stats.blocked}</Figure>
+    </Figures>
   );
 }
 
@@ -70,7 +60,7 @@ export default async function LedgerPage() {
       />
       {rows.length > 0 ? (
         <>
-          <Figures stats={ledgerStats(rows)} />
+          <LedgerFigures stats={ledgerStats(rows)} />
           <LedgerGrid rows={rows} labelledBy="ledger-heading" />
         </>
       ) : (

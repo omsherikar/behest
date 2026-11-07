@@ -1,9 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { buyers } from '@/lib/db/schema';
+import { buyers, llmCalls, sellers } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME } from '@/lib/demo/personas';
 import { generateSigningKey, loadSigningKey, publicJwks } from '@/lib/receipts/keys';
+import { createSigner } from '@/lib/receipts/sign';
+import { raviCart, receiptFor } from '@/tests/helpers/receipts';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 vi.mock('@/lib/db/client', async (importOriginal) => ({
@@ -174,5 +176,78 @@ describe('appDb and llmDeps', () => {
     expect(deps.db).toBe(db);
     expect(deps.claude).toBeInstanceOf(Anthropic);
     expect(Math.abs(deps.now().getTime() - Date.now())).toBeLessThan(1_000);
+  });
+});
+
+describe('purchaseDeps', () => {
+  it('hands the purchase flow the app database, PayPal, key, sellers, origin and clock, and checks intent on the model', async () => {
+    const app = await freshAppDeps();
+    const { getDb } = await import('@/lib/db/client');
+    const db = await createTestDb();
+    vi.mocked(getDb).mockReturnValue(db);
+    vi.stubEnv('PAYPAL_CLIENT_ID', 'client-id');
+    vi.stubEnv('PAYPAL_CLIENT_SECRET', 'client-secret');
+    vi.stubEnv('RECEIPT_SIGNING_KEY', keyA.pem);
+    vi.stubEnv('APP_URL', 'https://behest.example.com/');
+    vi.stubEnv('LLM_STUB', '1');
+
+    const deps = await app.purchaseDeps();
+
+    expect(deps.db).toBe(db);
+    expect(deps.paypal).toEqual(app.appPaypal());
+    expect(await deps.signer.jwks()).toEqual(await jwksOf(keyA.pem));
+    expect(deps.sellers.acceptAgentOrder).toEqual(expect.any(Function));
+    expect(deps.appUrl).toBe('https://behest.example.com');
+    expect(Math.abs(deps.now().getTime() - Date.now())).toBeLessThan(1_000);
+    const check = {
+      mandateText: 'Spices only',
+      readback: ['Spices only.'],
+      request: 'Buy turmeric',
+      cart: raviCart,
+      agentRationale: 'The buyer asked for turmeric.',
+    };
+    // LLM_STUB replays the recorded intent check, which is logged like any model call.
+    expect(await deps.intent(check)).toMatchObject({ verdict: 'consistent' });
+    expect(await db.select().from(llmCalls)).toEqual([expect.objectContaining({ route: 'intent_check', ok: true })]);
+  });
+
+  it('refuses to start without the PayPal credentials', async () => {
+    const { purchaseDeps } = await freshAppDeps();
+    vi.stubEnv('PAYPAL_CLIENT_ID', '');
+
+    await expect(purchaseDeps()).rejects.toThrow('PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET must be set (see .env.example)');
+  });
+});
+
+describe('sellerDeps and appSellerPort', () => {
+  it('give seller intake the app database, the app key set and the system clock', async () => {
+    const { sellerDeps } = await freshAppDeps();
+    const { getDb } = await import('@/lib/db/client');
+    const db = await createTestDb();
+    vi.mocked(getDb).mockReturnValue(db);
+    vi.stubEnv('RECEIPT_SIGNING_KEY', keyA.pem);
+
+    const deps = sellerDeps();
+
+    expect(deps.db).toBe(db);
+    expect(await deps.jwks()).toEqual(await jwksOf(keyA.pem));
+    expect(Math.abs(deps.now().getTime() - Date.now())).toBeLessThan(1_000);
+  });
+
+  it('hand an agent order to seller intake, which takes a receipt signed with the app key once', async () => {
+    const { appSellerPort } = await freshAppDeps();
+    const { getDb } = await import('@/lib/db/client');
+    const db = await createTestDb();
+    vi.mocked(getDb).mockReturnValue(db);
+    vi.stubEnv('RECEIPT_SIGNING_KEY', keyA.pem);
+    await db.insert(sellers).values({ slug: 'ravi-spices', name: "Ravi's Spice Co.", payoutEmail: 'ravi@example.com' });
+    const signer = createSigner(await loadSigningKey({ RECEIPT_SIGNING_KEY: keyA.pem }));
+    // Issued on the whole second just past, so it is fresh on the system clock.
+    const issued = new Date(Math.floor(Date.now() / 1000) * 1000);
+    const receiptJws = await signer.sign(receiptFor(raviCart, issued), 'behest-receipt+jws');
+    const order = { sellerSlug: 'ravi-spices', cart: raviCart, receiptJws };
+
+    expect(await appSellerPort().acceptAgentOrder(order)).toEqual({ status: 'accepted' });
+    expect(await appSellerPort().acceptAgentOrder(order)).toEqual({ status: 'rejected', reason: 'replayed' });
   });
 });

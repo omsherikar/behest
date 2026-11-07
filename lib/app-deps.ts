@@ -3,6 +3,7 @@ import type { JWK } from 'jose';
 import { type Db, getDb } from '@/lib/db/client';
 import { buyers } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME } from '@/lib/demo/personas';
+import { checkIntent } from '@/lib/intent/check';
 import { createClaude, type LlmDeps } from '@/lib/llm/client';
 import { getDispute, listDisputes, provideEvidence } from '@/lib/paypal/disputes';
 import { captureOrder, chargeSavedWallet, createApprovalOrder } from '@/lib/paypal/orders';
@@ -11,8 +12,11 @@ import type { PaypalPort } from '@/lib/paypal/port';
 import { refundCapture } from '@/lib/paypal/refunds';
 import { createPaymentToken, createSetupToken } from '@/lib/paypal/vault';
 import { verifyWebhook } from '@/lib/paypal/webhooks';
+import type { PurchaseDeps, SellerPort } from '@/lib/purchases/deps';
 import { loadSigningKey, publicJwks } from '@/lib/receipts/keys';
 import { createSigner, type Signer } from '@/lib/receipts/sign';
+import type { IntakeDeps } from '@/lib/sellers/intake';
+import { sellerPort } from '@/lib/sellers/port';
 
 // The app's live dependencies, built from the environment. Routes and pages take them from here and
 // hand them to library code, which tests call with fakes instead.
@@ -74,9 +78,36 @@ export function appPaypal(): PaypalPort {
   };
 }
 
+/** What seller order intake needs: the app's database, the public key set and the system clock. */
+export function sellerDeps(): IntakeDeps {
+  return { db: appDb(), jwks: appJwks, now: () => new Date() };
+}
+
+/** Hands agent orders to the sellers Behest hosts, through their own order intake. */
+export function appSellerPort(): SellerPort {
+  return sellerPort(sellerDeps());
+}
+
 /** What a model call needs: the app's database, the Claude client and the system clock. */
 export function llmDeps(): LlmDeps {
   return { db: appDb(), claude: createClaude(), now: () => new Date() };
+}
+
+/**
+ * What the purchase flow needs: the app's database, PayPal, the signing key, the intent check on the
+ * model, the sellers Behest hosts, the public origin and the system clock. Throws when a setting is
+ * missing, as the factories it calls do.
+ */
+export async function purchaseDeps(): Promise<PurchaseDeps> {
+  return {
+    db: appDb(),
+    paypal: appPaypal(),
+    signer: await appSigner(),
+    intent: (i) => checkIntent(llmDeps(), i),
+    sellers: appSellerPort(),
+    appUrl: appUrl(),
+    now: () => new Date(),
+  };
 }
 
 /**

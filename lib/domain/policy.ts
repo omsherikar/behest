@@ -11,7 +11,7 @@ const category = z.enum(CATEGORIES);
  * A seller slug: lower-case letters, digits and hyphens, starting with a letter or digit, at most
  * 63 characters. With no commas, spaces or upper case, a list of slugs reads back unambiguously.
  */
-const merchantSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
+export const merchantSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/);
 /**
  * When a mandate ends: a whole minute, which the readback shows as a date and time, or the last
  * millisecond of a UTC day, which it shows as that date. Either way the buyer reads the exact

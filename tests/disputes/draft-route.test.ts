@@ -80,7 +80,7 @@ let db: Db;
 let paypal: FakePaypal;
 
 async function request(disputeId: string, { persona = 'operator' }: { persona?: Persona | 'forged' | null } = {}) {
-  const headers = new Headers({ 'x-forwarded-for': '203.0.113.7, 10.0.0.1' });
+  const headers = new Headers({ 'x-forwarded-for': '10.0.0.1, 203.0.113.7' });
   if (persona === 'forged') headers.set('cookie', `${SESSION_COOKIE}=not-a-signed-cookie`);
   else if (persona) headers.set('cookie', `${SESSION_COOKIE}=${await sessionCookie(persona)}`);
   return new NextRequest(`http://localhost/api/disputes/${disputeId}/draft`, { method: 'POST', headers });

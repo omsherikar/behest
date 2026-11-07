@@ -57,7 +57,7 @@ async function request(
     signal,
   }: { persona?: Persona | 'forged' | null; headers?: Record<string, string>; signal?: AbortSignal } = {},
 ) {
-  const sent = new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7, 10.0.0.1', ...headers });
+  const sent = new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '10.0.0.1, 203.0.113.7', ...headers });
   if (persona === 'forged') sent.set('cookie', `${SESSION_COOKIE}=not-a-signed-cookie`);
   else if (persona) sent.set('cookie', `${SESSION_COOKIE}=${await sessionCookie(persona)}`);
   return new NextRequest('http://localhost/api/ai/studio', {
@@ -206,7 +206,7 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
     expect(rateLimit).toHaveBeenCalledWith('studio_analyst:203.0.113.7:seller', { capacity: 30, refillPerMinute: 20 });
     expect(createClaude).not.toHaveBeenCalled();
 
-    await POST(await request(turn, { headers: { 'x-real-ip': '198.51.100.4' } }));
+    await POST(await request(turn, { headers: { 'x-forwarded-for': '203.0.113.7, 198.51.100.4' } }));
     expect(rateLimit).toHaveBeenLastCalledWith('studio_analyst:198.51.100.4:buyer', expect.anything());
     const cookie = sent.cookies.get(SESSION_COOKIE)?.value ?? '';
     for (const [key] of vi.mocked(rateLimit).mock.calls) expect(key).not.toContain(cookie);

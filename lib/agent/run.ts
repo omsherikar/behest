@@ -7,6 +7,7 @@ import { mandates } from '@/lib/db/schema';
 import type { PurchaseProposal } from '@/lib/domain/proposal';
 import type { LlmDeps, LlmFailure } from '@/lib/llm/client';
 import { runToolLoop } from '@/lib/llm/tool-loop';
+import type { PurchaseDetail } from '@/lib/buyer-pages/detail';
 import type { ProposalOutcome, PurchaseDeps } from '@/lib/purchases/deps';
 import { proposePurchase } from '@/lib/purchases/propose';
 import { SHOPPING_SYSTEM_PROMPT } from './prompt';
@@ -21,7 +22,7 @@ import { buildShoppingTools, type MarketSearch } from './tools';
 export type AgentEvent =
   | { type: 'status'; text: string }
   | { type: 'tool'; name: string; input: unknown }
-  | { type: 'proposal'; outcome: ProposalOutcome }
+  | { type: 'proposal'; outcome: ProposalOutcome; view?: PurchaseDetail }
   | { type: 'done'; summary: string }
   | { type: 'error'; message: string };
 
@@ -36,6 +37,12 @@ export type AgentRequest = {
   onEvent: (event: AgentEvent) => void;
   /** Aborted when the buyer goes away: the run then stops at the next turn boundary, quietly. */
   signal?: AbortSignal;
+  /**
+   * Describes a proposal for the buyer's page, such as its cart and authority trace. Awaited before
+   * the proposal's event, so events keep their order; a description that fails is left out. The
+   * agent itself is told only the outcome.
+   */
+  describe?: (outcome: ProposalOutcome) => Promise<PurchaseDetail | null>;
 };
 
 export type AgentResult = { runId: string; outcomes: ProposalOutcome[]; summary: string };
@@ -135,7 +142,8 @@ export async function runShoppingAgent(deps: AgentDeps, i: AgentRequest): Promis
   const propose = async (proposal: PurchaseProposal) => {
     const outcome = await proposePurchase(deps.purchases, { buyerId: i.buyerId, runId, request: i.request, proposal });
     outcomes.push(outcome);
-    i.onEvent({ type: 'proposal', outcome });
+    const view = i.describe ? await i.describe(outcome).catch(() => null) : null;
+    i.onEvent(view ? { type: 'proposal', outcome, view } : { type: 'proposal', outcome });
     return outcome;
   };
   const tools = buildShoppingTools({ db: deps.db, buyerId: i.buyerId, runId, request: i.request, propose, search: deps.search });

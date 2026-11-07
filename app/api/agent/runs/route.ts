@@ -2,6 +2,7 @@ import { connection, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { type AgentEvent, RUN_FAILED, runShoppingAgent } from '@/lib/agent/run';
 import { appDb, demoBuyerId, llmDeps, purchaseDeps } from '@/lib/app-deps';
+import { purchaseDetails } from '@/lib/buyer-pages/detail';
 import { searchMarket } from '@/lib/channel3/client';
 import { readBody } from '@/lib/http/read-body';
 import { type Release, takeSlot } from '@/lib/inflight';
@@ -123,7 +124,10 @@ export async function POST(request: NextRequest) {
       // Without a key, the agent is told that market prices are not available.
       ...(process.env.CHANNEL3_API_KEY?.trim() ? { search: searchMarket } : {}),
     };
-    await runShoppingAgent(deps, { buyerId, request: parsed.data.request, onEvent, signal });
+    // Each proposal reaches the page with its cart, its trace and its proof, read back for this buyer.
+    const describe = async ({ purchaseId }: { purchaseId: string }) =>
+      (await purchaseDetails(deps.purchases.db, { buyerId, purchaseId }, deps.purchases.now()))[0] ?? null;
+    await runShoppingAgent(deps, { buyerId, request: parsed.data.request, onEvent, signal, describe });
   };
   return new Response(serverSentEvents(run, release, request), {
     headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' },

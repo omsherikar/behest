@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { type AgentEvent, createAgentEventParser, readAgentEvents, type RunOutcome } from '@/lib/buyer-pages/agent-events';
+import type { PurchaseDetail } from '@/lib/buyer-pages/detail';
 import type { ProposalOutcome } from '@/lib/purchases/deps';
 
 const outcome: RunOutcome = {
@@ -164,4 +165,46 @@ describe('readAgentEvents', () => {
 
 it("fits every outcome the purchase flow returns, so the route's events read as these", () => {
   expectTypeOf<ProposalOutcome>().toExtend<RunOutcome>();
+});
+
+describe("a proposal's description", () => {
+  const view: PurchaseDetail = {
+    id: outcome.purchaseId,
+    createdAt: '2026-11-07T09:10:00.000Z',
+    seller: "Ravi's Spice Co.",
+    sellerSlug: 'ravi-spices',
+    totalCents: 900,
+    items: [{ sku: 'TUR-100', title: 'Turmeric, 100 g', quantity: 2, unitPriceCents: 450 }],
+    gateVerdict: 'ASK',
+    finalVerdict: 'ASK',
+    verdict: 'ASK',
+    status: 'awaiting_approval',
+    reasons: ['Over $25.00, so you approve it.'],
+    trace: { mandate: 'done', gate: 'held', intent: 'done', paypal: 'held', receipt: 'not_reached' },
+    mandate: { id: 'mandate-1', policyHash: 'a'.repeat(64), confirmedAt: '2026-11-01T09:00:00.000Z', confirmation: 'session' },
+    outcomes: [{ rule: 'ask_threshold', result: 'ask', detail: '$9.00 is over your $5.00 approval limit' }],
+    intent: { verdict: 'consistent', reasons: [] },
+    paypal: { orderId: 'ORDER-1', captureId: null, capturedAt: null },
+    approveUrl: outcome.approveUrl,
+    receipt: null,
+    cart: null,
+    change: { kind: 'changes', approve: true, together: false, changes: [{ text: 'Raise your approval limit to $9.00', outcome: 'ALLOW' }] },
+  };
+
+  it('comes with the proposal when it has the shape the page reads', () => {
+    expect(parseChunks([frame({ type: 'proposal', outcome, view })])).toEqual([{ type: 'proposal', outcome, view }]);
+  });
+
+  it('is left out, keeping the outcome, when it is malformed or for another purchase', () => {
+    for (const bad of [
+      { ...view, trace: { ...view.trace, gate: 'maybe' } },
+      { ...view, items: [{ sku: 'TUR-100' }] },
+      { ...view, outcomes: [{ rule: 'ask_threshold', result: 'perhaps', detail: '' }] },
+      { ...view, receipt: { id: 'r' } },
+      { ...view, id: 'another-purchase' },
+      'a description',
+    ]) {
+      expect(parseChunks([frame({ type: 'proposal', outcome, view: bad })])).toEqual([{ type: 'proposal', outcome }]);
+    }
+  });
 });

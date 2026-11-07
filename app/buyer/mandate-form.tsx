@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 import { buttonClass } from '@/components/ui/button';
+import { fieldClass } from '@/components/ui/field';
 import { Notice } from '@/components/ui/notice';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { isDeclineAnswer } from '@/lib/mandate/decline';
@@ -139,7 +140,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
   }
 
   return (
-    <div className="mt-4">
+    <div className="mt-5">
       <form onSubmit={onSubmit}>
         <label htmlFor="mandate-text" className="block font-medium text-text">
           {replacing ? 'Your new mandate' : 'Your mandate'}
@@ -155,9 +156,9 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
           rows={3}
           maxLength={2000}
           placeholder={PLACEHOLDER}
-          className="mt-2 w-full rounded-control border border-line-strong bg-panel p-3 text-text placeholder:text-muted disabled:opacity-60"
+          className={`mt-2 ${fieldClass}`}
         />
-        <button type="submit" disabled={busy !== null || text.trim() === ''} className={`mt-3 ${primaryButton}`}>
+        <button type="submit" disabled={busy !== null || text.trim() === ''} className={`mt-4 ${primaryButton}`}>
           {busy === 'compile' && !compiled ? 'Reading it back...' : 'Read it back'}
         </button>
       </form>
@@ -170,7 +171,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
 
       {compiled && (
         <div className="mt-6 flex flex-col gap-6">
-          <section aria-labelledby="readback-heading" className="rounded-panel border border-dashed border-line-strong bg-panel/60 p-4 sm:p-5">
+          <section aria-labelledby="readback-heading" className="rounded-panel border border-dashed border-line-strong bg-raised/40 p-4 sm:p-5">
             <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
               <h3 id="readback-heading" className="font-medium text-text">
                 What your agent may do
@@ -223,7 +224,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
                         onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
                         disabled={busy !== null}
                         maxLength={500}
-                        className="mt-2 w-full rounded-control border border-line-strong bg-panel px-3 py-2 text-text disabled:opacity-60"
+                        className={`mt-2 ${fieldClass}`}
                       />
                     )}
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -236,10 +237,8 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
                             aria-pressed={chosen}
                             disabled={busy !== null}
                             onClick={() => choose(question, option)}
-                            className={`rounded-control border px-3 py-1.5 text-body transition-colors disabled:opacity-60 ${
-                              chosen
-                                ? 'border-action bg-action/14 text-text'
-                                : 'border-line-strong bg-panel text-text hover:border-muted hover:bg-raised'
+                            className={`rounded-full border px-3.5 py-1.5 text-body transition-colors disabled:opacity-60 ${
+                              chosen ? 'border-text bg-white/[0.12] text-text' : 'border-control text-text hover:border-muted hover:bg-raised'
                             }`}
                           >
                             {option}

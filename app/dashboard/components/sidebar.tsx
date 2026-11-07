@@ -93,7 +93,9 @@ export function ReportsSidebar({
                     <span className="truncate">{report.name}</span>
                   </button>
                 )}
-                <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                {/* The translate makes this box its own stacking context, so the menu's z-index only
+                    counts inside it; lift the box itself so the open menu covers the page list below. */}
+                <div className={`absolute right-1 top-1/2 -translate-y-1/2 ${menuFor === report.id ? 'z-30' : ''}`}>
                   <button
                     type="button"
                     aria-label={`Actions for ${report.name}`}

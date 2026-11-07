@@ -16,6 +16,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { Cart } from '../domain/cart';
 import type { Category } from '../domain/categories';
+import type { DecisionRecord } from '../domain/decision';
 import type { BuyerAssertion } from '../domain/passkey';
 import type { MandatePolicy } from '../domain/policy';
 import type { PurchaseProposal } from '../domain/proposal';
@@ -213,7 +214,7 @@ export const purchases = pgTable(
      * What the agent looked at before proposing: its searches, the options each returned and the
      * option it chose. Its hash goes into the signed receipt. Null for purchases made outside an agent run.
      */
-    decisionRecord: jsonb('decision_record').$type<Record<string, unknown>>(),
+    decisionRecord: jsonb('decision_record').$type<DecisionRecord>(),
     /** The canonical cart rebuilt from the catalog. Null when the gate could not build a valid cart. */
     cart: jsonb('cart').$type<Cart>(),
     cartHash: text('cart_hash'),

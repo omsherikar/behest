@@ -16,6 +16,7 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { Cart } from '../domain/cart';
 import type { Category } from '../domain/categories';
+import type { BuyerAssertion } from '../domain/passkey';
 import type { MandatePolicy } from '../domain/policy';
 import type { PurchaseProposal } from '../domain/proposal';
 
@@ -110,15 +111,10 @@ export const mandates = pgTable(
     confirmation: mandateConfirmation('confirmation').notNull().default('session'),
     /**
      * The buyer's passkey assertion over the mandate's hashes (base64url fields, as WebAuthn returns
-     * them). Null when the buyer confirmed by session alone.
+     * them), with the nonce and expiry its challenge commits to. Null when the buyer confirmed by
+     * session alone.
      */
-    buyerAssertion: jsonb('buyer_assertion').$type<{
-      credentialId: string;
-      authenticatorData: string;
-      clientDataJSON: string;
-      signature: string;
-      challenge: string;
-    }>(),
+    buyerAssertion: jsonb('buyer_assertion').$type<BuyerAssertion>(),
     status: mandateStatus('status').notNull().default('active'),
     /** When the buyer confirmed; the start of a `once` budget period. */
     confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),

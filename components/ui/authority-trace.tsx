@@ -67,10 +67,10 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
   });
 
   return (
-    // The trace runs across when it has room for five nodes side by side (42rem), and down the page
+    // The trace runs across when it has room for five nodes side by side (38rem), and down the page
     // otherwise, whatever the window: in a narrow panel it reads down even on a wide screen.
     <div className={`@container ${className}`}>
-      <ol aria-label={label} className="grid grid-cols-1 @2xl:grid-cols-5">
+      <ol aria-label={label} className="grid grid-cols-1 @min-[38rem]:grid-cols-5">
         {TRACE_STEPS.map((step, index) => {
           const state = states[step];
           const next = TRACE_STEPS[index + 1];
@@ -83,7 +83,7 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
   
           const node = (
             <>
-              <span className="flex h-5 items-center @2xl:w-full">
+              <span className="flex h-5 items-center @min-[38rem]:w-full">
                 <span
                   // Changing the key restarts the arrival animation when this step's state changes.
                   key={state}
@@ -95,7 +95,7 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                   <StateGlyph shape={STATE_SHAPES[state]} pulse={state === 'current'} className="size-5" />
                 </span>
                 {next && (
-                  <span aria-hidden className="relative mx-2 hidden h-0.5 flex-1 bg-line @2xl:block">
+                  <span aria-hidden className="relative mx-2 hidden h-0.5 flex-1 bg-line @min-[38rem]:block">
                     <span
                       key={states[next]}
                       className={`absolute inset-0 origin-left transition-colors duration-300 ${
@@ -106,7 +106,7 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                   </span>
                 )}
               </span>
-              <span className={`min-w-0 @2xl:pr-3 ${play ? 'motion-safe:animate-trace-play' : ''}`} style={delay(60)}>
+              <span className={`min-w-0 @min-[38rem]:pr-3 ${play ? 'motion-safe:animate-trace-play' : ''}`} style={delay(60)}>
                 <span className="flex items-baseline gap-1.5">
                   <span className="font-mono text-meta text-muted tabular-nums">{index + 1}</span>
                   <span
@@ -115,22 +115,27 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                     }`}
                   >
                     {STEP_NAMES[step]}
+                    {/* Inside the name, so a name that wraps keeps its chevron at its end. */}
+                    {hasProof && (
+                      <svg
+                        viewBox="0 0 16 16"
+                        aria-hidden
+                        className={`ml-1.5 inline size-3 align-[-1px] text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                      >
+                        <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
                   </span>
-                  {hasProof && (
-                    <svg viewBox="0 0 16 16" aria-hidden className={`size-3 self-center text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`}>
-                      <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
                 </span>
                 <span className={`block text-meta ${STATE_TEXT[state]}`}>{STATE_WORDS[state]}</span>
               </span>
             </>
           );
   
-          const nodeClass = 'flex w-full items-start gap-3 py-2 text-left @2xl:row-start-1 @2xl:flex-col @2xl:gap-2';
+          const nodeClass = 'flex w-full items-start gap-3 py-2 text-left @min-[38rem]:row-start-1 @min-[38rem]:flex-col @min-[38rem]:gap-2';
   
           return (
-            <li key={step} className="relative @2xl:contents">
+            <li key={step} className="relative @min-[38rem]:contents">
               {hasProof ? (
                 <button
                   id={buttonId}
@@ -148,7 +153,7 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
   
               {next && (
                 // The rail on a phone: from under this node down to the next one, beside any open proof.
-                <span aria-hidden className="absolute top-8 bottom-0 left-[9px] w-0.5 bg-line @2xl:hidden">
+                <span aria-hidden className="absolute top-8 bottom-0 left-[9px] w-0.5 bg-line @min-[38rem]:hidden">
                   <span
                     key={states[next]}
                     className={`absolute inset-0 origin-top transition-colors duration-300 ${
@@ -165,7 +170,7 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                   role="region"
                   aria-labelledby={buttonId}
                   hidden={!isOpen}
-                  className={`mb-2 ml-8 rounded-panel border border-line bg-raised p-3 text-body @2xl:col-span-5 @2xl:p-4 @2xl:row-start-2 @2xl:mt-2 @2xl:mb-0 @2xl:ml-0 ${
+                  className={`mb-2 ml-8 rounded-panel border border-line bg-raised p-3 text-body @min-[38rem]:col-span-5 @min-[38rem]:p-4 @min-[38rem]:row-start-2 @min-[38rem]:mt-2 @min-[38rem]:mb-0 @min-[38rem]:ml-0 ${
                     play && step === defaultOpen ? 'motion-safe:animate-trace-play' : ''
                   }`}
                   // When the trace plays, the proof open from the start arrives after the last node.

@@ -13,6 +13,7 @@ export interface PaypalPort {
   listDisputes(): Promise<DisputeSummary[]>;
   getDispute(id: string): Promise<DisputeDetail>;
   provideEvidence(id: string, i: { notes: string }): Promise<void>;
+  sendDisputeMessage(id: string, message: string): Promise<void>;
   verifyWebhook(headers: Headers, rawBody: string): Promise<boolean>;
 }
 

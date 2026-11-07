@@ -1,7 +1,9 @@
-// Reading the disputes buyers open against Behest's captures, and answering one with evidence.
-// Amounts become integer cents and must be USD; statuses and reasons are PayPal's own strings.
-// Whether to submit evidence is an operator's decision: provideEvidence sends what it is given.
+// Reading the disputes buyers open against Behest's captures, and answering one with evidence or,
+// while it is an inquiry, with a message to the buyer. Amounts become integer cents and must be USD;
+// statuses, stages, actions and reasons are PayPal's own strings. Whether and how to answer is an
+// operator's decision: provideEvidence and sendDisputeMessage send what they are given.
 
+import { createHash } from 'node:crypto';
 import { paypalRequest } from './http';
 import { toCents } from './money';
 import type { DisputeSummary, PaypalPort } from './port';
@@ -120,4 +122,18 @@ export const provideEvidence: PaypalPort['provideEvidence'] = async (id, { notes
   const form = new FormData();
   form.append('input', new Blob([JSON.stringify(input)], { type: 'application/json' }));
   await paypalRequest('POST', `${DISPUTES}/${encodeURIComponent(id)}/provide-evidence`, { form, requestId: `${id}:evidence` });
+};
+
+/**
+ * Sends `message` to the buyer on the dispute. PayPal's guide sends a message with no attachment as a
+ * JSON body holding `message`; a multipart request is only for attaching documents, which Behest
+ * does not. The request id is keyed on a hash of the text as well as the dispute, so a retry of the
+ * same message is applied once while an edited answer goes as a new message.
+ */
+export const sendDisputeMessage: PaypalPort['sendDisputeMessage'] = async (id, message) => {
+  const digest = createHash('sha256').update(message).digest('base64url');
+  await paypalRequest('POST', `${DISPUTES}/${encodeURIComponent(id)}/send-message`, {
+    body: { message },
+    requestId: `${id}:message:${digest}`,
+  });
 };

@@ -2,10 +2,11 @@ import type { StepState } from '@/lib/ui/trail';
 
 // The shape of a state, so that no state rests on colour alone: filled for done, a ring with a dot
 // for in progress, half filled for held, crossed for stopped and a dashed outline for not reached.
-// Notices add an "i" in a ring for information. It draws in the current text colour; the caller
+// Notices add an "i" in a ring for information, and `open`, a plain circle, marks something that
+// went through unchanged, as on the security page. It draws in the current text colour; the caller
 // sets the state colour and the size.
 
-export type GlyphShape = 'filled' | 'ring' | 'half' | 'crossed' | 'outlined' | 'info';
+export type GlyphShape = 'filled' | 'ring' | 'half' | 'crossed' | 'outlined' | 'open' | 'info';
 
 export const STATE_SHAPES: Record<StepState, GlyphShape> = {
   done: 'filled',

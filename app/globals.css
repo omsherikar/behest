@@ -292,6 +292,11 @@
   opacity: 1;
 }
 
+/* A grid as tall as its rows keeps no room for a sideways scrollbar it does not need. */
+.quiet-grid-headers .ag-body-horizontal-scroll.ag-invisible {
+  display: none;
+}
+
 @layer base {
   /* In-page links glide; the reduced-motion rule below turns this off. */
   html {

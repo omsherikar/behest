@@ -55,9 +55,17 @@ export async function sellerNameRefusal(db: Db, name: string, slug: string): Pro
 }
 
 /**
+ * The first key of the two-key advisory locks seller names take. Two-key locks never conflict with
+ * the one-key lock the periodic pass takes (lib/jobs/periodic.ts), so a name's hash cannot meet it.
+ */
+const SELLER_NAME_LOCKS = 4_242_002;
+
+/**
  * Holds every other onboarding of a name with the same key until the transaction ends, so that two
- * sellers whose names read the same cannot both check, find no clash, and be stored.
+ * sellers whose names read the same cannot both check, find no clash, and be stored. The tests run on
+ * PGlite, which has one connection, so they cover the check this lock guards but never a wait on it;
+ * the wait itself happens only on Postgres.
  */
 export async function lockSellerName(tx: Db, name: string): Promise<void> {
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${sellerNameKey(name)}))`);
+  await tx.execute(sql`select pg_advisory_xact_lock(${SELLER_NAME_LOCKS}, hashtext(${sellerNameKey(name)}))`);
 }

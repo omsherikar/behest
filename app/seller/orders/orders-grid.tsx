@@ -79,8 +79,7 @@ const columns: ColDef<SellerOrderRow>[] = [
   {
     field: 'totalCents',
     headerName: 'Cart total',
-    type: 'rightAligned',
-    cellClass: 'font-mono',
+    type: 'numeric',
     valueFormatter: ({ value }: ValueFormatterParams<SellerOrderRow, number | null>) =>
       typeof value === 'number' ? formatUsd(value) : '',
     filter: 'agNumberColumnFilter',

@@ -2,7 +2,6 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { connection } from 'next/server';
 import type { ReactNode } from 'react';
-import { fillWindowFromLg } from '@/components/shell/app-shell';
 import { buttonClass } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Money } from '@/components/ui/money';
@@ -54,7 +53,7 @@ export default async function LedgerPage() {
   const rows = await purchaseDetails(db, { buyerId: await demoBuyerId(db) }, new Date());
 
   return (
-    <div className={fillWindowFromLg}>
+    <div className="flex flex-1 flex-col">
       <PageHeader
         id="ledger-heading"
         title="Your ledger"
@@ -72,10 +71,7 @@ export default async function LedgerPage() {
       {rows.length > 0 ? (
         <>
           <Figures stats={ledgerStats(rows)} />
-          {/* A height of its own on a phone, where the page scrolls; the rest of the window from 1024 px. */}
-          <div className="flex h-[32rem] min-h-0 flex-col lg:h-auto lg:flex-1">
-            <LedgerGrid rows={rows} labelledBy="ledger-heading" />
-          </div>
+          <LedgerGrid rows={rows} labelledBy="ledger-heading" />
         </>
       ) : (
         <EmptyState

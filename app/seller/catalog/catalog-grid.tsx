@@ -82,8 +82,7 @@ const columns: ColDef<CatalogRow>[] = [
   {
     field: 'stock',
     headerName: 'Stock',
-    type: 'rightAligned',
-    cellClass: 'font-mono',
+    type: 'numeric',
     valueFormatter: ({ value }: ValueFormatterParams<CatalogRow, number | null>) =>
       value === null || value === undefined ? 'Not counted' : String(value),
     filter: 'agNumberColumnFilter',

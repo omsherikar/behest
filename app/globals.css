@@ -278,6 +278,20 @@
   animation: glow-turn var(--glow-animation-duration, 8s) linear infinite;
 }
 
+/*
+ * The app's grids (app/seller/seller-grid.tsx): a header's menu and filter buttons appear on hover,
+ * on keyboard focus and while its filter is on, so headers otherwise read as plain labels.
+ */
+.quiet-grid-headers .ag-header-cell :is(.ag-header-cell-menu-button, .ag-header-cell-filter-button) {
+  opacity: 0;
+  transition: opacity 150ms;
+}
+.quiet-grid-headers
+  :is(.ag-header-cell:hover, .ag-header-cell:focus-within, .ag-header-cell-filtered)
+  :is(.ag-header-cell-menu-button, .ag-header-cell-filter-button) {
+  opacity: 1;
+}
+
 @layer base {
   /* In-page links glide; the reduced-motion rule below turns this off. */
   html {

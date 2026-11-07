@@ -79,8 +79,7 @@ const columns: ColDef<DisputeRow>[] = [
   {
     field: 'amountCents',
     headerName: 'Amount',
-    type: 'rightAligned',
-    cellClass: 'font-mono',
+    type: 'numeric',
     valueFormatter: ({ value }: ValueFormatterParams<DisputeRow, number>) => (typeof value === 'number' ? formatUsd(value) : ''),
     filter: 'agNumberColumnFilter',
     filterValueGetter: ({ data }) => (typeof data?.amountCents === 'number' ? data.amountCents / 100 : null),

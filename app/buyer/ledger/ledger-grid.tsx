@@ -75,8 +75,7 @@ const columns: ColDef<PurchaseDetail>[] = [
   {
     field: 'totalCents',
     headerName: 'Total',
-    type: 'rightAligned',
-    cellClass: 'font-mono',
+    type: 'numeric',
     valueFormatter: ({ value }: ValueFormatterParams<PurchaseDetail, number | null>) =>
       typeof value === 'number' ? formatUsd(value) : 'Not priced',
     filter: 'agNumberColumnFilter',

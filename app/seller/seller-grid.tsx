@@ -14,11 +14,13 @@ import {
   enableDevValidations,
   NumberFilterModule,
   QuickFilterModule,
+  RowApiModule,
   RowAutoHeightModule,
   TextFilterModule,
   colorSchemeDark,
   themeQuartz,
   type ColDef,
+  type ColTypeDef,
   type GetRowIdParams,
   type GridApi,
 } from 'ag-grid-community';
@@ -39,8 +41,9 @@ const modules = [
   NumberFilterModule,
   QuickFilterModule,
   ColumnAutoSizeModule,
-  // Reads the columns' widths, to tell whether they fill the grid.
+  // Reads the columns' widths, to tell whether they fill the grid, and how many rows are shown.
   ColumnApiModule,
+  RowApiModule,
   CellStyleModule,
   RowAutoHeightModule,
 ];
@@ -75,6 +78,20 @@ const theme = themeQuartz.withPart(colorSchemeDark).withParams({
 });
 
 const defaultColDef: ColDef = { filter: true };
+
+/**
+ * `type: 'numeric'` for an amount or a count: right-aligned under a right-aligned header, in mono
+ * with tabular figures, so a column of numbers lines up.
+ */
+const columnTypes: Record<string, ColTypeDef> = {
+  numeric: { headerClass: 'ag-right-aligned-header', cellClass: ['ag-right-aligned-cell', 'font-mono', 'tabular-nums'] },
+};
+
+/**
+ * Up to this many rows, the grid is as tall as its rows, so a short list leaves no empty band;
+ * beyond it, the grid keeps a fixed height and scrolls.
+ */
+const MAX_ROWS_IN_FULL = 15;
 
 /**
  * Sizes every column to its header and its cells, so nothing is cut short. When that leaves room on
@@ -125,6 +142,9 @@ export function SellerGrid<Row extends { id: string }>({
   onOpen?: (row: Row) => void;
 }) {
   const [search, setSearch] = useState('');
+  /** How many rows the grid shows after the search, which decides its height. */
+  const [shown, setShown] = useState(rows.length);
+  const fitsRows = shown <= MAX_ROWS_IN_FULL;
   const box = useRef<HTMLDivElement>(null);
   /** Whether the columns have been sized to their content once. */
   const sized = useRef(false);
@@ -135,7 +155,7 @@ export function SellerGrid<Row extends { id: string }>({
   }, [labelledBy]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
+    <div className="grid gap-3">
       <input
         type="search"
         value={search}
@@ -144,13 +164,16 @@ export function SellerGrid<Row extends { id: string }>({
         aria-label={`Search ${label}`}
         className={cn(fieldClass, 'h-10 py-0 sm:w-80')}
       />
-      <div ref={box} className={`min-h-72 flex-1 ${onOpen ? '[&_.ag-row]:cursor-pointer' : ''}`}>
+      <div ref={box} className={cn('quiet-grid-headers', !fitsRows && 'h-[40rem]', onOpen && '[&_.ag-row]:cursor-pointer')}>
         <AgGridProvider modules={modules}>
           <AgGridReact<Row>
             theme={theme}
             rowData={rows}
             columnDefs={columns}
             defaultColDef={defaultColDef}
+            columnTypes={columnTypes}
+            domLayout={fitsRows ? 'autoHeight' : 'normal'}
+            onModelUpdated={(event) => setShown(event.api.getDisplayedRowCount())}
             getRowId={rowId<Row>}
             quickFilterText={search}
             enableCellTextSelection

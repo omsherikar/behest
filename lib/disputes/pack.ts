@@ -1,15 +1,20 @@
 import { asc, eq } from 'drizzle-orm';
+import { decodeJwt } from 'jose';
 import type { Db } from '@/lib/db/client';
 import { disputes, mandates, purchaseEvents, purchases, receipts, sellers, wallets } from '@/lib/db/schema';
 import type { Cart } from '@/lib/domain/cart';
 import { formatUsd } from '@/lib/domain/money';
+import { MandatePayload } from '@/lib/domain/receipt';
 import { removeHiddenCharacters, wrapUntrusted } from '@/lib/llm/untrusted';
+import { type PasskeyCheck, verifyMandatePasskey } from '@/lib/mandate/passkey';
 import { hashOf } from '@/lib/receipts/canonical';
 
 // The evidence Behest answers a dispute with (architecture section 5.5), assembled by plain code from
 // its own records: the signed mandate, the readback the buyer confirmed, the signed receipt, the cart,
 // the purchase's event log and, for a purchase the buyer approved, the approval. Behest records no
-// shipment tracking yet, so no pack has a tracking item.
+// shipment tracking yet, so no pack has a tracking item. The mandate item says how the buyer confirmed
+// the mandate and, when they signed it with their passkey, holds that signature and the result of
+// checking it, which anyone can repeat from the item alone.
 //
 // Text written by others is quoted where the pack writes it, with wrapUntrusted, so the evidence agent
 // reads it as data: the gate and intent reasons, which can hold seller-written titles, what a seller
@@ -83,8 +88,9 @@ export async function assembleEvidencePack(db: Db, disputeId: string, appOrigin:
     .from(wallets)
     .where(eq(wallets.buyerId, purchase.buyerId));
 
+  const passkeyCheck = await verifyMandatePasskey(mandate, new URL(appOrigin).origin);
   const items: EvidenceItem[] = [
-    { id: 'mandate', title: 'Signed mandate', body: mandateBody(mandate) },
+    { id: 'mandate', title: 'Signed mandate', body: mandateBody(mandate, passkeyCheck) },
     { id: 'readback', title: 'Readback the buyer confirmed', body: readbackBody(mandate) },
   ];
   if (receipt) items.push({ id: 'receipt', title: 'Signed receipt', body: receiptBody(receipt, verifyUrl) });
@@ -97,18 +103,67 @@ export async function assembleEvidencePack(db: Db, disputeId: string, appOrigin:
   return { disputeId, purchaseId, items };
 }
 
-function mandateBody(mandate: Mandate): string {
+/** Why a passkey signature failed its check, as the mandate item says it. */
+const PASSKEY_FAILURES: Record<Exclude<PasskeyCheck, { verified: true }>['reason'], string> = {
+  session: 'the mandate was confirmed by session alone',
+  malformed: 'the signed mandate or the stored signature could not be read',
+  hash_mismatch: 'the stored policy or readback does not hash to what the signed mandate carries',
+  bad_signature: 'the signature does not verify against the passkey the signed mandate names',
+};
+
+function mandateBody(mandate: Mandate, passkeyCheck: PasskeyCheck): string {
+  const byPasskey = mandate.confirmation === 'passkey';
   return [
     `Mandate ${mandate.id}, signed by Behest when the buyer confirmed it at ${mandate.confirmedAt.toISOString()}.`,
     `Expires: ${mandate.expiresAt?.toISOString() ?? 'never'}.`,
     `Policy hash: ${mandate.policyHash}`,
+    byPasskey
+      ? "Confirmed by: the buyer's passkey, which signed this mandate's policy and readback hashes on the buyer's own device."
+      : "Confirmed by: the buyer's signed-in session. The buyer's device did not sign this mandate, so Behest's is the only signature on it.",
     '',
     "The mandate in the buyer's own words:",
     unquotable(mandate.sourceText),
     '',
     'The signed mandate, a compact JWS:',
     mandate.jws,
+    ...(byPasskey ? ['', ...passkeyLines(mandate, passkeyCheck)] : []),
   ].join('\n');
+}
+
+/**
+ * The buyer's passkey signature over a mandate, every field of it base64url or a number, so nothing in
+ * it can pass for words, with how to check it and the result of checking it.
+ */
+function passkeyLines(mandate: Mandate, check: PasskeyCheck): string[] {
+  const payload = signedMandate(mandate.jws);
+  const passkey = payload?.confirmation === 'passkey' ? payload.passkey : null;
+  const assertion = mandate.buyerAssertion;
+  return [
+    "The buyer's passkey signature:",
+    `Credential id: ${assertion?.credentialId ?? 'not recorded'}`,
+    `Public key (COSE, base64url): ${passkey?.publicKey ?? 'not in the signed mandate'}`,
+    `Algorithm (COSE): ${passkey?.alg ?? 'not in the signed mandate'}`,
+    `Authenticator data (base64url): ${assertion?.authenticatorData ?? 'not recorded'}`,
+    `Client data JSON (base64url): ${assertion?.clientDataJSON ?? 'not recorded'}`,
+    `Signature (base64url): ${assertion?.signature ?? 'not recorded'}`,
+    `Challenge (base64url): ${assertion?.challenge ?? 'not recorded'}`,
+    `Nonce: ${assertion?.nonce ?? 'not recorded'}`,
+    `Expiry (exp): ${assertion?.exp ?? 'not recorded'}`,
+    'How to check it: the challenge is the SHA-256, base64url, of the canonical JSON (RFC 8785) of { policyHash, readbackHash, nonce, exp }, with the hashes the signed mandate carries. The signature is a WebAuthn assertion over that challenge by the public key the signed mandate names, so anyone can check it without asking Behest.',
+    check.verified
+      ? 'Passkey signature check: verified.'
+      : `Passkey signature check: failed, because ${PASSKEY_FAILURES[check.reason]}.`,
+  ];
+}
+
+/** The signed mandate's payload, read without checking Behest's signature, or null when it cannot be read. */
+function signedMandate(jws: string): MandatePayload | null {
+  try {
+    const parsed = MandatePayload.safeParse(decodeJwt(jws));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
 }
 
 function readbackBody(mandate: Mandate): string {

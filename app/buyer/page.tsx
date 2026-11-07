@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { connection } from 'next/server';
+import { Notice, TONE_KIND } from '@/components/ui/notice';
 import { appDb, demoBuyerId } from '@/lib/app-deps';
 import { mandates, type WalletStatus, wallets } from '@/lib/db/schema';
 import { getPersona, SESSION_COOKIE } from '@/lib/session';
@@ -15,9 +16,9 @@ export const metadata: Metadata = {
 // The buyer's page: their active mandate and wallet, if any, and the form to write a new mandate.
 // PayPal sends the buyer back here with `?wallet=` set to how linking their wallet went.
 
-type Notice = { tone: 'success' | 'warning' | 'danger'; text: string };
+type WalletNotice = { tone: 'success' | 'warning' | 'danger'; text: string };
 
-const WALLET_NOTICES = new Map<string, Notice>([
+const WALLET_NOTICES = new Map<string, WalletNotice>([
   ['linked', { tone: 'success', text: 'Your PayPal wallet is linked. Your agent can now pay within your mandate.' }],
   [
     'cancelled',
@@ -28,12 +29,6 @@ const WALLET_NOTICES = new Map<string, Notice>([
   ],
   ['error', { tone: 'danger', text: "Linking PayPal didn't work. Confirm your mandate again to try once more." }],
 ]);
-
-const NOTICE_STYLES: Record<Notice['tone'], string> = {
-  success: 'border-pp-success text-pp-success',
-  warning: 'border-pp-warning text-pp-warning',
-  danger: 'border-pp-danger text-pp-danger',
-};
 
 const WALLET_LABELS: Record<WalletStatus | 'none', string> = {
   linked: 'PayPal linked',
@@ -73,9 +68,9 @@ export default async function BuyerPage({ searchParams }: PageProps<'/buyer'>) {
       </p>
 
       {notice && (
-        <p role="status" className={`mt-6 rounded-xl border bg-pp-surface p-4 text-sm ${NOTICE_STYLES[notice.tone]}`}>
+        <Notice kind={TONE_KIND[notice.tone]} className="mt-6">
           {notice.text}
-        </p>
+        </Notice>
       )}
 
       {mandate && (

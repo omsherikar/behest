@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { type AgentEvent, type RunOutcome, readAgentEvents } from '@/lib/buyer-pages/agent-events';
 import { aboutMandate, runRefusal, statusWords, toolStep } from '@/lib/buyer-pages/words';
+import { buttonClass } from '@/components/ui/button';
 import { VerdictBadge } from '@/components/ui/verdict-badge';
 
 // The buyer asks the shopping agent for something and follows its run as a timeline: what it is
@@ -17,8 +18,7 @@ const PLACEHOLDER = 'Restock turmeric and cumin, one jar of each';
 const UNREACHABLE = 'Could not reach Behest. Check your connection and try again.';
 const CUT_OFF = 'The connection closed before your agent finished.';
 
-const primaryButton =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
+const primaryButton = buttonClass('primary');
 const textLink =
   'font-semibold text-pp-blue underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
 

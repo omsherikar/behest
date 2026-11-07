@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
+import { buttonClass } from '@/components/ui/button';
 import { type Draft, type DraftItem, draftOutcome, submitOutcome } from '@/lib/ops-pages/dispute-outcomes';
 import { narrativeProblem, submittableNarrative, toggleCitation } from '@/lib/ops-pages/narrative-edit';
 import { EvidenceItems } from './evidence-items';
@@ -15,10 +16,8 @@ type Claim = { key: number; text: string; evidenceIds: string[] };
 type Narrative = { summary: string; claims: Claim[] };
 type Notice = { tone: 'success' | 'danger'; text: string };
 
-const primaryButton =
-  'inline-flex min-h-10 items-center justify-center rounded-full bg-pp-blue px-5 py-2 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
-const secondaryButton =
-  'inline-flex min-h-10 items-center justify-center rounded-full border border-pp-blue px-5 py-2 font-semibold text-pp-blue transition-colors hover:bg-pp-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
+const primaryButton = buttonClass('primary');
+const secondaryButton = buttonClass('secondary');
 const linkButton =
   'text-sm font-semibold text-pp-blue hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60';
 const textArea =

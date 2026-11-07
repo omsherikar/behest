@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { connection } from 'next/server';
+import { buttonClass } from '@/components/ui/button';
 import { appDb } from '@/lib/app-deps';
 import { DEMO_SELLER_SLUG } from '@/lib/demo/personas';
 import { plural } from '@/lib/domain/words';
@@ -16,10 +17,8 @@ export const metadata: Metadata = {
 // exists, the page offers the onboarding form; after that, a summary of the shop and links to its
 // catalog and orders.
 
-const primaryLink =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
-const secondaryLink =
-  'inline-flex h-10 items-center justify-center rounded-full border border-pp-blue px-5 font-semibold text-pp-blue transition-colors hover:bg-pp-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
+const primaryLink = buttonClass('primary');
+const secondaryLink = buttonClass('secondary');
 
 export default async function SellerPage() {
   // Reads the database on every request, never at build time.

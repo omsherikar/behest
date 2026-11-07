@@ -14,6 +14,9 @@ const STYLE: Record<NoticeKind, { box: string; glyph: string; shape: GlyphShape 
   stop: { box: 'border-stop/35 bg-stop/12', glyph: 'text-stop', shape: 'crossed' },
 };
 
+/** The tones the buyer's pages give their notices, as notice kinds. */
+export const TONE_KIND: Record<'success' | 'warning' | 'danger', NoticeKind> = { success: 'success', warning: 'hold', danger: 'stop' };
+
 export function Notice({
   kind,
   title,

@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
+import { buttonClass } from '@/components/ui/button';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { isDeclineAnswer } from '@/lib/mandate/decline';
 
@@ -26,10 +27,8 @@ const BUDGET_QUESTION = 'budget_amount';
 
 const PLACEHOLDER = '$60 a month on groceries and spices, ask me above $25, never electronics';
 
-const primaryButton =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
-const secondaryButton =
-  'inline-flex h-10 items-center justify-center rounded-full border border-pp-blue px-5 font-semibold text-pp-blue transition-colors hover:bg-pp-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
+const primaryButton = buttonClass('primary');
+const secondaryButton = buttonClass('secondary');
 
 /** An error message from a route, as a sentence: capitalized, with a full stop. */
 function sentence(message: string): string {

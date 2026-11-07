@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { type ChangeEvent, type FormEvent, type ReactNode, useRef, useState } from 'react';
+import { buttonClass } from '@/components/ui/button';
 import { plural } from '@/lib/domain/words';
 import { onboardOutcome, type OnboardOutcome } from '@/lib/seller-pages/onboard-outcome';
 import {
@@ -27,8 +28,7 @@ import { downsizePhoto } from './downsize';
 type Photo = PhotoEntry & { key: number; fileName: string };
 type Csv = { fileName: string; text: string };
 
-const primaryButton =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
+const primaryButton = buttonClass('primary');
 const textInput =
   'mt-2 w-full rounded-xl border border-line-strong bg-pp-surface px-3 py-2 text-pp-ink placeholder:text-pp-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60';
 const fileInput =

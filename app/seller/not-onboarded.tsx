@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { buttonClass } from '@/components/ui/button';
 
 /** What the catalog and orders pages show before the seller's shop is onboarded. */
 export function NotOnboarded() {
@@ -8,7 +9,7 @@ export function NotOnboarded() {
       <p className="mt-1 text-sm text-pp-muted">List your products from a CSV file or photos, and they show up here.</p>
       <Link
         href="/seller"
-        className="mt-4 inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue"
+        className={buttonClass('primary', 'default', 'mt-4')}
       >
         Onboard your shop
       </Link>

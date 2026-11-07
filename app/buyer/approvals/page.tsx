@@ -2,8 +2,10 @@ import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
 import { connection } from 'next/server';
+import { buttonClass } from '@/components/ui/button';
+import { Notice, TONE_KIND } from '@/components/ui/notice';
 import { appDb, demoBuyerId } from '@/lib/app-deps';
-import { returnNotices, type ReturnNotice } from '@/lib/buyer-pages/notices';
+import { returnNotices } from '@/lib/buyer-pages/notices';
 import { pendingApprovals, type PendingApproval } from '@/lib/buyer-pages/purchases';
 import { qrDataUrl } from '@/lib/buyer-pages/qr';
 import { formatUsd } from '@/lib/domain/money';
@@ -19,13 +21,7 @@ export const metadata: Metadata = {
 // purchase id, or `?pending=` or `?error=` from the return route; each shows Behest's own notice.
 // Seller names, item titles and reasons are shown as text, as they may be a seller's.
 
-const primaryLink =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
-const NOTICE_STYLES: Record<ReturnNotice['tone'], string> = {
-  success: 'border-pp-success text-pp-success',
-  warning: 'border-pp-warning text-pp-warning',
-  danger: 'border-pp-danger text-pp-danger',
-};
+const primaryLink = buttonClass('primary');
 const textLink =
   'font-semibold text-pp-blue underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
 
@@ -70,11 +66,7 @@ export default async function ApprovalsPage({ searchParams }: PageProps<'/buyer/
       </p>
 
       {notices.map((notice) => (
-        <p
-          key={notice.text}
-          role={notice.tone === 'danger' ? 'alert' : 'status'}
-          className={`mt-6 rounded-xl border bg-pp-surface p-4 text-sm ${NOTICE_STYLES[notice.tone]}`}
-        >
+        <Notice key={notice.text} kind={TONE_KIND[notice.tone]} className="mt-6">
           {notice.text}
           {notice.ledger && (
             <>
@@ -84,7 +76,7 @@ export default async function ApprovalsPage({ searchParams }: PageProps<'/buyer/
               </Link>
             </>
           )}
-        </p>
+        </Notice>
       ))}
 
       {approvals.length === 0 ? (

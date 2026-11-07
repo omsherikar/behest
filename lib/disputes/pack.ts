@@ -3,7 +3,7 @@ import type { Db } from '@/lib/db/client';
 import { disputes, mandates, purchaseEvents, purchases, receipts, sellers, wallets } from '@/lib/db/schema';
 import type { Cart } from '@/lib/domain/cart';
 import { formatUsd } from '@/lib/domain/money';
-import { wrapUntrusted } from '@/lib/llm/untrusted';
+import { removeHiddenCharacters, wrapUntrusted } from '@/lib/llm/untrusted';
 import { hashOf } from '@/lib/receipts/canonical';
 
 // The evidence Behest answers a dispute with (architecture section 5.5), assembled by plain code from
@@ -188,7 +188,8 @@ function logBody(purchase: Purchase, events: PurchaseEvent[], privateValues: (st
       if (!source || typeof value !== 'string') continue;
       delete data[field];
       // Blanked out before the quote is cut, or a value straddling the cut would leave its start behind.
-      quoted.push(` ${field}: ${wrapUntrusted(source, redact(value), MAX_QUOTED_CHARS)}`);
+      // Hidden characters go first, since the quote drops them and would otherwise rejoin a split value.
+      quoted.push(` ${field}: ${wrapUntrusted(source, redact(removeHiddenCharacters(value)), MAX_QUOTED_CHARS)}`);
     }
     const fields = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
     return `${index + 1}. ${event.createdAt.toISOString()} ${event.kind}${fields}${quoted.join('')}`;

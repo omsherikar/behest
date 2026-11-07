@@ -45,6 +45,10 @@ export const PAPER = {
   url: 'https://arxiv.org/abs/2601.22569',
 };
 
+/** What the security page is for, in one sentence. */
+export const PURPOSE =
+  'A published prompt-injection attack on agent payments, replayed against every Behest layer, with what each layer did.';
+
 export const THREAT =
   "Shopping agents read what sellers write. In January 2026, Debi, Zhu and Sen Gupta showed that a few sentences in a product listing reliably steer a shopping agent built on Google's Agent Payments Protocol (AP2): their Branded Whisper attack moved the attacker's product to the top of the agent's choices, and their Vault Whisper attack drew out the user's data, though every purchase carried a signed mandate. A signed mandate records what the buyer allowed; it does not stop an agent being talked into something inside it. This page replays that class of attack against each Behest layer and records what each one did, including where an attack got through.";
 

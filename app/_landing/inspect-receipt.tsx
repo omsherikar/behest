@@ -1,11 +1,16 @@
 import type { ReactNode } from 'react';
 import { JwsView } from '@/components/ui/jws-view';
+import { Money } from '@/components/ui/money';
+import { ProofId } from '@/components/ui/proof-id';
+import { VerdictBadge } from '@/components/ui/verdict-badge';
 import { GlowBorderCard } from '@/components/vui/glow-border-card';
 import { SAMPLE } from './sample';
 import { Section } from './section';
 
-// Inspect a receipt: the sample purchase's receipt decoded in the page's one glowing frame, beside
-// the four steps a seller takes to verify one, which match lib/receipts and the verify route.
+// Inspect a receipt: the sample purchase's receipt in the page's one glowing frame, beside the four
+// steps a seller takes to verify one, which match lib/receipts and the verify route. The token is
+// clamped and the payload starts as its six key claims, so the two columns end together; the whole
+// token and payload are one click away.
 
 const Code = ({ children }: { children: ReactNode }) => <code className="font-mono text-[0.92em] text-text">{children}</code>;
 
@@ -22,6 +27,27 @@ const STEPS: ReactNode[] = [
     with the check that failed.
   </>,
 ];
+
+/** The claims a seller checks first, read from the signed payload itself. */
+function summaryRows() {
+  const { payment, decision, mandate, seller } = SAMPLE.receipt;
+  return [
+    { label: 'Amount', value: <Money cents={payment.amountCents} mono /> },
+    { label: 'Verdict', value: <VerdictBadge verdict={decision.verdict} personal={false} /> },
+    {
+      label: 'Approved by',
+      value: (
+        <>
+          {decision.approver === 'human' ? 'The buyer, at PayPal' : 'The signed mandate, with no click'}{' '}
+          <code className="ml-1 font-mono text-meta text-muted">{decision.approver}</code>
+        </>
+      ),
+    },
+    { label: 'Mandate policy hash', value: <ProofId value={mandate.policyHash} label="Mandate policy hash" /> },
+    { label: 'PayPal capture id', value: <ProofId value={payment.captureId} label="PayPal capture id" /> },
+    { label: 'Seller', value: <code className="font-mono text-meta text-text">{seller.slug}</code> },
+  ];
+}
 
 export function InspectReceipt() {
   return (
@@ -52,7 +78,7 @@ export function InspectReceipt() {
           </p>
         </div>
         <GlowBorderCard className="min-w-0 rounded-panel lg:col-span-8">
-          <JwsView jws={SAMPLE.receiptJws} token="auto" />
+          <JwsView jws={SAMPLE.receiptJws} token="clamp" decoded="summary" summary={summaryRows()} />
         </GlowBorderCard>
       </div>
     </Section>

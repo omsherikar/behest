@@ -248,7 +248,7 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
       {
         id: 'purchases',
         description:
-          'One row per purchase the agent proposed. Verdict is the final one (after the intent check). Allowed, Needed ' +
+          'One row per purchase the agent proposed. Verdict is the final one (after the intent check). Allowed, Needs ' +
           'approval and Blocked are 1 or 0, so their sums count purchases.' +
           (full
             ? ' Budget effect says whether the total counts against the budget as spent, is reserved in flight, or was ' +
@@ -266,7 +266,7 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
           ['total', 'Total', 'currencyFormat'],
           ['proposals', 'Proposals', 'integerFormat'],
           ['allowed', 'Allowed', 'integerFormat'],
-          ['asked', 'Needed approval', 'integerFormat'],
+          ['asked', 'Needs approval', 'integerFormat'],
           ['blocked', 'Blocked', 'integerFormat'],
           ['captureId', 'PayPal capture', 'textFormat'],
           ...(full

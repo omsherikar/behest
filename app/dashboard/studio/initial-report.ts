@@ -37,13 +37,11 @@ const typography = (fontSize: number, fontWeight: 'normal' | 'bold' = 'normal', 
   fontStyle: 'normal' as const,
 });
 
-// A KPI tile, styled the same everywhere: bold title, large value, optional sparkline along `sparklineX`.
-const kpi = (text: string, value: { id: string; aggregation?: 'sum' | 'avg' | 'countd' }, sparklineX?: string) => ({
+// A KPI tile, styled the same everywhere: bold title and large value. No tile carries a sparkline,
+// which would lift its title above its neighbours' in a row of tiles.
+const kpi = (text: string, value: { id: string; aggregation?: 'sum' | 'avg' | 'countd' }) => ({
   type: 'value' as const,
-  dataMapping: {
-    value: [value],
-    ...(sparklineX && { sparklineX: [{ id: sparklineX }] }),
-  },
+  dataMapping: { value: [value] },
   format: {
     title: { enabled: true, text, typography: typography(14, 'bold') },
     caption: { enabled: true, text: '', typography: typography(0) },
@@ -56,9 +54,9 @@ const kpi = (text: string, value: { id: string; aggregation?: 'sum' | 'avg' | 'c
 const decisions: PageState = {
   id: 'decisions',
   widgets: {
-    'kpi-proposals': kpi('Proposals', sum('purchases.proposals'), 'calendar::day'),
+    'kpi-proposals': kpi('Proposals', sum('purchases.proposals')),
     'kpi-allowed': kpi('Allowed', sum('purchases.allowed')),
-    'kpi-asked': kpi('Needed approval', sum('purchases.asked')),
+    'kpi-asked': kpi('Needs approval', sum('purchases.asked')),
     'kpi-blocked': kpi('Blocked', sum('purchases.blocked')),
     verdict: {
       type: 'button-filter',
@@ -237,9 +235,9 @@ const PAID = ['Captured', 'Accepted', 'Settled', 'Disputed', 'Resolved'];
 const sellerOrders: PageState = {
   id: 'orders',
   widgets: {
-    'kpi-orders': kpi('Agent orders', sum('purchases.proposals'), 'calendar::day'),
+    'kpi-orders': kpi('Agent orders', sum('purchases.proposals')),
     'kpi-allowed': kpi('Allowed', sum('purchases.allowed')),
-    'kpi-asked': kpi('Needed approval', sum('purchases.asked')),
+    'kpi-asked': kpi('Needs approval', sum('purchases.asked')),
     'kpi-blocked': kpi('Blocked', sum('purchases.blocked')),
     verdict: {
       type: 'button-filter',

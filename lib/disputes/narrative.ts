@@ -50,7 +50,7 @@ export const DISPUTE_SYSTEM_PROMPT = `You draft Behest's answer to a PayPal disp
 
 Behest's records of the disputed purchase come as evidence items, each with an id:
 
-- mandate: the buyer's spending mandate in their own words, and Behest's signature over it.
+- mandate: the buyer's spending mandate in their own words, Behest's signature over it, and how the buyer confirmed it: by their signed-in session alone, or by also signing it with their passkey on their own device. For a passkey, the item holds that signature and whether it verifies, which shows the buyer's device, not Behest, signed that exact mandate.
 - readback: the limits Behest enforces for that mandate, as the buyer confirmed them.
 - receipt: the receipt Behest signed when PayPal captured the payment, and how anyone can verify it.
 - cart: the seller, items, quantities, prices and total that were bought, from Behest's database.

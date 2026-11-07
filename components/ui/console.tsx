@@ -67,8 +67,8 @@ export function Console({
       {header && <div className="border-b border-line bg-white/[0.02] px-4 py-3 sm:px-5">{header}</div>}
       {rows.length === 0 && empty ? (
         // Centred in whatever height the page gives the console, so an idle console is never a blank band.
-        <div className="flex flex-1 items-center justify-center px-6 py-14 text-center text-body text-pretty text-muted">
-          <div className="max-w-[46ch]">{empty}</div>
+        <div className="flex flex-1 items-center justify-center px-6 py-10 text-center text-body text-pretty text-muted">
+          {typeof empty === 'string' ? <p className="max-w-[46ch]">{empty}</p> : empty}
         </div>
       ) : (
         <ol

@@ -20,6 +20,12 @@ import { aboutMandate, runRefusal, toolArgs, toolStep } from '@/lib/buyer-pages/
 
 const PLACEHOLDER = 'Restock turmeric and cumin, one jar of each';
 
+/**
+ * Requests the demo seller's catalog (lib/demo/ravi-spices.csv) can answer under the demo mandate:
+ * two the agent may pay for alone, and a $40 gift box that waits for the buyer's approval.
+ */
+const EXAMPLES = [PLACEHOLDER, 'A 1 kg bag of basmati rice', 'A spice gift box for a friend who cooks'];
+
 const UNREACHABLE = 'Could not reach Behest. Check your connection and try again.';
 const CUT_OFF = 'The connection closed before your agent finished.';
 
@@ -99,6 +105,7 @@ export function ShopRun() {
   const [problem, setProblem] = useState<Problem | null>(null);
   /** Aborts the run's request; held so that leaving the page stops the stream. */
   const run = useRef<AbortController | null>(null);
+  const requestBox = useRef<HTMLTextAreaElement>(null);
   const lastId = useRef(0);
   const nextId = () => ++lastId.current;
 
@@ -145,8 +152,7 @@ export function ShopRun() {
   }
 
   return (
-    // As tall as the column beside it from 1024 px: the console takes whatever height is left.
-    <div className="flex h-full flex-col gap-6">
+    <div className="grid gap-6">
       {/* A command bar: the request, a line on what happens to it, and the button that sends the agent. */}
       <form onSubmit={start} className="grid gap-2.5">
         <label htmlFor="shop-request" className="text-body font-medium text-text">
@@ -154,6 +160,7 @@ export function ShopRun() {
         </label>
         <div className="rounded-frame border border-control bg-surface transition-colors focus-within:border-text hover:border-muted has-[textarea:disabled]:opacity-70">
           <textarea
+            ref={requestBox}
             id="shop-request"
             value={request}
             onChange={(event) => setRequest(event.target.value)}
@@ -198,7 +205,8 @@ export function ShopRun() {
 
       <Console
         label="Your agent's run"
-        className="min-h-[26rem] flex-1"
+        // Only as tall as its rows once a run starts; idle, as tall as its one line and examples.
+        className={lines.length > 0 || running ? 'min-h-64' : undefined}
         live
         header={
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-meta">
@@ -220,7 +228,28 @@ export function ShopRun() {
             </p>
           </div>
         }
-        empty="When you send your agent, each search it makes and each purchase it proposes appears here, with the trace that authorized it."
+        empty={
+          <div className="grid justify-items-center gap-4">
+            <p>Your agent&apos;s searches and proposals appear here, each with its trace. Try one:</p>
+            <ul aria-label="Example requests" className="flex flex-wrap justify-center gap-2">
+              {EXAMPLES.map((example) => (
+                <li key={example}>
+                  <button
+                    type="button"
+                    disabled={running}
+                    onClick={() => {
+                      setRequest(example);
+                      requestBox.current?.focus();
+                    }}
+                    className="rounded-full border border-control px-3.5 py-1.5 text-meta text-text transition-colors hover:border-muted hover:bg-raised disabled:opacity-50"
+                  >
+                    {example}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        }
         rows={lines.map(consoleRow)}
       />
     </div>

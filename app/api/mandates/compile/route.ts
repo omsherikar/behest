@@ -106,7 +106,8 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: { code: result.error, message } }, { status });
   }
   if (result.questions.length > 0) {
-    // The model words its decline option freely; the page recognises only the exact one.
+    // The prompt asks for the exact decline option; any spelling of it the page would still read as a
+    // decline is replaced by the one exact answer, and every other option is kept as the model wrote it.
     const questions = result.questions.map((question) => ({ ...question, options: withDeclineOption(question.options) }));
     return Response.json({ ...result, questions });
   }

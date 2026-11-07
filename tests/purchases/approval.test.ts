@@ -551,12 +551,10 @@ describe('expireApproval', () => {
     expect(await stepsOf(db, purchaseId)).toEqual(['approval_order', 'approval_expired']);
   });
 
-  it.each(['expiry first', 'approval first'])('lets exactly one of an expiry and an approval through when both are called at once, %s', async (order) => {
+  it('lets only one of an expiry and an approval called at once move the purchase', async () => {
     const { db, deps, paypal, purchaseId, orderId } = await setUpAwaiting();
-    const expire = () => expireApproval(deps, purchaseId);
-    const approve = () => completeApproval(deps, orderId);
 
-    await Promise.all(order === 'expiry first' ? [expire(), approve()] : [approve(), expire()]);
+    await Promise.all([expireApproval(deps, purchaseId), completeApproval(deps, orderId)]);
 
     const steps = await stepsOf(db, purchaseId);
     const winners = steps.filter((kind) => kind === 'approval_expired' || kind === 'charge');

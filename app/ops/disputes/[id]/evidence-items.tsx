@@ -1,31 +1,90 @@
+import { evidenceAnchor, evidenceStyle } from '@/components/ops/evidence-style';
+import { JwsView } from '@/components/ui/jws-view';
+import { consoleTime } from '@/lib/ui/format';
 import type { DraftItem } from '@/lib/ops-pages/dispute-outcomes';
+import { logTimeline, signedArtifact } from '@/lib/ops-pages/evidence';
 
-// The evidence items of a dispute's pack, each folded under its title. Their text comes from
-// Behest's records and quotes what buyers, sellers and PayPal wrote, so it is shown as plain text,
-// wrapped anywhere so that a long signature never widens the page.
+// The evidence items of a dispute's pack as a stack of panels, each one a citation can jump to. The
+// signed mandate and receipt are decoded under their facts, and the purchase log is laid out as a
+// timeline. Their text comes from Behest's records and quotes what buyers, sellers and PayPal wrote,
+// so everything is shown as plain text, wrapped anywhere so a long value never widens the page.
+
+const prose = 'text-body whitespace-pre-wrap text-text wrap-anywhere';
+
+function ItemBody({ item }: { item: DraftItem }) {
+  const artifact = signedArtifact(item.body);
+  if (artifact) {
+    return (
+      <div className="grid gap-3">
+        {artifact.text && <p className={prose}>{artifact.text}</p>}
+        <JwsView jws={artifact.jws} label={item.id === 'mandate' ? 'Signed mandate' : 'Signed receipt'} decoded="folded" token="short" />
+      </div>
+    );
+  }
+
+  const timeline = item.id === 'purchase_log' ? logTimeline(item.body) : null;
+  if (timeline) {
+    return (
+      <div className="grid gap-3">
+        <p className={`${prose} text-muted`}>{timeline.intro.join('\n')}</p>
+        <ol aria-label="Recorded steps" className="grid gap-0">
+          {timeline.steps.map((step, index) => (
+            <li key={step.n} className="relative grid grid-cols-[1.25rem_minmax(0,1fr)] gap-x-3 pb-3 last:pb-0">
+              {index < timeline.steps.length - 1 && <span aria-hidden className="absolute top-4 bottom-0 left-[9px] w-0.5 bg-line" />}
+              <span aria-hidden className="mt-1.5 size-2.5 justify-self-center rounded-full border-2 border-[#d49cf0] bg-bg" />
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-baseline gap-x-3 font-mono text-meta">
+                  <time dateTime={step.at} title={step.at} className="text-muted tabular-nums">
+                    {step.at.slice(0, 10)} {consoleTime(step.at)}
+                  </time>
+                  <span className="font-medium text-text">{step.kind}</span>
+                </p>
+                {step.detail && <p className="mt-0.5 font-mono text-meta whitespace-pre-wrap text-muted wrap-anywhere">{step.detail}</p>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    );
+  }
+
+  return <p className={prose}>{item.body}</p>;
+}
 
 export function EvidenceItems({ items }: { items: readonly DraftItem[] }) {
   return (
     <section aria-labelledby="evidence-heading" className="mt-8">
-      <h2 id="evidence-heading" className="text-lg font-semibold text-pp-navy">
-        Evidence items
+      <h2 id="evidence-heading" className="text-lead font-medium text-text">
+        Evidence
       </h2>
-      <p className="mt-1 text-sm text-pp-muted">
-        What Behest&apos;s records show, as the narrative cites them. Open an item to read it in full.
+      <p className="mt-1 text-body text-muted">
+        What Behest&apos;s records show, as the narrative cites them. Signed items can be decoded, and a citation jumps to its item.
       </p>
-      <ul className="mt-3 flex flex-col gap-2">
-        {items.map((item) => (
-          <li key={item.id}>
-            <details className="rounded-xl border border-pp-border bg-pp-surface">
-              <summary className="cursor-pointer rounded-xl p-3 font-semibold text-pp-navy focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue">
-                {item.title} <span className="font-mono text-xs font-normal text-pp-muted">{item.id}</span>
-              </summary>
-              <pre className="border-t border-pp-border p-3 font-mono text-xs whitespace-pre-wrap text-pp-ink wrap-anywhere">
-                {item.body}
-              </pre>
-            </details>
-          </li>
-        ))}
+      <ul className="mt-4 grid gap-4">
+        {items.map((item) => {
+          const style = evidenceStyle(item.id);
+          return (
+            <li key={item.id}>
+              <article
+                id={evidenceAnchor(item.id)}
+                tabIndex={-1}
+                aria-labelledby={`${evidenceAnchor(item.id)}-title`}
+                className="scroll-mt-28 rounded-panel border border-line bg-panel target:border-action target:ring-1 target:ring-action focus:outline-none"
+              >
+                <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-4 py-3 sm:px-5">
+                  <span aria-hidden className={`size-2.5 rounded-[3px] ${style.dot}`} />
+                  <h3 id={`${evidenceAnchor(item.id)}-title`} className="font-medium text-text">
+                    {item.title}
+                  </h3>
+                  <span className="font-mono text-meta text-muted">{item.id}</span>
+                </header>
+                <div className="p-4 sm:p-5">
+                  <ItemBody item={item} />
+                </div>
+              </article>
+            </li>
+          );
+        })}
       </ul>
     </section>
   );

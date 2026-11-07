@@ -199,6 +199,10 @@ export class FakePaypal implements PaypalPort {
     return this.call('provideEvidence', [id, i], () => undefined);
   }
 
+  sendDisputeMessage(id: string, message: string) {
+    return this.call('sendDisputeMessage', [id, message], () => undefined);
+  }
+
   verifyWebhook(headers: Headers, rawBody: string) {
     return this.call('verifyWebhook', [headers, rawBody], () => this.webhookValid);
   }

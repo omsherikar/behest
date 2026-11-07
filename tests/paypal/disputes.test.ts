@@ -5,12 +5,13 @@ import disputeFixture from '@/tests/fixtures/paypal/dispute.json';
 import disputeList from '@/tests/fixtures/paypal/dispute-list.json';
 import resolvedFixture from '@/tests/fixtures/paypal/dispute-resolved.json';
 import { PayPalApiError, resetPaypalTokenCacheForTests, setPaypalRetrySleepForTests } from '@/lib/paypal/http';
-import { getDispute, listDisputes, provideEvidence } from '@/lib/paypal/disputes';
+import { getDispute, listDisputes, provideEvidence, sendDisputeMessage } from '@/lib/paypal/disputes';
 
 const DISPUTES = '/v1/customer/disputes';
 const DISPUTE_ID = 'PP-R-QXT-10071254';
 const DISPUTE_PATH = `${DISPUTES}/${DISPUTE_ID}`;
 const EVIDENCE_PATH = `${DISPUTE_PATH}/provide-evidence`;
+const MESSAGE_PATH = `${DISPUTE_PATH}/send-message`;
 const CAPTURE_ID = '3KX75190LV2280416';
 const BUYER_NOTES = 'My agent bought a 12 oz bag of whole bean coffee on November 3 and nothing has arrived.';
 
@@ -182,6 +183,8 @@ describe('getDispute', () => {
       createTime: '2026-11-04T16:22:41.000Z',
       buyerNotes: BUYER_NOTES,
       outcome: null,
+      stage: 'INQUIRY',
+      actions: ['provide_evidence', 'send_message'],
     });
   });
 
@@ -198,7 +201,37 @@ describe('getDispute', () => {
       createTime: '2026-11-02T09:05:13.000Z',
       buyerNotes: 'The spice gift box was missing two of the jars the listing showed.',
       outcome: 'RESOLVED_SELLER_FAVOUR',
+      stage: 'CHARGEBACK',
+      actions: [],
     });
+  });
+
+  it('reads the stage and what PayPal allows the seller now from its links, leaving out self', async () => {
+    // As the sandbox read an inquiry waiting for Behest: no provide_evidence link until it is a claim.
+    const links = ['self', 'accept_claim', 'send_message', 'escalate', 'make_offer'].map((rel) => ({
+      href: `https://api-m.sandbox.paypal.com/v1/customer/disputes/${DISPUTE_ID}/${rel}`,
+      rel,
+      method: rel === 'self' ? 'GET' : 'POST',
+    }));
+    stubFetch([{ method: 'GET', path: DISPUTE_PATH, body: disputeWith({ dispute_life_cycle_stage: 'INQUIRY', links }) }]);
+
+    expect(await getDispute(DISPUTE_ID)).toMatchObject({
+      stage: 'INQUIRY',
+      actions: ['accept_claim', 'send_message', 'escalate', 'make_offer'],
+    });
+  });
+
+  it('names each action once and skips links with no rel', async () => {
+    const links = [{ rel: 'provide_evidence' }, { href: 'https://api-m.sandbox.paypal.com/x' }, { rel: '' }, { rel: 'provide_evidence' }];
+    stubFetch([{ method: 'GET', path: DISPUTE_PATH, body: disputeWith({ links }) }]);
+
+    expect((await getDispute(DISPUTE_ID)).actions).toEqual(['provide_evidence']);
+  });
+
+  it('reports no stage and no actions when PayPal sends neither', async () => {
+    stubFetch([{ method: 'GET', path: DISPUTE_PATH, body: disputeWith({ dispute_life_cycle_stage: undefined, links: undefined }) }]);
+
+    expect(await getDispute(DISPUTE_ID)).toMatchObject({ stage: null, actions: [] });
   });
 
   it('reads a buyer-favoured outcome the same way', async () => {
@@ -359,5 +392,81 @@ describe('provideEvidence', () => {
 
     expect(error).toBeInstanceOf(PayPalApiError);
     expect(error).toMatchObject({ status: 400, body: JSON.stringify(body) });
+  });
+});
+
+describe('sendDisputeMessage', () => {
+  const message = 'Signed mandate m_41c2 allowed this purchase.\n\nSigned receipt: rcpt_7f3a';
+  /** What PayPal answers a message it takes: a link back to the dispute. */
+  const sent = { links: [{ href: `https://api-m.sandbox.paypal.com${DISPUTE_PATH}`, rel: 'self', method: 'GET' }] };
+
+  it('posts the message as the JSON body PayPal documents for a message with no attachment', async () => {
+    const calls = stubFetch([{ method: 'POST', path: MESSAGE_PATH, body: sent }]);
+
+    await sendDisputeMessage(DISPUTE_ID, message);
+
+    const [post] = apiCalls(calls);
+    expect(post.method).toBe('POST');
+    expect(post.url).toBe('https://api-m.sandbox.paypal.com/v1/customer/disputes/PP-R-QXT-10071254/send-message');
+    expect(post.headers['content-type']).toBe('application/json');
+    expect(JSON.parse(post.body ?? '')).toEqual({ message });
+  });
+
+  it('keys the message on the dispute id and a hash of its text', async () => {
+    const calls = stubFetch([{ method: 'POST', path: MESSAGE_PATH, body: sent }]);
+
+    await sendDisputeMessage(DISPUTE_ID, message);
+    await sendDisputeMessage(DISPUTE_ID, message);
+    await sendDisputeMessage(DISPUTE_ID, `${message} `);
+
+    const [first, again, edited] = apiCalls(calls).map((c) => c.headers['paypal-request-id']);
+    expect(first).toMatch(/^PP-R-QXT-10071254:message:[\w-]{43}$/);
+    expect(first).not.toContain(message.slice(0, 10));
+    expect(again).toBe(first);
+    expect(edited).not.toBe(first);
+  });
+
+  it('sends the same message under the same request id when PayPal is briefly unavailable', async () => {
+    const calls = stubFetch([
+      { method: 'POST', path: MESSAGE_PATH, status: 503, once: true, body: { name: 'SERVICE_UNAVAILABLE' } },
+      { method: 'POST', path: MESSAGE_PATH, body: sent },
+    ]);
+
+    await sendDisputeMessage(DISPUTE_ID, message);
+
+    const posts = apiCalls(calls);
+    expect(posts).toHaveLength(2);
+    expect(posts[1].headers['paypal-request-id']).toBe(posts[0].headers['paypal-request-id']);
+    expect(posts[1].body).toBe(posts[0].body);
+  });
+
+  it('resolves with nothing once PayPal takes the message', async () => {
+    stubFetch([{ method: 'POST', path: MESSAGE_PATH, body: sent }]);
+
+    await expect(sendDisputeMessage(DISPUTE_ID, message)).resolves.toBeUndefined();
+  });
+
+  it('encodes the dispute id, so it stays one segment of the path', async () => {
+    const calls = stubFetch([{ method: 'POST', path: `${DISPUTES}/AB%2FCD%3Fx%3D1/send-message`, body: sent }]);
+
+    await sendDisputeMessage('AB/CD?x=1', message);
+
+    const [post] = apiCalls(calls);
+    expect(post.url).toBe('https://api-m.sandbox.paypal.com/v1/customer/disputes/AB%2FCD%3Fx%3D1/send-message');
+  });
+
+  it('rethrows a PayPal error untouched', async () => {
+    const body = {
+      name: 'UNPROCESSABLE_ENTITY',
+      message: 'The requested action could not be performed, semantically incorrect, or failed business validation.',
+      details: [{ issue: 'ACTION_NOT_ALLOWED_IN_CURRENT_DISPUTE_STATE' }],
+      debug_id: '7c2e1f04a9b35',
+    };
+    stubFetch([{ method: 'POST', path: MESSAGE_PATH, status: 422, body }]);
+
+    const error = await sendDisputeMessage(DISPUTE_ID, message).catch((e) => e);
+
+    expect(error).toBeInstanceOf(PayPalApiError);
+    expect(error).toMatchObject({ status: 422, body: JSON.stringify(body) });
   });
 });

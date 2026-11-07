@@ -23,9 +23,10 @@ export const metadata: Metadata = {
 // One dispute, in two columns from 1024 px: the buyer's notes as they wrote them and Behest's answer
 // with its evidence on the left; on the right, what PayPal reported and a timeline of the dispute and
 // of the purchase behind it, from the purchase log the evidence pack records. Until evidence is
-// submitted the operator drafts, edits and submits the narrative here; after, the page shows the
-// narrative PayPal was sent, read-only. Everything others wrote (the buyer's notes, PayPal's reason,
-// the evidence items) is shown as plain text.
+// submitted the operator drafts and edits the narrative here, and answers with it as PayPal allows:
+// as evidence once the dispute is a claim, or as a message to the buyer while it is an inquiry.
+// After, the page shows the narrative PayPal was sent, read-only. Everything others wrote (the
+// buyer's notes, PayPal's reason, the evidence items) is shown as plain text.
 
 // 7 Nov 2026, 09:00.
 const dateTime = new Intl.DateTimeFormat('en-GB', {
@@ -58,7 +59,7 @@ export default async function DisputePage({ params }: PageProps<'/ops/disputes/[
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
           <ProofId value={dispute.paypalDisputeId} label="PayPal dispute id" full />
           <StatusBadge tone={dispute.submitted ? 'seal' : 'hold'} label="Evidence">
-            {dispute.submitted ? 'Answered with evidence' : 'Not answered yet'}
+            {dispute.submitted ? 'Answered with evidence' : dispute.messagedAt ? 'Answered by message' : 'Not answered yet'}
           </StatusBadge>
         </div>
         <p className="mt-3 max-w-[68ch] text-lead text-pretty text-muted">
@@ -81,7 +82,13 @@ export default async function DisputePage({ params }: PageProps<'/ops/disputes/[
               {dispute.items && <EvidenceItems items={dispute.items} />}
             </>
           ) : dispute.linked ? (
-            <DisputeEvidence disputeId={dispute.id} items={dispute.items} startFrom={dispute.lastNarrative} />
+            <DisputeEvidence
+              disputeId={dispute.id}
+              items={dispute.items}
+              startFrom={dispute.lastNarrative}
+              actions={dispute.actions}
+              messagedAt={dispute.messagedAt}
+            />
           ) : (
             <Notice kind="info" className="mt-8">
               This dispute is not matched to a purchase yet, so Behest has no evidence to answer it with. Behest matches a
@@ -98,9 +105,9 @@ type TimelineEntry = { at: string; what: string; detail?: string };
 
 /**
  * The whole story in time order: when the purchase was proposed and captured, as the purchase log's
- * opening lines record it, every step the log recorded, worded, and the dispute's own moments,
- * opened and answered. Before a draft gathers the evidence, the purchase's side is not known here,
- * and the timeline says so.
+ * opening lines record it, every step the log recorded, worded, and the dispute's own moments:
+ * opened, answered by message and answered with evidence. Before a draft gathers the evidence, the
+ * purchase's side is not known here, and the timeline says so.
  */
 function Timeline({ dispute }: { dispute: DisputeView }) {
   const log = dispute.items?.find((item) => item.id === 'purchase_log');
@@ -115,6 +122,7 @@ function Timeline({ dispute }: { dispute: DisputeView }) {
     // The capture time is on the purchase itself; a logged capture event already says it.
     ...(moments.capturedAt && !logged('capture') ? [{ at: moments.capturedAt, what: 'Captured at PayPal' }] : []),
     ...(dispute.openedAt ? [{ at: dispute.openedAt, what: 'Dispute opened at PayPal', detail: dispute.reason }] : []),
+    ...(dispute.messagedAt ? [{ at: dispute.messagedAt, what: 'Answer sent to the buyer as a message' }] : []),
     ...(dispute.submitted ? [{ at: dispute.submitted.at, what: 'Evidence submitted to PayPal' }] : []),
   ].sort((a, b) => a.at.localeCompare(b.at));
 
@@ -159,6 +167,8 @@ function Facts({ dispute }: { dispute: DisputeView }) {
         fields={[
           { label: 'Reason', value: dispute.reason },
           { label: 'Status at PayPal', value: dispute.status },
+          // Hidden until PayPal has given a stage, so the page never shows a stage it was not told.
+          ...(dispute.stage ? [{ label: 'Stage', value: dispute.stage }] : []),
           { label: 'Amount', value: <Money cents={dispute.amountCents} mono /> },
           { label: 'Opened', value: dispute.openedAt ? <span className="font-mono text-meta">{utc(dispute.openedAt)}</span> : 'Not recorded' },
           { label: 'Purchase', value: dispute.linked ? 'Matched' : 'Not matched' },

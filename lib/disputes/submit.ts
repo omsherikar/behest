@@ -1,13 +1,17 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import { disputes, receipts } from '@/lib/db/schema';
-import { PayPalApiError } from '@/lib/paypal/http';
 import type { PaypalPort } from '@/lib/paypal/port';
+import { type AnswerRefusalCode, checkAnswerAtPaypal, isPaypalRefusal } from './answerable';
 import type { Narrative } from './narrative';
 
 // Submits the narrative an operator reviewed to PayPal as the dispute's evidence, exactly once
 // (architecture section 5.5). PayPal gets it as plain-text notes: the summary, each claim with the
 // evidence items it cites, and the signed receipt's id with where to verify it.
+//
+// PayPal takes evidence only once the dispute is a claim, so before anything is claimed the dispute
+// is read live at PayPal and refused in plain words while it is an inquiry, under review or closed.
+// When PayPal cannot be read, nothing is sent: evidence never goes to PayPal unchecked.
 //
 // A submission is claimed in the database first: a conditional update records the time and the
 // narrative only while none is recorded, and commits before PayPal is asked, so no lock is held
@@ -24,14 +28,16 @@ export type SubmitEvidenceErrorCode =
   | 'unmatched'
   | 'already_submitted'
   | 'notes_too_long'
+  | AnswerRefusalCode
   | 'paypal_refused'
   | 'paypal_failed';
 
 /**
- * Why evidence was not submitted. `paypal_refused` is PayPal answering with a 4xx other than 429,
- * which sending the same evidence again would not change. `paypal_failed` is any other failure of
- * PayPal's call: no answer, a 5xx or a 429, which a later attempt may get past. For both, the
- * cause is the error PayPal's call threw.
+ * Why evidence was not submitted. The codes of AnswerRefusalCode say PayPal takes no evidence on the
+ * dispute now, or could not be read to check, with the cause PayPal's read threw. `paypal_refused`
+ * is PayPal answering the submission with a 4xx other than 429, which sending the same evidence
+ * again would not change. `paypal_failed` is any other failure of PayPal's call: no answer, a 5xx or
+ * a 429, which a later attempt may get past. For both, the cause is the error PayPal's call threw.
  */
 export class SubmitEvidenceError extends Error {
   readonly code: SubmitEvidenceErrorCode;
@@ -48,8 +54,12 @@ export class SubmitEvidenceError extends Error {
  */
 const oneLine = (text: string) => text.replace(/[\s\u0085]+/g, ' ').trim();
 
-/** The notes PayPal gets for the narrative, with the receipt lines when the purchase has a receipt. */
-function renderNotes(narrative: Narrative, receipt: { id: string; verifyUrl: string } | null): string {
+/**
+ * The notes PayPal gets for the narrative, with the receipt lines when the purchase has the receipt
+ * `receiptId`, verified on `appUrl`, Behest's public origin. The same text goes to the buyer when the
+ * answer is sent as a message.
+ */
+export function renderNotes(narrative: Narrative, receiptId: string | null, appUrl: string): string {
   const lines = [
     oneLine(narrative.summary),
     '',
@@ -58,15 +68,30 @@ function renderNotes(narrative: Narrative, receipt: { id: string; verifyUrl: str
       (claim, index) => `${index + 1}. ${oneLine(claim.text)} ${claim.evidenceIds.map((id) => `[${id}]`).join(' ')}`,
     ),
   ];
-  if (receipt) lines.push('', `Signed receipt: ${receipt.id}`, `Verify it at: ${receipt.verifyUrl}`);
+  if (receiptId) lines.push('', `Signed receipt: ${receiptId}`, `Verify it at: ${new URL('/api/receipts/verify', appUrl).href}`);
   return lines.join('\n');
 }
 
-const count = (n: number) => n.toLocaleString('en-US');
+/**
+ * What answering the dispute whose row id is `disputeId` needs from Behest's records: its PayPal id,
+ * its purchase, when its evidence was submitted and its purchase's receipt. Undefined when there is
+ * no such dispute.
+ */
+export async function disputeToAnswer(db: Db, disputeId: string) {
+  const [dispute] = await db
+    .select({
+      paypalDisputeId: disputes.paypalDisputeId,
+      purchaseId: disputes.purchaseId,
+      submittedAt: disputes.submittedAt,
+      receiptId: receipts.id,
+    })
+    .from(disputes)
+    .leftJoin(receipts, eq(receipts.purchaseId, disputes.purchaseId))
+    .where(eq(disputes.id, disputeId));
+  return dispute;
+}
 
-/** Whether PayPal answered that it will not take the request, rather than failing to answer it. */
-const isRefusal = (failure: unknown) =>
-  failure instanceof PayPalApiError && failure.status >= 400 && failure.status < 500 && failure.status !== 429;
+const count = (n: number) => n.toLocaleString('en-US');
 
 /**
  * Sends the narrative to PayPal as the evidence for the dispute whose row id is `disputeId`, and
@@ -74,7 +99,9 @@ const isRefusal = (failure: unknown) =>
  * `deps.appUrl`, Behest's public origin. The caller has already checked that every citation names
  * an item of the dispute's evidence pack. Throws a SubmitEvidenceError, sending and storing nothing, for
  * a dispute that does not exist, is not matched to a purchase or was already submitted, and for
- * notes longer than PayPal takes. When PayPal's call throws, it logs PayPal's error, releases the
+ * notes longer than PayPal takes. It then reads the dispute live at PayPal and stores the stage and
+ * actions PayPal reports, and throws one, sending and storing nothing else, when PayPal takes no
+ * evidence on it now or cannot be read. When PayPal's call throws, it logs PayPal's error, releases the
  * submission and throws one with code `paypal_refused` or `paypal_failed`. If the release fails too,
  * it throws an AggregateError of PayPal's error and the release's, and the dispute still reads as
  * submitted.
@@ -86,28 +113,23 @@ export async function submitEvidence(
   const { db } = deps;
   const { disputeId, narrative } = i;
 
-  const [dispute] = await db
-    .select({
-      paypalDisputeId: disputes.paypalDisputeId,
-      purchaseId: disputes.purchaseId,
-      submittedAt: disputes.submittedAt,
-      receiptId: receipts.id,
-    })
-    .from(disputes)
-    .leftJoin(receipts, eq(receipts.purchaseId, disputes.purchaseId))
-    .where(eq(disputes.id, disputeId));
+  const dispute = await disputeToAnswer(db, disputeId);
   if (!dispute) throw new SubmitEvidenceError('unknown_dispute', 'there is no such dispute');
   if (!dispute.purchaseId) throw new SubmitEvidenceError('unmatched', 'the dispute is not matched to a purchase');
   if (dispute.submittedAt) throw new SubmitEvidenceError('already_submitted', 'already submitted');
 
-  const verifyUrl = new URL('/api/receipts/verify', deps.appUrl).href;
-  const notes = renderNotes(narrative, dispute.receiptId ? { id: dispute.receiptId, verifyUrl } : null);
+  const notes = renderNotes(narrative, dispute.receiptId, deps.appUrl);
   // Refused whole: cutting the notes short could drop a claim or the receipt without anyone seeing.
   if (notes.length > MAX_NOTES_CHARS) {
     throw new SubmitEvidenceError(
       'notes_too_long',
       `The evidence notes come to ${count(notes.length)} characters, and PayPal takes at most ${count(MAX_NOTES_CHARS)}. Shorten the summary or the claims and submit again.`,
     );
+  }
+
+  const refusal = await checkAnswerAtPaypal(deps, { id: disputeId, paypalDisputeId: dispute.paypalDisputeId }, 'evidence');
+  if (refusal) {
+    throw new SubmitEvidenceError(refusal.code, refusal.message, 'cause' in refusal ? { cause: refusal.cause } : undefined);
   }
 
   const submittedAt = deps.now();
@@ -138,7 +160,7 @@ export async function submitEvidence(
         `PayPal did not take the evidence for dispute ${disputeId}, and its submission could not be released, so the dispute still reads as submitted`,
       );
     }
-    if (isRefusal(failure)) throw new SubmitEvidenceError('paypal_refused', 'PayPal refused the evidence', { cause: failure });
+    if (isPaypalRefusal(failure)) throw new SubmitEvidenceError('paypal_refused', 'PayPal refused the evidence', { cause: failure });
     throw new SubmitEvidenceError('paypal_failed', 'PayPal did not take the evidence', { cause: failure });
   }
 }

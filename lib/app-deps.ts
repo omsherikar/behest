@@ -5,7 +5,7 @@ import { buyers } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME } from '@/lib/demo/personas';
 import { checkIntent } from '@/lib/intent/check';
 import { createClaude, type LlmDeps } from '@/lib/llm/client';
-import { getDispute, listDisputes, provideEvidence } from '@/lib/paypal/disputes';
+import { getDispute, listDisputes, provideEvidence, sendDisputeMessage } from '@/lib/paypal/disputes';
 import { captureOrder, chargeSavedWallet, createApprovalOrder } from '@/lib/paypal/orders';
 import { createPayout, getPayoutBatch } from '@/lib/paypal/payouts';
 import type { PaypalPort } from '@/lib/paypal/port';
@@ -74,6 +74,7 @@ export function appPaypal(): PaypalPort {
     listDisputes,
     getDispute,
     provideEvidence,
+    sendDisputeMessage,
     verifyWebhook,
   };
 }

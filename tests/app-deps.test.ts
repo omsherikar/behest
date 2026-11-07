@@ -156,6 +156,7 @@ describe('appPaypal', () => {
       listDisputes: disputes.listDisputes,
       getDispute: disputes.getDispute,
       provideEvidence: disputes.provideEvidence,
+      sendDisputeMessage: disputes.sendDisputeMessage,
       verifyWebhook: webhooks.verifyWebhook,
     });
   });

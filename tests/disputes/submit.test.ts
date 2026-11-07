@@ -7,7 +7,7 @@ import { MAX_NOTES_CHARS, SubmitEvidenceError, submitEvidence } from '@/lib/disp
 import { PayPalApiError } from '@/lib/paypal/http';
 import type { FakePaypal } from '@/tests/helpers/fake-paypal';
 import { setUpCaptured } from '@/tests/helpers/purchase-deps';
-import { chargedDispute, openDispute, PAYPAL_DISPUTE_ID } from '@/tests/helpers/seed-dispute';
+import { chargedDispute, INQUIRY_ACTIONS, openDispute, PAYPAL_DISPUTE_ID, paypalDispute } from '@/tests/helpers/seed-dispute';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 // The first createTestDb() call in a file migrates a template database, which can take several
@@ -23,6 +23,7 @@ afterEach(() => {
 const APP_URL = 'https://behest.example.com';
 const SUBMITTED_AT = new Date('2026-11-07T15:30:00.250Z');
 const LOGGED = '[disputes] PayPal did not take the evidence:';
+const NOT_READ = '[disputes] PayPal did not return the dispute:';
 const EVIDENCE_PATH = `/v1/customer/disputes/${PAYPAL_DISPUTE_ID}/provide-evidence`;
 
 const NARRATIVE: Narrative = {
@@ -82,6 +83,86 @@ describe('submitEvidence', () => {
     expect(await disputeRow(db, disputeId)).toMatchObject({ narrative: NARRATIVE, submittedAt: SUBMITTED_AT });
   });
 
+  it('reads the dispute live at PayPal before claiming it, and stores the stage and actions PayPal reports', async () => {
+    const { db, paypal, disputeId } = await chargedDispute();
+    let claimedWhenRead: unknown = 'not read';
+    const read = paypal.getDispute.bind(paypal);
+    vi.spyOn(paypal, 'getDispute').mockImplementation(async (id) => {
+      claimedWhenRead = (await disputeRow(db, disputeId)).submittedAt;
+      return read(id);
+    });
+
+    await submitEvidence(depsFor(db, paypal), { disputeId, narrative: NARRATIVE });
+
+    expect(paypal.callsTo('getDispute')).toEqual([[PAYPAL_DISPUTE_ID]]);
+    expect(claimedWhenRead).toBeNull();
+    expect(await disputeRow(db, disputeId)).toMatchObject({ stage: 'CHARGEBACK', actions: ['provide_evidence', 'accept_claim'] });
+  });
+
+  it.each([
+    {
+      name: 'an inquiry that allows a message',
+      live: paypalDispute({ stage: 'INQUIRY', actions: INQUIRY_ACTIONS }),
+      code: 'inquiry',
+      message: 'PayPal takes evidence once this inquiry becomes a claim. Until then, send the buyer your answer as a message.',
+    },
+    {
+      name: 'a dispute PayPal is reviewing, with no actions',
+      live: paypalDispute({ status: 'UNDER_REVIEW', actions: [] }),
+      code: 'not_taking_answers',
+      message: 'PayPal is reviewing this dispute and takes no answer from Behest right now.',
+    },
+    {
+      name: 'a dispute that allows neither evidence nor a message',
+      live: paypalDispute({ status: 'WAITING_FOR_BUYER_RESPONSE', actions: ['accept_claim'] }),
+      code: 'not_taking_answers',
+      message: 'PayPal takes no evidence or message from Behest on this dispute right now.',
+    },
+    {
+      name: 'a closed dispute',
+      live: paypalDispute({ status: 'RESOLVED', outcome: 'RESOLVED_BUYER_FAVOUR', actions: [] }),
+      code: 'closed',
+      message: 'PayPal has closed this dispute, so it takes no answer from Behest.',
+    },
+  ])('refuses evidence for $name, storing its stage and actions and nothing else', async ({ live, code, message }) => {
+    const { db, paypal, disputeId } = await chargedDispute();
+    paypal.disputes = [live];
+
+    const refused = submitEvidence(depsFor(db, paypal), { disputeId, narrative: NARRATIVE });
+
+    await expect(refused).rejects.toThrow(SubmitEvidenceError);
+    await expect(refused).rejects.toMatchObject({ code, message });
+    expect(paypal.callsTo('provideEvidence')).toEqual([]);
+    expect(await disputeRow(db, disputeId)).toMatchObject({
+      stage: live.stage,
+      actions: live.actions,
+      status: 'OPEN',
+      narrative: null,
+      submittedAt: null,
+      messagedAt: null,
+    });
+  });
+
+  it.each([
+    ['PayPal cannot be reached', (paypal: FakePaypal) => paypal.failNext('getDispute', 'network'), TypeError],
+    ['PayPal has no such dispute', (paypal: FakePaypal) => (paypal.disputes = []), PayPalApiError],
+  ])('refuses without submitting when %s, logging why, so evidence never goes unchecked', async (_, fail, cause) => {
+    const { db, paypal, disputeId } = await chargedDispute();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fail(paypal);
+
+    const refused = submitEvidence(depsFor(db, paypal), { disputeId, narrative: NARRATIVE });
+
+    await expect(refused).rejects.toMatchObject({
+      code: 'check_failed',
+      message: 'Could not check the dispute at PayPal. Try again.',
+      cause: expect.any(cause),
+    });
+    expect(logged).toHaveBeenCalledWith(NOT_READ, expect.any(cause));
+    expect(paypal.callsTo('provideEvidence')).toEqual([]);
+    expect(await disputeRow(db, disputeId)).toMatchObject({ stage: null, actions: null, narrative: null, submittedAt: null });
+  });
+
   it('has the submission stored before PayPal is asked, with no transaction left open', async () => {
     const { db, paypal, disputeId } = await chargedDispute();
     let seen: unknown;
@@ -114,6 +195,7 @@ describe('submitEvidence', () => {
 
   it('leaves the receipt lines out for a purchase that was never given a receipt', async () => {
     const { db, paypal, purchaseId } = await setUpCaptured();
+    paypal.disputes = [paypalDispute()];
     const disputeId = await openDispute(db, purchaseId);
 
     await submitEvidence(depsFor(db, paypal), { disputeId, narrative: NARRATIVE });
@@ -135,6 +217,7 @@ describe('submitEvidence', () => {
     await expect(second).rejects.toThrow(new SubmitEvidenceError('already_submitted', 'already submitted'));
     await expect(second).rejects.toMatchObject({ code: 'already_submitted' });
     expect(paypal.callsTo('provideEvidence')).toHaveLength(1);
+    expect(paypal.callsTo('getDispute')).toHaveLength(1);
     expect(await disputeRow(db, disputeId)).toMatchObject({ narrative: NARRATIVE, submittedAt: SUBMITTED_AT });
   });
 
@@ -263,6 +346,7 @@ describe('submitEvidence', () => {
       message:
         'The evidence notes come to 2,001 characters, and PayPal takes at most 2,000. Shorten the summary or the claims and submit again.',
     });
+    expect(paypal.callsTo('getDispute')).toEqual([]);
     expect(paypal.callsTo('provideEvidence')).toEqual([]);
     expect(await disputeRow(db, disputeId)).toMatchObject({ narrative: null, submittedAt: null });
   });

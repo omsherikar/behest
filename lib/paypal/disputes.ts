@@ -1,7 +1,9 @@
-// Reading the disputes buyers open against Behest's captures, and answering one with evidence.
-// Amounts become integer cents and must be USD; statuses and reasons are PayPal's own strings.
-// Whether to submit evidence is an operator's decision: provideEvidence sends what it is given.
+// Reading the disputes buyers open against Behest's captures, and answering one with evidence or,
+// while it is an inquiry, with a message to the buyer. Amounts become integer cents and must be USD;
+// statuses, stages, actions and reasons are PayPal's own strings. Whether and how to answer is an
+// operator's decision: provideEvidence and sendDisputeMessage send what they are given.
 
+import { createHash } from 'node:crypto';
 import { paypalRequest } from './http';
 import { toCents } from './money';
 import type { DisputeSummary, PaypalPort } from './port';
@@ -25,6 +27,9 @@ type Dispute = {
   messages?: Message[];
   /** Present once PayPal has decided the dispute. */
   dispute_outcome?: { outcome_code?: string };
+  dispute_life_cycle_stage?: string;
+  /** One link for each thing the caller may do with the dispute now, besides `self`. */
+  links?: Link[];
 };
 type DisputePage = { items?: Dispute[]; links?: Link[] };
 
@@ -90,6 +95,15 @@ function firstBuyerMessage(messages: Message[] | undefined): Message | undefined
   return written.reduce<Message | undefined>((first, message) => (first && postedAt(first) <= postedAt(message) ? first : message), undefined);
 }
 
+/**
+ * What PayPal lets the seller do with the dispute now, each once, in the order PayPal lists them.
+ * PayPal offers an action only through its link: no provide_evidence link means it takes no evidence.
+ */
+function actionsOf(links: Link[] | undefined): string[] {
+  const rels = (links ?? []).flatMap((link) => (link.rel && link.rel !== 'self' ? [link.rel] : []));
+  return [...new Set(rels)];
+}
+
 export const getDispute: PaypalPort['getDispute'] = async (id) => {
   const dispute = await paypalRequest<Dispute | undefined>('GET', `${DISPUTES}/${encodeURIComponent(id)}`);
   // PayPal keeps what each side wrote in `messages`. The buyer's earliest written message is taken
@@ -98,6 +112,8 @@ export const getDispute: PaypalPort['getDispute'] = async (id) => {
     ...toSummary(dispute ?? {}),
     buyerNotes: firstBuyerMessage(dispute?.messages)?.content ?? null,
     outcome: dispute?.dispute_outcome?.outcome_code ?? null,
+    stage: dispute?.dispute_life_cycle_stage ?? null,
+    actions: actionsOf(dispute?.links),
   };
 };
 
@@ -106,4 +122,18 @@ export const provideEvidence: PaypalPort['provideEvidence'] = async (id, { notes
   const form = new FormData();
   form.append('input', new Blob([JSON.stringify(input)], { type: 'application/json' }));
   await paypalRequest('POST', `${DISPUTES}/${encodeURIComponent(id)}/provide-evidence`, { form, requestId: `${id}:evidence` });
+};
+
+/**
+ * Sends `message` to the buyer on the dispute. PayPal's guide sends a message with no attachment as a
+ * JSON body holding `message`; a multipart request is only for attaching documents, which Behest
+ * does not. The request id is keyed on a hash of the text as well as the dispute, so a retry of the
+ * same message is applied once while an edited answer goes as a new message.
+ */
+export const sendDisputeMessage: PaypalPort['sendDisputeMessage'] = async (id, message) => {
+  const digest = createHash('sha256').update(message).digest('base64url');
+  await paypalRequest('POST', `${DISPUTES}/${encodeURIComponent(id)}/send-message`, {
+    body: { message },
+    requestId: `${id}:message:${digest}`,
+  });
 };

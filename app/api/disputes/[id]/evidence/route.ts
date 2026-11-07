@@ -3,48 +3,21 @@ import { connection, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { appDb, appJwks, appPaypal, appUrl } from '@/lib/app-deps';
 import { disputes } from '@/lib/db/schema';
-import type { Narrative } from '@/lib/disputes/narrative';
-import { assembleEvidencePack, EVIDENCE_IDS, type EvidencePack } from '@/lib/disputes/pack';
+import { isWordedRefusal, NarrativeRequest, NOT_JSON, uncitedClaims, WORDED_REFUSALS } from '@/lib/disputes/answer-request';
+import { assembleEvidencePack } from '@/lib/disputes/pack';
 import { SubmitEvidenceError, type SubmitEvidenceErrorCode, submitEvidence } from '@/lib/disputes/submit';
 import { FORM_BODY_BYTES, readBody } from '@/lib/http/read-body';
+import { clientAddress, EVIDENCE_SUBMIT_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { personaRefusal } from '@/lib/session';
 
 // Submits the narrative the operator reviewed to PayPal as the dispute's evidence, exactly as the
 // operator sent it. The evidence pack is built again from Behest's records, and a narrative citing
 // an item the pack does not hold is refused, naming the claims to fix: submitting cannot be undone,
-// so nothing the operator approved is dropped on the way to PayPal.
-
-/** `items` as a list in a sentence, such as `a, b and c`. */
-const inProse = (items: readonly string[], conjunction: 'and' | 'or') =>
-  items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${conjunction} ${items.at(-1)}`;
-
-const NOT_JSON = 'Send the narrative as JSON.';
-const SHAPE = 'Send the narrative as a summary and a list of claims.';
-const CITE = `Cite evidence items by their ids: ${inProse(EVIDENCE_IDS, 'or')}.`;
-
-/** One claim: its text, and the evidence items that show it, each cited once. */
-const Claim = z.strictObject(
-  {
-    text: z.string({ error: SHAPE }).trim().min(1, { error: 'Every claim needs its text.' }),
-    evidenceIds: z
-      .array(z.enum(EVIDENCE_IDS, { error: CITE }), { error: SHAPE })
-      .min(1, { error: 'Every claim must cite at least one evidence item.' })
-      .refine((ids) => new Set(ids).size === ids.length, { error: 'Cite each evidence item once in a claim.' }),
-  },
-  { error: SHAPE },
-);
-
-/** A narrative as the operator edited it, in the shape of a Narrative. */
-const NarrativeRequest = z.strictObject(
-  {
-    summary: z.string({ error: SHAPE }).trim().min(1, { error: 'Write a summary.' }),
-    claims: z.array(Claim, { error: SHAPE }).min(1, { error: 'Write at least one claim.' }),
-  },
-  { error: SHAPE },
-);
+// so nothing the operator approved is dropped on the way to PayPal. A dispute PayPal takes no
+// evidence on yet, such as an inquiry, is refused with 422 and words saying what PayPal takes instead.
 
 /** The status and operator-facing message for each refusal with a fixed message. Nothing PayPal sent reaches the client. */
-const REFUSALS: Record<Exclude<SubmitEvidenceErrorCode, 'notes_too_long'>, [status: number, message: string]> = {
+const REFUSALS: Record<Exclude<SubmitEvidenceErrorCode, keyof typeof WORDED_REFUSALS>, [status: number, message: string]> = {
   unknown_dispute: [404, 'There is no such dispute.'],
   unmatched: [409, 'This dispute is not matched to a purchase, so Behest has no evidence for it.'],
   already_submitted: [409, 'Evidence for this dispute was already submitted.'],
@@ -52,22 +25,9 @@ const REFUSALS: Record<Exclude<SubmitEvidenceErrorCode, 'notes_too_long'>, [stat
   paypal_failed: [502, 'PayPal did not take the evidence. Submit it again to retry.'],
 };
 
+const ROUTE = 'dispute_evidence';
 const error = (status: number, message: string) => Response.json({ error: { message } }, { status });
 const refuse = (code: keyof typeof REFUSALS) => error(...REFUSALS[code]);
-
-/**
- * Why the narrative cannot be submitted as it stands: the claims, numbered from 1, that cite items
- * the pack does not hold. Null when every citation names an item of the pack.
- */
-function uncitedClaims(narrative: Narrative, pack: EvidencePack): string | null {
-  const held = pack.items.map((item) => item.id);
-  const uncited = narrative.claims.flatMap(({ evidenceIds }, index) => {
-    const missing = evidenceIds.filter((id) => !held.includes(id));
-    return missing.length > 0 ? [`claim ${index + 1} cites ${inProse(missing, 'and')}`] : [];
-  });
-  if (uncited.length === 0) return null;
-  return `Some claims cite evidence this dispute does not have: ${uncited.join('; ')}. Its evidence is ${inProse(held, 'and')}.`;
-}
 
 /** `POST { summary, claims }`: submits the narrative and returns `{ narrative }`, as submitted after trimming. */
 export async function POST(request: NextRequest, ctx: RouteContext<'/api/disputes/[id]/evidence'>) {
@@ -76,6 +36,9 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/dispute
 
   const refusal = await personaRefusal(request, 'operator');
   if (refusal) return refusal;
+  if (!rateLimit(`${ROUTE}:${clientAddress(request)}:operator`, EVIDENCE_SUBMIT_LIMIT)) {
+    return error(429, 'Too many submissions at once. Try again in a minute.');
+  }
 
   const { id } = await ctx.params;
   // Dispute ids are UUIDs; Postgres would refuse anything else as an error rather than find nothing.
@@ -115,7 +78,7 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/dispute
   } catch (failure) {
     if (!(failure instanceof SubmitEvidenceError)) throw failure;
     // submitEvidence has logged PayPal's own error, which never reaches the client.
-    return failure.code === 'notes_too_long' ? error(400, failure.message) : refuse(failure.code);
+    return isWordedRefusal(failure.code) ? error(WORDED_REFUSALS[failure.code], failure.message) : refuse(failure.code);
   }
   return Response.json({ narrative });
 }

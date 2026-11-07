@@ -51,6 +51,8 @@ const dispute: DisputeDetail = {
   createTime: '2026-11-07T09:00:00Z',
   buyerNotes: BUYER_NOTES,
   outcome: null,
+  stage: 'CHARGEBACK',
+  actions: ['provide_evidence', 'accept_claim'],
 };
 
 /** Every tool the official toolkit can build that writes to PayPal. */

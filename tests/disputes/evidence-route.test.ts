@@ -7,16 +7,21 @@ import type { Db } from '@/lib/db/client';
 import { disputes, receipts } from '@/lib/db/schema';
 import type { Narrative } from '@/lib/disputes/narrative';
 import { PayPalApiError } from '@/lib/paypal/http';
+import { EVIDENCE_SUBMIT_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
 import type { FakePaypal } from '@/tests/helpers/fake-paypal';
 import { jwks } from '@/tests/helpers/purchase-deps';
-import { chargedDispute, openDispute, PAYPAL_DISPUTE_ID } from '@/tests/helpers/seed-dispute';
+import { chargedDispute, INQUIRY_ACTIONS, openDispute, PAYPAL_DISPUTE_ID, paypalDispute } from '@/tests/helpers/seed-dispute';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 // connection() needs a Next.js request scope, which a test does not have.
 vi.mock('next/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('next/server')>()),
   connection: vi.fn(async () => {}),
+}));
+vi.mock('@/lib/ratelimit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ratelimit')>()),
+  rateLimit: vi.fn(() => true),
 }));
 vi.mock('@/lib/app-deps', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/app-deps')>()),
@@ -173,6 +178,16 @@ describe('POST /api/disputes/[id]/evidence', () => {
     expect(paypal.callsTo('provideEvidence')).toEqual([]);
   });
 
+  it('answers 429 once the operator has submitted too often, without reading or sending anything at PayPal', async () => {
+    vi.mocked(rateLimit).mockReturnValueOnce(false);
+
+    expect(await submit(NARRATIVE)).toEqual({ status: 429, body: error('Too many submissions at once. Try again in a minute.') });
+    expect(rateLimit).toHaveBeenCalledWith(expect.stringMatching(/^dispute_evidence:.*:operator$/), EVIDENCE_SUBMIT_LIMIT);
+    expect(paypal.callsTo('getDispute')).toEqual([]);
+    expect(paypal.callsTo('provideEvidence')).toEqual([]);
+    expect(await disputeRow()).toMatchObject({ narrative: null, submittedAt: null });
+  });
+
   it('answers 409 to a dispute not matched to a purchase, submitting nothing', async () => {
     await db.delete(disputes);
     const unmatched = await openDispute(db, null);
@@ -195,6 +210,46 @@ describe('POST /api/disputes/[id]/evidence', () => {
     });
     expect(paypal.callsTo('provideEvidence')).toHaveLength(1);
     expect(await disputeRow()).toMatchObject({ narrative: NARRATIVE, submittedAt: first.submittedAt });
+  });
+
+  it.each([
+    [
+      'an inquiry, which takes a message instead',
+      paypalDispute({ stage: 'INQUIRY', actions: INQUIRY_ACTIONS }),
+      'PayPal takes evidence once this inquiry becomes a claim. Until then, send the buyer your answer as a message.',
+    ],
+    [
+      'a dispute PayPal is reviewing',
+      paypalDispute({ status: 'UNDER_REVIEW', actions: [] }),
+      'PayPal is reviewing this dispute and takes no answer from Behest right now.',
+    ],
+    [
+      'a closed dispute',
+      paypalDispute({ status: 'RESOLVED', actions: [] }),
+      'PayPal has closed this dispute, so it takes no answer from Behest.',
+    ],
+  ])('answers 422 in plain words to %s, submitting nothing and storing what PayPal allows', async (_, live, message) => {
+    paypal.disputes = [live];
+
+    expect(await submit(NARRATIVE)).toEqual({ status: 422, body: error(message) });
+    expect(paypal.callsTo('provideEvidence')).toEqual([]);
+    expect(await disputeRow()).toMatchObject({ stage: live.stage, actions: live.actions, narrative: null, submittedAt: null });
+  });
+
+  it("answers 502 without PayPal's details when the dispute cannot be checked at PayPal, submitting nothing", async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const answer = new PayPalApiError(503, `/v1/customer/disputes/${PAYPAL_DISPUTE_ID}`, '{"name":"SERVICE_UNAVAILABLE","debug_id":"f00dfeed"}');
+    vi.spyOn(paypal, 'getDispute').mockRejectedValueOnce(answer);
+
+    const response = await POST(await request(disputeId, NARRATIVE), { params: Promise.resolve({ id: disputeId }) });
+    const text = await response.text();
+
+    expect(response.status).toBe(502);
+    expect(JSON.parse(text)).toEqual(error('Could not check the dispute at PayPal. Try again.'));
+    expect(text).not.toMatch(/SERVICE_UNAVAILABLE|f00dfeed/);
+    expect(logged).toHaveBeenCalledWith('[disputes] PayPal did not return the dispute:', answer);
+    expect(paypal.callsTo('provideEvidence')).toEqual([]);
+    expect(await disputeRow()).toMatchObject({ narrative: null, submittedAt: null });
   });
 
   it("answers 502 without PayPal's details when PayPal fails, logging the cause and leaving the dispute to submit again", async () => {

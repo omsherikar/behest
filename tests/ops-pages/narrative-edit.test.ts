@@ -50,6 +50,11 @@ describe('narrativeProblem', () => {
     expect(narrativeProblem({ ...ready, claims: [] }, PACK)).toBe('Add at least one claim before you submit.');
   });
 
+  it('names the way the answer goes when it is a message to the buyer', () => {
+    expect(narrativeProblem({ ...ready, summary: '' }, PACK, 'send')).toBe('Write a summary before you send.');
+    expect(narrativeProblem({ ...ready, claims: [] }, PACK, 'send')).toBe('Add at least one claim before you send.');
+  });
+
   it('names a claim with no text by its number', () => {
     const claims = [...ready.claims, claim('  ', ['cart'])];
     expect(narrativeProblem({ ...ready, claims }, PACK)).toBe('Claim 3 has no text. Write it or remove the claim.');

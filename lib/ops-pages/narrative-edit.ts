@@ -26,10 +26,17 @@ export function toggleCitation(cited: readonly string[], id: string, packIds: re
   return inPackOrder(next, packIds);
 }
 
-/** Why the narrative cannot be submitted as it stands, in words for the operator, or null when it can. */
-export function narrativeProblem(narrative: EditableNarrative, packIds: readonly string[]): string | null {
-  if (narrative.summary.trim() === '') return 'Write a summary before you submit.';
-  if (narrative.claims.length === 0) return 'Add at least one claim before you submit.';
+/**
+ * Why the narrative cannot be sent as it stands, in words for the operator, or null when it can.
+ * `verb` names how it goes: submitted as evidence, or sent to the buyer as a message.
+ */
+export function narrativeProblem(
+  narrative: EditableNarrative,
+  packIds: readonly string[],
+  verb: 'submit' | 'send' = 'submit',
+): string | null {
+  if (narrative.summary.trim() === '') return `Write a summary before you ${verb}.`;
+  if (narrative.claims.length === 0) return `Add at least one claim before you ${verb}.`;
   for (const [index, claim] of narrative.claims.entries()) {
     if (claim.text.trim() === '') return `Claim ${index + 1} has no text. Write it or remove the claim.`;
     if (inPackOrder(claim.evidenceIds, packIds).length === 0) {

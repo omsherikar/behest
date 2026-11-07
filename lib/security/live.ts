@@ -83,6 +83,7 @@ function paypalThatMovesNoMoney(): PaypalPort {
     listDisputes: never('listDisputes'),
     getDispute: never('getDispute'),
     provideEvidence: never('provideEvidence'),
+    sendDisputeMessage: never('sendDisputeMessage'),
     verifyWebhook: never('verifyWebhook'),
   };
 }

@@ -21,7 +21,19 @@ const SHELL_HEIGHT_BARE = '[--shell-h:3.0625rem]';
  */
 export const fillWindow = 'flex h-[max(36rem,calc(100dvh-var(--shell-h)-3rem))] flex-col';
 
-export function AppShell({ persona, children }: { persona?: Persona; children: ReactNode }) {
+export function AppShell({
+  persona,
+  aside,
+  bleed = false,
+  children,
+}: {
+  persona?: Persona;
+  /** Without a persona: what the top bar shows on the right, such as links within the page. */
+  aside?: ReactNode;
+  /** Gives the page the full width, for a page that lays out its own sections, such as the home page. */
+  bleed?: boolean;
+  children: ReactNode;
+}) {
   const info = persona ? personaInfo(persona) : null;
   return (
     <div className={`flex min-h-dvh flex-col ${info ? SHELL_HEIGHT : SHELL_HEIGHT_BARE}`}>
@@ -40,7 +52,7 @@ export function AppShell({ persona, children }: { persona?: Persona; children: R
           >
             behest
           </Link>
-          {persona && <PersonaSwitcher current={persona} />}
+          {persona ? <PersonaSwitcher current={persona} /> : aside}
         </div>
         {info && (
           <div className="mx-auto w-full max-w-[1200px] px-4 sm:px-6">
@@ -49,7 +61,7 @@ export function AppShell({ persona, children }: { persona?: Persona; children: R
         )}
       </header>
       <main id="content" tabIndex={-1} className="flex flex-1 flex-col focus:outline-none">
-        <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col px-4 py-6 sm:px-6">{children}</div>
+        {bleed ? children : <div className="mx-auto flex w-full max-w-[1200px] flex-1 flex-col px-4 py-6 sm:px-6">{children}</div>}
       </main>
     </div>
   );

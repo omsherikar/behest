@@ -8,6 +8,7 @@ import type { PaypalPort } from '@/lib/paypal/port';
 import { deliverToSeller } from './deliver';
 import type { ProposalOutcome, PurchaseDeps } from './deps';
 import { appendEvent, StaleTransition, transition } from './events';
+import { MANDATE_NOT_ACTIVE, purchaseMandateActive } from './mandate-check';
 import { issueReceipt, receiptBlocker } from './receipt';
 import { describeFailure } from './settle';
 
@@ -80,9 +81,9 @@ const REPLAY_WINDOW_MS = 5 * 60 * 60 * 1000;
  * - DECLINED: a `charge_declined` event, and the purchase ends `failed`;
  * - a second thrown error: a `charge_unknown` event, with the purchase left `charging` for the
  *   queued job to replay.
- * A purchase that could not be given its receipt once captured fails with a `charge_refused`
- * event, and one whose buyer has no linked wallet with a `charge_failed` event, each saying why;
- * PayPal is never asked. A purchase another call has already moved on from `proposed` is returned
+ * A purchase whose mandate has been revoked or has expired since the gate decided, or that could
+ * not be given its receipt once captured, fails with a `charge_refused` event, and one whose buyer
+ * has no linked wallet with a `charge_failed` event, each saying why; PayPal is never asked. A purchase another call has already moved on from `proposed` is returned
  * as it stands. Throws, changing nothing, for a purchase whose final verdict is not ALLOW.
  */
 export async function chargeAllowed(deps: ChargeDeps, purchaseId: string): Promise<ProposalOutcome> {
@@ -258,11 +259,22 @@ export async function purchaseOutcome(db: Db, purchaseId: string): Promise<Propo
 }
 
 /**
+ * Why a purchase about to be charged, or sent to its buyer to approve, must not be, or null when it
+ * may: its mandate is no longer active and unexpired, read again with its row held FOR SHARE until
+ * the caller's transaction ends, so no confirmation can revoke it before the payment is recorded; or
+ * it could not be given its receipt once captured.
+ */
+export async function chargeRefusal(db: Db, purchaseId: string, now: Date): Promise<string | null> {
+  if (!(await purchaseMandateActive(db, purchaseId, now))) return MANDATE_NOT_ACTIVE;
+  return receiptBlocker(db, purchaseId, now);
+}
+
+/**
  * Moves the purchase from `proposed` to `charging`, with the policy as its approver, logs the
  * charge and queues its `charge_retry` job with recordCharge, and returns the charge to send. If
- * the purchase could not be given its receipt, or its buyer has no linked wallet, it fails the
- * purchase instead, and returns null; it also returns null for a purchase another call has already
- * moved on.
+ * chargeRefusal refuses the purchase, it fails with a `charge_refused` event saying why, and if its
+ * buyer has no linked wallet, with a `charge_failed` event. Either way it returns null, and it also
+ * returns null for a purchase another call has already moved on.
  */
 async function startCharge(
   { db, now }: ChargeDeps,
@@ -273,7 +285,7 @@ async function startCharge(
   try {
     return await db.transaction(async (tx) => {
       await transition(tx, purchaseId, 'proposed', 'charging', { approver: 'policy' });
-      const refusal = await receiptBlocker(tx, purchaseId, now());
+      const refusal = await chargeRefusal(tx, purchaseId, now());
       if (refusal) {
         await appendEvent(tx, purchaseId, 'charge_refused', { reason: refusal });
         await transition(tx, purchaseId, 'charging', 'failed');

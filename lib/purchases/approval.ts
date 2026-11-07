@@ -3,10 +3,9 @@ import type { Db } from '@/lib/db/client';
 import { purchases } from '@/lib/db/schema';
 import { enqueue, type JobOutcome } from '@/lib/jobs/queue';
 import type { PaypalPort } from '@/lib/paypal/port';
-import { purchaseOutcome, recordCharge, takePayment, type PaymentRequest } from './charge';
+import { chargeRefusal, purchaseOutcome, recordCharge, takePayment, type PaymentRequest } from './charge';
 import type { ProposalOutcome, PurchaseDeps } from './deps';
 import { appendEvent, StaleTransition, transition } from './events';
-import { receiptBlocker } from './receipt';
 import { describeFailure } from './settle';
 
 // Purchases the buyer approves themselves (architecture section 6.3). The gate sent the purchase to
@@ -35,8 +34,9 @@ const FIRST_ATTEMPT_FAILED = 'Creating an approval order failed, so PayPal is as
  * asks PayPal for the order the buyer approves, asking once more with the same request id if that
  * throws, and stores the order's id and approval link on the purchase. Creating the order moves no
  * money, so if PayPal cannot answer either time the purchase is cancelled at once, releasing its
- * budget: no buyer can approve an order whose link they never saw. A purchase that could not be
- * given its receipt once captured fails with a `charge_refused` event, and PayPal is never asked.
+ * budget: no buyer can approve an order whose link they never saw. A purchase whose mandate has been
+ * revoked or has expired since the gate decided, or that could not be given its receipt once
+ * captured, fails with a `charge_refused` event, and PayPal is never asked.
  * A purchase another call has already moved on from `proposed` is returned as it stands. Throws,
  * changing nothing, for a purchase whose final verdict is not ASK.
  */
@@ -116,10 +116,10 @@ export async function expireApproval({ db }: Pick<PurchaseDeps, 'db'>, purchaseI
 
 /**
  * Moves the purchase from `proposed` to `awaiting_approval` and queues its `approval_expiry` job,
- * and returns the order to ask PayPal for and when the approval window closes. If the purchase
- * could not be given its receipt, it fails the purchase instead, through `charging` as a refused
- * charge does, and returns null; it also returns null for a purchase another call has already
- * moved on.
+ * and returns the order to ask PayPal for and when the approval window closes. If chargeRefusal
+ * refuses the purchase, because its mandate has ended or it could not be given its receipt, it fails
+ * the purchase instead, through `charging` as a refused charge does, and returns null; it also
+ * returns null for a purchase another call has already moved on.
  */
 async function openApproval(
   { db, appUrl, now }: ApprovalDeps,
@@ -128,7 +128,7 @@ async function openApproval(
 ): Promise<{ request: ApprovalRequest; expiresAt: Date } | null> {
   try {
     return await db.transaction(async (tx) => {
-      const refusal = await receiptBlocker(tx, purchaseId, now());
+      const refusal = await chargeRefusal(tx, purchaseId, now());
       if (refusal) {
         await transition(tx, purchaseId, 'proposed', 'charging');
         await appendEvent(tx, purchaseId, 'charge_refused', { reason: refusal });

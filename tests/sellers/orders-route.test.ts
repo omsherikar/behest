@@ -119,6 +119,7 @@ describe('POST /api/sellers/[slug]/orders', () => {
       body: { error: { message: 'Too many requests at once. Try again in a minute.' } },
     });
     expect(rateLimit).toHaveBeenCalledWith('seller_orders:198.51.100.4', PUBLIC_WRITE_LIMIT);
+    expect(sellerDeps).not.toHaveBeenCalled();
     expect(await db.select().from(sellerOrders)).toEqual([]);
   });
 });

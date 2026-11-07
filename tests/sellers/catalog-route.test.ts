@@ -48,12 +48,15 @@ const product = (sellerId: string, sku: string, changes: Partial<typeof products
 
 let db: Db;
 let raviId: string;
+/** The statements the database runs once the test's data is in. */
+let statements: string[];
 
 // The first createTestDb() in a file migrates the template database, which is slow on a busy machine.
 beforeAll(() => createTestDb(), 60_000);
 
 beforeEach(async () => {
-  db = await createTestDb();
+  statements = [];
+  db = await createTestDb({ logger: { logQuery: (query) => statements.push(query) } });
   vi.mocked(appDb).mockReturnValue(db);
   const [ravi, other] = await db
     .insert(sellers)
@@ -71,6 +74,7 @@ beforeEach(async () => {
     product(raviId, 'CUM-100', { stock: 0 }),
     product(other.id, 'CABLE-1', { category: 'electronics' }),
   ]);
+  statements.length = 0;
 });
 
 afterEach(() => {
@@ -126,7 +130,7 @@ describe('GET /api/sellers/[slug]/catalog', () => {
     });
   });
 
-  it('counts reads per address against the public read limit, and answers 429 past it', async () => {
+  it('counts reads per address against the public read limit, and answers 429 past it without reading the database', async () => {
     vi.mocked(rateLimit).mockReturnValueOnce(false);
 
     expect(await answer(await catalogOf('ravi-spices'))).toEqual({
@@ -134,5 +138,6 @@ describe('GET /api/sellers/[slug]/catalog', () => {
       body: { error: { message: 'Too many requests at once. Try again in a minute.' } },
     });
     expect(rateLimit).toHaveBeenCalledWith('seller_catalog:198.51.100.4', PUBLIC_READ_LIMIT);
+    expect(statements).toEqual([]);
   });
 });

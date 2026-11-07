@@ -145,13 +145,16 @@ describe('POST /api/receipts/verify', () => {
     });
   });
 
-  it('counts checks per address against the public read limit, and answers 429 past it', async () => {
+  it('counts checks per address against the public read limit, and answers 429 past it without reading the database', async () => {
     vi.mocked(rateLimit).mockReturnValueOnce(false);
+    const jws = await signReceipt(receiptFor(raviCart));
 
-    expect(await answer(await verify({ jws: 'x', cart: raviCart, sellerSlug: 'ravi-spices' }))).toEqual({
+    expect(await answer(await verify({ jws, cart: raviCart, sellerSlug: 'ravi-spices' }))).toEqual({
       status: 429,
       body: { error: { message: 'Too many requests at once. Try again in a minute.' } },
     });
     expect(rateLimit).toHaveBeenCalledWith('receipt_verify:198.51.100.4', PUBLIC_READ_LIMIT);
+    expect(sellerDeps).not.toHaveBeenCalled();
+    expect(statements).toEqual([]);
   });
 });

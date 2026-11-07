@@ -25,6 +25,12 @@ export type CatalogRejection = { line: number; reason: string };
 /** Data rows after this many are rejected. */
 export const ROW_LIMIT = 200;
 
+/**
+ * The largest CSV a seller may send, in UTF-8 bytes. `ROW_LIMIT` rows of plain text at the longest
+ * name and description the reader keeps come to about 0.4 MB, so a real catalog fits with room to spare.
+ */
+export const CSV_MAX_BYTES = 1024 * 1024;
+
 const NAME_MAX = 120;
 const DESCRIPTION_MAX = 2000;
 const SKU_MAX = 64;
@@ -54,11 +60,12 @@ type CsvRecord = { line: number; cells: string[]; unbalancedQuotes: boolean };
 
 /**
  * The listings in a seller's CSV, and the rows that cannot be listings with the line each starts on and
- * why. Only the first `ROW_LIMIT` data rows are read. The first row to use a SKU keeps it, even when that
- * row is rejected for another reason, so a later row with the same SKU is reported as a duplicate.
+ * why. Only the first `ROW_LIMIT` data rows are read; the rows after them are reported as one rejection,
+ * at the first of them, saying how many were left out. The first row to use a SKU keeps it, even when
+ * that row is rejected for another reason, so a later row with the same SKU is reported as a duplicate.
  */
 export function parseCatalogCsv(text: string): { rows: CatalogRow[]; rejected: CatalogRejection[] } {
-  const [header, ...records] = readRecords(text);
+  const { records: [header, ...records], leftOut } = readRecords(text, ROW_LIMIT + 1);
   if (header === undefined) return { rows: [], rejected: [{ line: 1, reason: 'the file is empty' }] };
 
   const columns = findColumns(header.cells);
@@ -70,11 +77,15 @@ export function parseCatalogCsv(text: string): { rows: CatalogRow[]; rejected: C
   const rows: CatalogRow[] = [];
   const rejected: CatalogRejection[] = [];
   const claimed = new Set<string>();
-  records.forEach((record, index) => {
-    const result = index < ROW_LIMIT ? readRow(record, header.cells.length, columns, claimed) : `row limit is ${ROW_LIMIT}`;
+  for (const record of records) {
+    const result = readRow(record, header.cells.length, columns, claimed);
     if (typeof result === 'string') rejected.push({ line: record.line, reason: result });
     else rows.push(result);
-  });
+  }
+  if (leftOut) {
+    const rowsLeftOut = leftOut.count === 1 ? '1 row from this line on was' : `${leftOut.count} rows from this line on were`;
+    rejected.push({ line: leftOut.line, reason: `row limit is ${ROW_LIMIT}: ${rowsLeftOut} left out` });
+  }
   return { rows, rejected };
 }
 
@@ -128,10 +139,15 @@ function readRow(record: CsvRecord, width: number, columns: Columns, claimed: Se
   };
 }
 
-/** Every record in the file that has a non-blank cell, with the line it starts on. */
-function readRecords(text: string): CsvRecord[] {
+/**
+ * The first `limit` records in the file that have a non-blank cell, with the line each starts on,
+ * and how many such records come after them, from which line. Records past the limit are only
+ * counted, so a long file costs no more memory than a short one.
+ */
+function readRecords(text: string, limit: number): { records: CsvRecord[]; leftOut: { line: number; count: number } | null } {
   const source = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   const records: CsvRecord[] = [];
+  let leftOut: { line: number; count: number } | null = null;
   let start = 0;
   let line = 1;
   Papa.parse<string[]>(source, {
@@ -139,7 +155,12 @@ function readRecords(text: string): CsvRecord[] {
     newline: '\n',
     step: ({ data, errors, meta }) => {
       if (data.some((cell) => cell.trim() !== '')) {
-        records.push({ line, cells: data, unbalancedQuotes: errors.some((error) => error.type === 'Quotes') });
+        if (records.length < limit) {
+          records.push({ line, cells: data, unbalancedQuotes: errors.some((error) => error.type === 'Quotes') });
+        } else {
+          leftOut ??= { line, count: 0 };
+          leftOut.count += 1;
+        }
       }
       // The record ends where the next one starts, so the line breaks it spans, including any inside
       // quoted fields, move the line count on to the next record.
@@ -147,7 +168,7 @@ function readRecords(text: string): CsvRecord[] {
       start = meta.cursor;
     },
   });
-  return records;
+  return { records, leftOut };
 }
 
 /** Spreadsheets in some locales put `;` or tabs between fields. The header line shows which a file uses. */

@@ -2,7 +2,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MAX_TURNS, RUN_FAILED } from '@/lib/agent/run';
 import { ATTACKS, type AttackId } from '@/lib/security/attacks';
-import { INTENT_CHECKS_PER_ATTACK, liveRefusal, maxModelCalls, replayLive, replayLiveAll } from '@/lib/security/live';
+import { INTENT_CHECKS_PER_ATTACK, liveRefusal, liveState, maxModelCalls, replayLive, replayLiveAll, RUN_STOPPED } from '@/lib/security/live';
+import type { LiveProposal } from '@/lib/security/results';
 import { fakeClaude, messageJson, type FakeToolUse } from '@/tests/helpers/fake-claude';
 import { createTestDb } from '@/tests/helpers/test-db';
 
@@ -192,6 +193,64 @@ describe('replayLive', () => {
     expect(result.calls).toBe(8);
     expect(result.proposals.map((p) => p.intent?.verdict)).toEqual(['consistent', 'consistent', 'consistent', 'unavailable']);
     expect(result.proposals[3]).toMatchObject({ finalVerdict: 'ASK', status: 'awaiting_approval' });
+  });
+});
+
+describe('liveState', () => {
+  const aimed = (changes: Partial<LiveProposal>): LiveProposal => ({
+    sellerSlug: 'ravis-spice-co',
+    items: [{ sku: 'TUR-100', quantity: 1 }],
+    rationale: 'Turmeric.',
+    targetsAttack: true,
+    gateVerdict: 'ALLOW',
+    intent: null,
+    finalVerdict: null,
+    status: 'proposed',
+    ...changes,
+  });
+
+  it('counts a proposal the attack wanted that Behest never decided as a failed run, not a stop', () => {
+    expect(liveState(attack('lookalike-seller'), [aimed({})], null)).toBe('failed');
+    expect(liveState(attack('lookalike-seller'), [aimed({ finalVerdict: 'BLOCK' }), aimed({})], null)).toBe('failed');
+  });
+
+  it('still counts an allowed or held proposal beside an undecided one', () => {
+    expect(liveState(attack('lookalike-seller'), [aimed({}), aimed({ finalVerdict: 'ASK' })], null)).toBe('flagged');
+    expect(liveState(attack('lookalike-seller'), [aimed({}), aimed({ finalVerdict: 'ALLOW' })], null)).toBe('passed');
+  });
+});
+
+describe('a live run that throws', () => {
+  const broken = { NODE_ENV: 'test' as const, ATTACK_LIVE: '1', ANTHROPIC_API_KEY: 'sk-test', CLAUDE_MODEL_SHOPPING_AGENT: 'no-such-model' };
+
+  it('is recorded as failed with a fixed message and its spend, instead of throwing', async () => {
+    const { fake, deps } = claudeWith([]);
+
+    const result = await replayLive({ ...deps, env: broken }, attack('ranking-whisper'));
+
+    expect(result).toEqual({
+      attack: 'ranking-whisper',
+      state: 'failed',
+      proposals: [],
+      summary: '',
+      error: RUN_STOPPED,
+      calls: 0,
+      costUsd: 0,
+    });
+    expect(fake.requests).toHaveLength(0);
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining('ranking-whisper'), expect.any(Error));
+  });
+
+  it('does not end the replay: the next attack still runs', async () => {
+    const { deps } = claudeWith([]);
+
+    const run = await replayLiveAll({ ...deps, env: broken }, [attack('ranking-whisper'), attack('budget-override')]);
+
+    expect(run.results.map((r) => [r.attack, r.state])).toEqual([
+      ['ranking-whisper', 'failed'],
+      ['budget-override', 'failed'],
+    ]);
+    expect(run.skipped).toEqual([]);
   });
 });
 

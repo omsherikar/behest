@@ -136,7 +136,7 @@ describe('POST /api/disputes/[id]/evidence', () => {
     [
       'a citation of no kind of evidence item',
       { ...NARRATIVE, claims: [{ text: 'It was paid.', evidenceIds: ['invoice'] }] },
-      'Cite evidence items by their ids: mandate, readback, receipt, cart, purchase_log, approval or tracking.',
+      'Cite evidence items by their ids: mandate, readback, receipt, cart, decision, purchase_log, approval or tracking.',
     ],
     ['a field a narrative does not have', { ...NARRATIVE, submitted: true }, 'Send the narrative as a summary and a list of claims.'],
   ])('answers 400 to %s, submitting nothing', async (_, body, message) => {

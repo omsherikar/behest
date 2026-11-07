@@ -57,6 +57,15 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
     setPrevious(states);
   }
 
+  /**
+   * When several steps change at once, as when a streamed proposal is decided, they arrive one
+   * after another in trace order, so the trace fills node by node. `offset` moves a step's rail
+   * ahead of its node.
+   */
+  const arrival = (step: TraceStep, offset = 0): CSSProperties => ({
+    animationDelay: `${Math.max(0, changed.indexOf(step) * PLAY_STEP_MS + offset)}ms`,
+  });
+
   return (
     // The trace runs across when it has room for five nodes side by side (42rem), and down the page
     // otherwise, whatever the window: in a narrow panel it reads down even on a wide screen.
@@ -81,17 +90,18 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                   className={`${STATE_TEXT[state]} ${changed.includes(step) ? 'motion-safe:animate-trace-arrive' : ''} ${
                     play ? 'motion-safe:animate-trace-play' : ''
                   }`}
-                  style={delay(0)}
+                  style={changed.includes(step) ? arrival(step) : delay(0)}
                 >
                   <StateGlyph shape={STATE_SHAPES[state]} pulse={state === 'current'} className="size-5" />
                 </span>
                 {next && (
                   <span aria-hidden className="relative mx-2 hidden h-0.5 flex-1 bg-line @2xl:block">
                     <span
+                      key={states[next]}
                       className={`absolute inset-0 origin-left transition-colors duration-300 ${
                         states[next] === 'not_reached' ? `border-t-2 ${RAIL.not_reached}` : RAIL[states[next]]
-                      } ${play ? 'motion-safe:animate-trace-rail-x' : ''}`}
-                      style={delay(PLAY_STEP_MS * 0.55)}
+                      } ${play || changed.includes(next) ? 'motion-safe:animate-trace-rail-x' : ''}`}
+                      style={changed.includes(next) ? arrival(next, -PLAY_STEP_MS * 0.45) : delay(PLAY_STEP_MS * 0.55)}
                     />
                   </span>
                 )}
@@ -140,10 +150,11 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                 // The rail on a phone: from under this node down to the next one, beside any open proof.
                 <span aria-hidden className="absolute top-8 bottom-0 left-[9px] w-0.5 bg-line @2xl:hidden">
                   <span
+                    key={states[next]}
                     className={`absolute inset-0 origin-top transition-colors duration-300 ${
                       states[next] === 'not_reached' ? `border-l-2 ${RAIL.not_reached}` : RAIL[states[next]]
-                    } ${play ? 'motion-safe:animate-trace-rail-y' : ''}`}
-                    style={delay(PLAY_STEP_MS * 0.55)}
+                    } ${play || changed.includes(next) ? 'motion-safe:animate-trace-rail-y' : ''}`}
+                    style={changed.includes(next) ? arrival(next, -PLAY_STEP_MS * 0.45) : delay(PLAY_STEP_MS * 0.55)}
                   />
                 </span>
               )}

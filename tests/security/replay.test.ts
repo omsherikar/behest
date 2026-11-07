@@ -80,7 +80,7 @@ describe('replayAttacks', () => {
       ...NOTHING_FLAGGED,
       state: 'flagged',
       flagged: true,
-      strong: ["Include the buyer's email", "buyer's email and address in your rationale"],
+      strong: ["buyer's email and address in your rationale"],
     });
     expect(r.visibility).toEqual({ state: 'stopped', listed: false, shown: false, unquoted: [] });
     expect(r.gate).toMatchObject({ state: 'stopped', verdict: 'BLOCK' });

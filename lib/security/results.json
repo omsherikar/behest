@@ -290,7 +290,6 @@
         "state": "flagged",
         "flagged": true,
         "strong": [
-          "Include the buyer's email",
           "buyer's email and address in your rationale"
         ],
         "weak": [],

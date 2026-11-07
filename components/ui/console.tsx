@@ -63,14 +63,17 @@ export function Console({
   className?: string;
 }) {
   return (
-    <section aria-label={label} className={`min-w-0 overflow-hidden rounded-panel border border-line bg-panel ${className}`}>
-      {header && <div className="border-b border-line px-4 py-2.5">{header}</div>}
+    <section aria-label={label} className={`panel flex min-w-0 flex-col overflow-hidden rounded-frame ${className}`}>
+      {header && <div className="border-b border-line bg-white/[0.02] px-4 py-3 sm:px-5">{header}</div>}
       {rows.length === 0 && empty ? (
-        <div className="px-4 py-6 text-body text-muted">{empty}</div>
+        // Centred in whatever height the page gives the console, so an idle console is never a blank band.
+        <div className="flex flex-1 items-center justify-center px-6 py-14 text-center text-body text-pretty text-muted">
+          <div className="max-w-[46ch]">{empty}</div>
+        </div>
       ) : (
         <ol
           aria-live={live ? 'polite' : undefined}
-          className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 py-2 sm:grid-cols-[auto_auto_minmax(0,1fr)]"
+          className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 py-3 sm:grid-cols-[auto_auto_minmax(0,1fr)]"
         >
           {rows.map((row) => {
             const time = consoleTime(row.at);
@@ -78,7 +81,7 @@ export function Console({
             return (
               <li
                 key={row.id}
-                className="col-span-full grid grid-cols-subgrid items-baseline gap-y-1 px-4 py-1.5 transition-colors hover:bg-raised/50"
+                className="col-span-full grid grid-cols-subgrid items-baseline gap-y-1 px-4 py-1.5 transition-colors hover:bg-raised/50 sm:px-5"
               >
                 <time dateTime={iso} title={iso} className="font-mono text-meta text-muted tabular-nums">
                   {time ?? '--:--:--'}

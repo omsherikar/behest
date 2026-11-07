@@ -1,11 +1,22 @@
 import { transformJSONSchema } from '@anthropic-ai/sdk/lib/transform-json-schema';
+import type { PayPalAgentToolkit } from '@paypal/agent-toolkit/openai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  paypalAgentToolkit,
-  paypalReadOnlyTools,
-  READ_ONLY_TOOLS,
-  type ToolkitLike,
-} from '@/lib/paypal/toolkit-bridge';
+import * as bridge from '@/lib/paypal/toolkit-bridge';
+import { paypalReadOnlyTools, READ_ONLY_TOOLS, type ToolkitLike } from '@/lib/paypal/toolkit-bridge';
+
+/** Every official toolkit built, in order, so a test can watch the one the bridge builds for itself. */
+const built = vi.hoisted((): unknown[] => []);
+
+vi.mock('@paypal/agent-toolkit/openai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@paypal/agent-toolkit/openai')>();
+  class RecordedToolkit extends actual.PayPalAgentToolkit {
+    constructor(...args: ConstructorParameters<typeof actual.PayPalAgentToolkit>) {
+      super(...args);
+      built.push(this);
+    }
+  }
+  return { ...actual, PayPalAgentToolkit: RecordedToolkit };
+});
 
 type ToolCall = Parameters<ToolkitLike['handleToolCall']>[0];
 type Reply = Awaited<ReturnType<ToolkitLike['handleToolCall']>>;
@@ -56,11 +67,12 @@ function fakeToolkit(names: readonly string[], reply: (call: ToolCall) => Reply 
   return { toolkit, calls };
 }
 
-/** The official toolkit as the bridge builds it, with stand-in credentials. Building it calls nothing. */
-function officialToolkit() {
+/** The official toolkit the bridge builds for itself, with stand-in credentials. Building it calls nothing. */
+function officialToolkit(): PayPalAgentToolkit {
   vi.stubEnv('PAYPAL_CLIENT_ID', 'client-id');
   vi.stubEnv('PAYPAL_CLIENT_SECRET', 'client-secret');
-  return paypalAgentToolkit();
+  paypalReadOnlyTools();
+  return built.at(-1) as PayPalAgentToolkit;
 }
 
 /** The tool named `name`, which the test expects to be there. */
@@ -84,6 +96,12 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+
+describe('the toolkit bridge', () => {
+  it('hands out no way to build the full toolkit, only the read-only tools', () => {
+    expect(Object.keys(bridge).sort()).toEqual(['READ_ONLY_TOOLS', 'paypalReadOnlyTools']);
+  });
 });
 
 describe('paypalReadOnlyTools', () => {

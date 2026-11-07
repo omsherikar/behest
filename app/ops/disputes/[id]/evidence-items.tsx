@@ -1,23 +1,137 @@
 import { evidenceAnchor, evidenceStyle } from '@/components/ops/evidence-style';
 import { JwsView } from '@/components/ui/jws-view';
+import { ProofFields } from '@/components/ui/proof-fields';
+import { ProofId } from '@/components/ui/proof-id';
+import { type BadgeTone, StatusBadge } from '@/components/ui/status-badge';
 import { consoleTime } from '@/lib/ui/format';
 import type { DraftItem } from '@/lib/ops-pages/dispute-outcomes';
-import { logTimeline, signedArtifact } from '@/lib/ops-pages/evidence';
+import {
+  decisionRecord,
+  logTimeline,
+  type PasskeyCheckResult,
+  type PasskeySignature,
+  passkeySignature,
+  signedArtifact,
+} from '@/lib/ops-pages/evidence';
 
 // The evidence items of a dispute's pack as a stack of panels, each one a citation can jump to. The
-// signed mandate and receipt are decoded under their facts, and the purchase log is laid out as a
-// timeline. Their text comes from Behest's records and quotes what buyers, sellers and PayPal wrote,
-// so everything is shown as plain text, wrapped anywhere so a long value never widens the page.
+// signed mandate and receipt are decoded under their facts, a passkey's signature on the mandate and
+// the decision record's hash are laid out as proof fields, and the purchase log as a timeline. Their
+// text comes from Behest's records and quotes what buyers, sellers and PayPal wrote, so everything is
+// shown as plain text, wrapped anywhere so a long value never widens the page.
 
 const prose = 'text-body whitespace-pre-wrap text-text wrap-anywhere';
 
+const CHECK_BADGES: Record<PasskeyCheckResult, { tone: BadgeTone; word: string }> = {
+  verified: { tone: 'seal', word: 'Verified' },
+  'not made': { tone: 'muted', word: 'Not made' },
+  failed: { tone: 'stop', word: 'Failed' },
+};
+
+const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** The fields shown above the fold, which the full list below leaves out. */
+const LEADING = new Set(['Credential id', 'Public key (COSE, base64url)', 'Passkey signature check']);
+
+/** The passkey's signature on the mandate: the check's result, Behest's binding signature, the key, then every field. */
+function PasskeyProof({ passkey }: { passkey: PasskeySignature }) {
+  const { check, behestSigned, credentialId, publicKey } = passkey;
+  const badge = check && CHECK_BADGES[check.result];
+  const rest = passkey.fields.filter(({ label }) => !LEADING.has(label) && !label.startsWith("Behest's signature"));
+  return (
+    <section aria-label="The passkey signature" className="grid gap-3 rounded-control border border-line bg-bg/50 p-3 sm:p-4">
+      <h4 className="text-meta font-medium text-muted">The passkey signature</h4>
+      <ProofFields
+        fields={[
+          {
+            label: 'Passkey check',
+            value:
+              check && badge ? (
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <StatusBadge tone={badge.tone} label="Passkey signature check">
+                    {badge.word}
+                  </StatusBadge>
+                  <span className="text-muted">{sentence(check.reason)}</span>
+                </span>
+              ) : (
+                <span className="text-muted">Not stated</span>
+              ),
+          },
+          {
+            label: 'Behest signature',
+            value:
+              behestSigned === null ? (
+                <span className="text-muted">Not stated</span>
+              ) : (
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <StatusBadge tone={behestSigned ? 'seal' : 'stop'} label="Behest's signature on the mandate">
+                    {behestSigned ? 'Verified' : 'Does not verify'}
+                  </StatusBadge>
+                  <span className="text-muted">It binds this passkey to the buyer&apos;s account.</span>
+                </span>
+              ),
+          },
+          {
+            label: 'Credential id',
+            value: credentialId ? <ProofId value={credentialId} label="Passkey credential id" /> : <span className="text-muted">Not recorded</span>,
+          },
+          {
+            label: 'Public key',
+            value: publicKey ? (
+              <ProofId value={publicKey} label="Passkey public key" />
+            ) : (
+              <span className="text-muted">Not in the signed mandate</span>
+            ),
+          },
+        ]}
+      />
+      {rest.length > 0 && (
+        <details className="group">
+          <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-control text-meta font-medium text-action hover:text-action-strong [&::-webkit-details-marker]:hidden">
+            Every field of the signature
+            <svg viewBox="0 0 16 16" aria-hidden className="size-3 transition-transform group-open:rotate-180">
+              <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </summary>
+          <div className="mt-3">
+            <ProofFields
+              fields={rest.map(({ label, value }) => ({
+                label,
+                value: /\s/.test(value) ? (
+                  <span className="whitespace-pre-wrap text-muted wrap-anywhere">{value}</span>
+                ) : (
+                  <span className="font-mono text-meta wrap-anywhere">{value}</span>
+                ),
+              }))}
+            />
+          </div>
+        </details>
+      )}
+    </section>
+  );
+}
+
 function ItemBody({ item }: { item: DraftItem }) {
-  const artifact = signedArtifact(item.body);
+  // A mandate a passkey signed ends with that signature; the signed mandate comes before it.
+  const signed = item.id === 'mandate' ? passkeySignature(item.body) : null;
+  const artifact = signedArtifact(signed?.text ?? item.body);
   if (artifact) {
     return (
       <div className="grid gap-3">
         {artifact.text && <p className={prose}>{artifact.text}</p>}
         <JwsView jws={artifact.jws} label={item.id === 'mandate' ? 'Signed mandate' : 'Signed receipt'} decoded="folded" token="short" />
+        {signed && <PasskeyProof passkey={signed.passkey} />}
+      </div>
+    );
+  }
+
+  const decision = item.id === 'decision' ? decisionRecord(item.body) : null;
+  if (decision) {
+    return (
+      <div className="grid gap-3">
+        {decision.text && <p className={prose}>{decision.text}</p>}
+        <ProofFields fields={[{ label: 'Decision record', value: <ProofId value={decision.hash} label="Decision record hash" /> }]} />
+        {decision.commitment && <p className={`${prose} text-muted`}>{decision.commitment}</p>}
       </div>
     );
   }

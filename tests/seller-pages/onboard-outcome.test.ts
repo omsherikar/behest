@@ -99,6 +99,14 @@ describe('a shop that was not onboarded', () => {
     });
   });
 
+  it('says the name is too close to a seller that exists when that is why the shop was refused', () => {
+    expect(onboardOutcome(409, { error: { code: 'name_taken', message: 'ignored' } })).toEqual({
+      ok: false,
+      message: 'A seller with a name too close to this one already exists. Choose another name.',
+      refresh: false,
+    });
+  });
+
   it('words every other answer in plain terms', () => {
     const cases: [number | null, string][] = [
       [null, 'Could not reach Behest. Check your connection and try again.'],

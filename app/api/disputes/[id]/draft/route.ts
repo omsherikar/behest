@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { connection, type NextRequest } from 'next/server';
 import { z } from 'zod';
-import { appDb, appPaypal, appUrl, llmDeps } from '@/lib/app-deps';
+import { appDb, appJwks, appPaypal, appUrl, llmDeps } from '@/lib/app-deps';
 import { disputes } from '@/lib/db/schema';
 import { draftNarrative } from '@/lib/disputes/narrative';
 import { assembleEvidencePack } from '@/lib/disputes/pack';
@@ -52,12 +52,13 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/dispute
   // Dispute ids are UUIDs; Postgres would refuse anything else as an error rather than find nothing.
   if (!z.guid().safeParse(id).success) return error(404, UNKNOWN);
 
-  // Every setting this route needs (APP_URL, the PayPal credentials and the Claude client) is read
-  // before anything is stored.
+  // Every setting this route needs (APP_URL, the PayPal credentials, the Claude client and the public
+  // key set the pack checks Behest's signatures against) is read before anything is stored.
   const base = appUrl();
   const paypal = appPaypal();
   const deps = llmDeps();
   const db = appDb();
+  const jwks = await appJwks();
 
   const [dispute] = await db
     .select({ paypalDisputeId: disputes.paypalDisputeId, purchaseId: disputes.purchaseId, submittedAt: disputes.submittedAt })
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/dispute
   if (!dispute.purchaseId) return error(409, UNMATCHED);
   if (dispute.submittedAt) return error(409, SUBMITTED);
 
-  const pack = await assembleEvidencePack(db, id, base);
+  const pack = await assembleEvidencePack(db, id, base, jwks);
   // Only while nothing is submitted, so a submission made since the check above keeps its pack.
   const stored = await db
     .update(disputes)

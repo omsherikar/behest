@@ -61,24 +61,52 @@ export const ReceiptPayload = z
         capturedAt: z.iso.datetime(),
       })
       .strict(),
+    /**
+     * Present when a shopping agent proposed the purchase: the hash of its decision record, what it
+     * looked at, chose and why. Sellers need not read it.
+     */
+    agent: z.object({ decisionHash: sha256Hex }).strict().optional(),
   })
   .strict();
 export type ReceiptPayload = z.infer<typeof ReceiptPayload>;
 
-export const MandatePayload = z
+/** The fields every signed mandate carries, however the buyer confirmed it. */
+const mandateFields = {
+  v: z.literal(1),
+  id: z.string().min(1),
+  iss: z.literal('behest'),
+  iat: issuedAt,
+  /** A hash of the buyer id, so the signed mandate does not reveal it. */
+  buyer: z.object({ ref: sha256Hex }).strict(),
+  policyHash: sha256Hex,
+  /** Hash of the plain-English readback the buyer confirmed. */
+  readbackHash: sha256Hex,
+  confirmedAt: z.iso.datetime(),
+  expiresAt: z.iso.datetime().nullable(),
+};
+
+/**
+ * The buyer's passkey that signed the mandate's hashes: everything a verifier needs to check that
+ * signature, so it needs nothing from Behest.
+ */
+export const MandatePasskey = z
   .object({
-    v: z.literal(1),
-    id: z.string().min(1),
-    iss: z.literal('behest'),
-    iat: issuedAt,
-    /** A hash of the buyer id, so the signed mandate does not reveal it. */
-    buyer: z.object({ ref: sha256Hex }).strict(),
-    policyHash: sha256Hex,
-    /** Hash of the plain-English readback the buyer confirmed. */
-    readbackHash: sha256Hex,
-    confirmedAt: z.iso.datetime(),
-    confirmation: z.literal('session'),
-    expiresAt: z.iso.datetime().nullable(),
+    /** The credential id, base64url, as the authenticator reports it. */
+    credentialId: z.string().min(1),
+    /** The COSE public key, base64url. */
+    publicKey: z.string().min(1),
+    /** The COSE algorithm of the key, such as -7 for ES256. */
+    alg: z.number().int(),
   })
   .strict();
+export type MandatePasskey = z.infer<typeof MandatePasskey>;
+
+/**
+ * A signed mandate. `confirmation` says how the buyer confirmed it: by a signed-in session alone, or
+ * also by signing its hashes with their passkey, which the mandate then names.
+ */
+export const MandatePayload = z.discriminatedUnion('confirmation', [
+  z.object({ ...mandateFields, confirmation: z.literal('session') }).strict(),
+  z.object({ ...mandateFields, confirmation: z.literal('passkey'), passkey: MandatePasskey }).strict(),
+]);
 export type MandatePayload = z.infer<typeof MandatePayload>;

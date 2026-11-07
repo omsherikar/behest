@@ -6,7 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { buildListings, screenRow } from '@/lib/catalog/build';
 import { parseCatalogCsv } from '@/lib/catalog/csv';
 import type { Db } from '@/lib/db/client';
-import { buyers, jobs, products, purchases, sellers, wallets } from '@/lib/db/schema';
+import { buyerPasskeys, buyers, jobs, products, purchases, sellers, wallets } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME, DEMO_SELLER_SLUG } from '@/lib/demo/personas';
 import { DemoBusy, RAVI_CATALOG_CSV, resetDemo, seedDemo } from '@/lib/demo/seed';
 import nextConfig from '@/next.config';
@@ -70,6 +70,7 @@ const NOTHING_REMOVED = {
   jobs: 0,
   mandates: 0,
   wallets: 0,
+  passkeys: 0,
 };
 
 let db: Db;
@@ -224,6 +225,7 @@ describe('resetDemo', () => {
         jobs: 1,
         mandates: 1,
         wallets: 0,
+        passkeys: 0,
       },
       seeded: SEEDED,
     });
@@ -247,6 +249,22 @@ describe('resetDemo', () => {
     });
     expect(await db.select().from(wallets)).toEqual([linked]);
     expect(await listings(db)).toEqual(SEEDED_LISTINGS);
+  });
+
+  it("clears the demo buyer's passkeys, so any visitor's device can register its own, and keeps other buyers'", async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    const [priya] = await db.select().from(buyers).where(eq(buyers.name, DEMO_BUYER_NAME));
+    const [other] = await db.insert(buyers).values({ name: 'Sam' }).returning();
+    await db.insert(buyerPasskeys).values([
+      { buyerId: priya.id, credentialId: 'cred-1', publicKey: 'pk-1' },
+      { buyerId: priya.id, credentialId: 'cred-2', publicKey: 'pk-2' },
+      { buyerId: other.id, credentialId: 'cred-3', publicKey: 'pk-3' },
+    ]);
+
+    const { removed } = await resetDemo(db, { payeeEmail: PAYEE });
+
+    expect(removed.passkeys).toBe(2);
+    expect(await db.select({ credentialId: buyerPasskeys.credentialId }).from(buyerPasskeys)).toEqual([{ credentialId: 'cred-3' }]);
   });
 
   it('removes the linked wallet too when full', async () => {

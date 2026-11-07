@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { connection, type NextRequest } from 'next/server';
 import { z } from 'zod';
-import { appDb, appPaypal, appUrl } from '@/lib/app-deps';
+import { appDb, appJwks, appPaypal, appUrl } from '@/lib/app-deps';
 import { disputes } from '@/lib/db/schema';
 import type { Narrative } from '@/lib/disputes/narrative';
 import { assembleEvidencePack, EVIDENCE_IDS, type EvidencePack } from '@/lib/disputes/pack';
@@ -96,6 +96,7 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/dispute
   const base = appUrl();
   const paypal = appPaypal();
   const db = appDb();
+  const jwks = await appJwks();
 
   const [dispute] = await db
     .select({ purchaseId: disputes.purchaseId, submittedAt: disputes.submittedAt })
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/dispute
   if (dispute.submittedAt) return refuse('already_submitted');
 
   const narrative = parsed.data;
-  const uncited = uncitedClaims(narrative, await assembleEvidencePack(db, id, base));
+  const uncited = uncitedClaims(narrative, await assembleEvidencePack(db, id, base, jwks));
   if (uncited) return error(400, uncited);
 
   try {

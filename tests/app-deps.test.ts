@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { buyers, sellers } from '@/lib/db/schema';
+import { buyers, llmCalls, sellers } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME } from '@/lib/demo/personas';
 import { generateSigningKey, loadSigningKey, publicJwks } from '@/lib/receipts/keys';
 import { createSigner } from '@/lib/receipts/sign';
@@ -176,6 +176,46 @@ describe('appDb and llmDeps', () => {
     expect(deps.db).toBe(db);
     expect(deps.claude).toBeInstanceOf(Anthropic);
     expect(Math.abs(deps.now().getTime() - Date.now())).toBeLessThan(1_000);
+  });
+});
+
+describe('purchaseDeps', () => {
+  it('hands the purchase flow the app database, PayPal, key, sellers, origin and clock, and checks intent on the model', async () => {
+    const app = await freshAppDeps();
+    const { getDb } = await import('@/lib/db/client');
+    const db = await createTestDb();
+    vi.mocked(getDb).mockReturnValue(db);
+    vi.stubEnv('PAYPAL_CLIENT_ID', 'client-id');
+    vi.stubEnv('PAYPAL_CLIENT_SECRET', 'client-secret');
+    vi.stubEnv('RECEIPT_SIGNING_KEY', keyA.pem);
+    vi.stubEnv('APP_URL', 'https://behest.example.com/');
+    vi.stubEnv('LLM_STUB', '1');
+
+    const deps = await app.purchaseDeps();
+
+    expect(deps.db).toBe(db);
+    expect(deps.paypal).toEqual(app.appPaypal());
+    expect(await deps.signer.jwks()).toEqual(await jwksOf(keyA.pem));
+    expect(deps.sellers.acceptAgentOrder).toEqual(expect.any(Function));
+    expect(deps.appUrl).toBe('https://behest.example.com');
+    expect(Math.abs(deps.now().getTime() - Date.now())).toBeLessThan(1_000);
+    const check = {
+      mandateText: 'Spices only',
+      readback: ['Spices only.'],
+      request: 'Buy turmeric',
+      cart: raviCart,
+      agentRationale: 'The buyer asked for turmeric.',
+    };
+    // LLM_STUB replays the recorded intent check, which is logged like any model call.
+    expect(await deps.intent(check)).toMatchObject({ verdict: 'consistent' });
+    expect(await db.select().from(llmCalls)).toEqual([expect.objectContaining({ route: 'intent_check', ok: true })]);
+  });
+
+  it('refuses to start without the PayPal credentials', async () => {
+    const { purchaseDeps } = await freshAppDeps();
+    vi.stubEnv('PAYPAL_CLIENT_ID', '');
+
+    await expect(purchaseDeps()).rejects.toThrow('PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET must be set (see .env.example)');
   });
 });
 

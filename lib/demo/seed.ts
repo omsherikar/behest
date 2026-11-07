@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { eq, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { demoBuyerId } from '@/lib/app-deps';
 import { screenRow } from '@/lib/catalog/build';
@@ -125,6 +125,12 @@ export type Removed = {
 
 export type ResetResult = { removed: Removed; seeded: SeedResult };
 
+/**
+ * How long after its last change a purchase still `charging` holds off a reset. One left longer is
+ * stuck, flagged by the periodic pass as `charge_stale`, and removed like the rest.
+ */
+const CHARGE_IN_PROGRESS_MS = 30 * 60 * 1000;
+
 /** Why a reset removed nothing: a purchase is being charged or a job is running, so a payment is under way. */
 export class DemoBusy extends Error {
   override name = 'DemoBusy';
@@ -141,15 +147,18 @@ export class DemoBusy extends Error {
  * needs the buyer to approve at PayPal in a browser; `full` removes it too. Buyers, sellers and
  * products stay, and so do the model call log, which the daily spend cap sums, and the webhook
  * events, which keep each PayPal event from being processed twice. Throws, removing nothing, when
- * the payee email is missing or not an email, and DemoBusy while a purchase is being charged or a
- * job is running, since wiping the demo then would cut a payment off halfway.
+ * the payee email is missing or not an email, and DemoBusy while a purchase that changed in the last
+ * 30 minutes is being charged or a job is running, since wiping the demo then would cut a payment off
+ * halfway. A purchase left `charging` for longer is stuck, so it does not hold the reset off: it is
+ * removed with its record, and any money PayPal still moves for it is checked at PayPal.
  */
 export async function resetDemo(db: Db, options: ResetOptions): Promise<ResetResult> {
   const payeeEmail = checkedPayeeEmail(options.payeeEmail);
   return db.transaction(async (tx) => {
     // Held until the reset commits, so no charge or job can start between this check and the deletes.
     await tx.execute(sql`lock table ${purchases}, ${jobs} in exclusive mode`);
-    const charging = await tx.$count(purchases, eq(purchases.status, 'charging'));
+    const chargingSince = new Date(Date.now() - CHARGE_IN_PROGRESS_MS);
+    const charging = await tx.$count(purchases, and(eq(purchases.status, 'charging'), gte(purchases.updatedAt, chargingSince)));
     const running = await tx.$count(jobs, eq(jobs.status, 'running'));
     if (charging > 0 || running > 0) throw new DemoBusy();
 

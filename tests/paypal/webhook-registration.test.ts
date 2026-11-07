@@ -12,8 +12,10 @@ const eventTypes = [
   { name: 'PAYMENT.CAPTURE.COMPLETED' },
   { name: 'PAYMENT.CAPTURE.DENIED' },
   { name: 'PAYMENT.CAPTURE.REFUNDED' },
+  { name: 'PAYMENT.CAPTURE.REVERSED' },
   { name: 'CUSTOMER.DISPUTE.CREATED' },
   { name: 'CUSTOMER.DISPUTE.UPDATED' },
+  { name: 'CUSTOMER.DISPUTE.RESOLVED' },
   { name: 'PAYMENT.PAYOUTS-ITEM.SUCCEEDED' },
   { name: 'PAYMENT.PAYOUTS-ITEM.FAILED' },
 ];
@@ -53,7 +55,7 @@ describe('webhook URL', () => {
 });
 
 describe('registering the webhook', () => {
-  it('lists the eight event types Behest acts on', () => {
+  it('lists the ten event types Behest acts on, the reversal and the dispute outcome included', () => {
     expect(WEBHOOK_EVENT_TYPES).toEqual(eventTypes.map(({ name }) => name));
   });
 

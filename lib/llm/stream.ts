@@ -5,7 +5,7 @@ import type {
   BetaRawMessageStreamEvent,
   BetaTool,
 } from '@anthropic-ai/sdk/resources/beta/messages';
-import { dailyCapUsd, type LlmCallRow, type LlmDeps, type LlmFailure, recordCall, spendCapFailure } from './client';
+import { type LlmCallRow, type LlmDeps, type LlmFailure, recordCall, spendCapFailure, spendCaps } from './client';
 import { type LlmRoute, ROUTE_HEADER, routeConfig } from './routes';
 import { billedUsage, FALLBACK_BETA, isMessage, salvagedUsage, stopFailure } from './structured';
 
@@ -49,7 +49,7 @@ export async function* streamReply(
 ): AsyncGenerator<LlmStreamEvent, void, undefined> {
   const env = deps.env ?? process.env;
   const { model, effort, maxTokens } = routeConfig(route, env);
-  const cap = dailyCapUsd(env);
+  const cap = spendCaps(route, env);
   const capped = await spendCapFailure(deps.db, deps.now(), cap);
   if (capped) {
     yield streamError('spend_cap', capped.detail ?? 'The daily model budget is spent');

@@ -315,6 +315,26 @@ describe('startApproval', () => {
     ]);
   });
 
+  it.each([
+    ['revoked', { status: 'revoked' as const }],
+    ['expired', { status: 'expired' as const }],
+    ['past its expiry', { expiresAt: new Date(NOW.getTime() - 1000) }],
+  ])('fails without asking PayPal when its mandate is %s by the time it goes to the buyer', async (_, change) => {
+    const s = await setUpAsk();
+    await s.db.update(mandates).set(change).where(eq(mandates.id, s.mandateId));
+
+    const outcome = await startApproval(s.deps, s.purchaseId);
+
+    expect(outcome).toMatchObject({ status: 'failed', approveUrl: null, receiptId: null });
+    expect(s.paypal.calls).toEqual([]);
+    expect(await jobKinds(s.db)).toEqual([]);
+    expect(await eventsOf(s.db, s.purchaseId)).toEqual([
+      { kind: 'status', data: { from: 'proposed', to: 'charging' } },
+      { kind: 'charge_refused', data: { reason: 'mandate no longer active' } },
+      { kind: 'status', data: { from: 'charging', to: 'failed' } },
+    ]);
+  });
+
   it('refuses a purchase that was not sent to its buyer, changing nothing', async () => {
     const { db, deps, paypal, purchaseId } = await setUpAsk();
     await db.update(purchases).set({ finalVerdict: 'ALLOW' }).where(eq(purchases.id, purchaseId));

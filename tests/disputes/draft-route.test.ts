@@ -60,6 +60,7 @@ const DETAIL: DisputeDetail = {
   captureId: 'CAPTURE-1',
   createTime: '2026-11-07T09:00:00Z',
   buyerNotes: BUYER_NOTES,
+  outcome: null,
 };
 
 const AUTHORIZED = { text: 'The buyer confirmed a mandate allowing $60 a month on groceries and spices.', evidenceIds: ['mandate'] };

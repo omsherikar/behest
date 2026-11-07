@@ -298,6 +298,26 @@ describe('resetDemo', () => {
     expect(await rowCounts(db)).toEqual(before);
   });
 
+  it('refuses while a purchase changed in the last 30 minutes is being charged', async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    await addDemoActivity(db);
+    await db.update(purchases).set({ status: 'charging', updatedAt: new Date(Date.now() - 29 * 60 * 1000) });
+
+    await expect(resetDemo(db, { payeeEmail: PAYEE })).rejects.toBeInstanceOf(DemoBusy);
+    expect(await db.$count(purchases)).toBe(1);
+  });
+
+  it('removes a purchase left charging for more than 30 minutes like any other', async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    await addDemoActivity(db);
+    await db.update(purchases).set({ status: 'charging', updatedAt: new Date(Date.now() - 31 * 60 * 1000) });
+
+    const { removed } = await resetDemo(db, { payeeEmail: PAYEE });
+
+    expect(removed.purchases).toBe(1);
+    expect(await db.$count(purchases)).toBe(0);
+  });
+
   it('refuses while a job is running, and removes nothing', async () => {
     await seedDemo(db, { payeeEmail: PAYEE });
     await addDemoActivity(db);

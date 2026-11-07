@@ -8,6 +8,13 @@
       "when": 1793969521547,
       "tag": "0000_initial_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1794051351141,
+      "tag": "0001_passkeys_and_decision_records",
+      "breakpoints": true
     }
   ]
 }

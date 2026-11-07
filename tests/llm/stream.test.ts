@@ -119,6 +119,18 @@ it('sends nothing and ends with a spend_cap error once the daily cap is reached'
   expect(await db.select().from(llmCalls)).toHaveLength(1);
 });
 
+it("sends nothing and ends with a spend_cap error once the analyst's own daily cap is spent", async () => {
+  const { fake, stream } = await setup([]);
+  await recordCall(db, { route: 'studio_analyst', model: 'claude-opus-5-5', effort: 'low', ok: true, costUsd: 1, createdAt: NOW });
+
+  const events = await collect(stream());
+
+  expect(events).toEqual([
+    { type: 'error', error: { type: 'spend_cap', message: 'Spent $1 of the $1 daily model budget for studio_analyst' } },
+  ]);
+  expect(fake.requests).toHaveLength(0);
+});
+
 it('ends a stream that fails part way with an api_error event and logs what it spent', async () => {
   const recorded = recordedStream('error-turn');
   const { stream } = await setup([streamed(recorded)]);

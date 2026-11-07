@@ -209,7 +209,7 @@ export async function POST(request: NextRequest) {
     return error(429, 'Too many questions at once. Try again in a minute.');
   }
 
-  // The largest turn accepted: about a quarter of a million tokens.
+  // The largest turn accepted: 256 KiB, about 65 thousand tokens.
   const text = await readBody(request, MAX_BODY_BYTES);
   if (text === null) return error(413, 'This conversation is too long for the analyst. Start a new one.');
   const read = readTurn(text);

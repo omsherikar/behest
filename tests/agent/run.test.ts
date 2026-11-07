@@ -6,6 +6,7 @@ import { SHOPPING_SYSTEM_PROMPT } from '@/lib/agent/prompt';
 import { type AgentEvent, runShoppingAgent } from '@/lib/agent/run';
 import type { MarketSearch } from '@/lib/agent/tools';
 import { buyers, llmCalls, mandates, products, purchases, receipts, sellers, wallets, type MandateStatus } from '@/lib/db/schema';
+import { DecisionRecord } from '@/lib/domain/decision';
 import { createClaude, recordCall } from '@/lib/llm/client';
 import type { IntentInput, IntentResult, PurchaseDeps } from '@/lib/purchases/deps';
 import { hashOf, sha256Hex } from '@/lib/receipts/canonical';
@@ -353,6 +354,25 @@ describe('runShoppingAgent', () => {
     expect(records[0].choice.items).toEqual([{ sku: 'TUR-100', quantity: 1 }]);
     expect(records[1].steps.map((step) => step.tool)).toEqual(['search_sellers', 'get_product']);
     expect(records[1]).toMatchObject({ choice: { items: [{ sku: 'GAR-200', quantity: 1 }] }, rationale: 'Garam masala too.' });
+  });
+
+  it('tells the agent its proposal failed, and stores nothing, when its decision record is not one', async () => {
+    const s = await setUp([messageJson({ toolUses: [proposeCall] }), messageJson({ text: SUMMARY })]);
+    // A record the tools build always parses, so the parse is made to refuse it here.
+    vi.spyOn(DecisionRecord, 'parse').mockImplementationOnce(() => {
+      throw new Error('not a decision record');
+    });
+
+    const result = await s.run();
+
+    const sent = s.fake.requests[1].body.messages as { role: string; content: { type: string; content: string }[] }[];
+    expect(sent[2].content[0]).toMatchObject({
+      type: 'tool_result',
+      content: 'Behest could not finish this proposal. Do not propose it again; ask the buyer to check their ledger.',
+    });
+    expect(result.outcomes).toEqual([]);
+    expect(await s.db.select().from(purchases)).toEqual([]);
+    expect(console.error).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('propose_purchase failed'));
   });
 
   it('gives the agent the market search it is handed', async () => {

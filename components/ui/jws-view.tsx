@@ -62,7 +62,8 @@ export function JwsView({ jws, label = 'Signed receipt', actions }: { jws: strin
           {label} <span className="font-normal text-muted">compact JWS</span>
         </p>
         <div className="flex items-center gap-2">
-          {actions}
+          {/* Wrapped: a node passed in from a server page must not share an array with siblings. */}
+          {actions && <div className="flex items-center gap-2">{actions}</div>}
           <CopyButton value={jws.trim()} label="JWS" />
         </div>
       </div>

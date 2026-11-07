@@ -161,7 +161,7 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                     Step {index + 1}, {STEP_NAMES[step]}: {STATE_WORDS[state].toLowerCase()}
                   </span>
                 </p>
-                {proof[step]}
+                <div className="min-w-0">{proof[step]}</div>
               </div>
             )}
           </li>

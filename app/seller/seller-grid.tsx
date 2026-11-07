@@ -82,24 +82,27 @@ const defaultColDef: ColDef = { filter: true };
  * it; without such a column every column widens in proportion. A grid narrower than its content
  * scrolls sideways instead of cutting a header.
  */
-function fitColumns(api: GridApi, box: HTMLElement | null) {
-  api.autoSizeAllColumns();
-  const room = box?.querySelector('.ag-body-viewport')?.clientWidth ?? 0;
+function fillColumns(api: GridApi, box: HTMLElement | null) {
+  // The scrolling area the columns sit in (`ag-grid-viewport` in AG Grid 36, `ag-body-viewport` before).
+  const room = box?.querySelector('.ag-grid-viewport, .ag-body-viewport')?.clientWidth ?? 0;
   const columns = api.getAllDisplayedColumns();
   const used = columns.reduce((sum, column) => sum + column.getActualWidth(), 0);
   if (room === 0 || used >= room) return;
   const fill = (column: (typeof columns)[number]) => (column.getColDef().context as { fill?: boolean } | undefined)?.fill === true;
-  if (!columns.some(fill)) {
-    api.sizeColumnsToFit();
-    return;
-  }
-  // Every other column keeps the width its content needs.
+  const anyFill = columns.some(fill);
+  // AG Grid spreads the room from the columns' default widths, so each column's content width is
+  // its floor: no column ends narrower than its content. With a fill column, the others stay put.
   api.sizeColumnsToFit({
-    columnLimits: columns
-      .filter((column) => !fill(column))
-      .map((column) => ({ key: column.getColId(), minWidth: column.getActualWidth(), maxWidth: column.getActualWidth() })),
+    columnLimits: columns.map((column) => {
+      const width = column.getActualWidth();
+      return anyFill && !fill(column) ? { key: column.getColId(), minWidth: width, maxWidth: width } : { key: column.getColId(), minWidth: width };
+    }),
   });
 }
+
+/** AG Grid sizes the columns to their content once the rows are drawn; filling waits for that. */
+const autoSizeStrategy = { type: 'fitCellContents' } as const;
+
 /** Rows keep their database id as the grid's row id. One function for every render: AG Grid reads it once. */
 function rowId<Row extends { id: string }>({ data }: GetRowIdParams<Row>): string {
   return data.id;
@@ -123,6 +126,8 @@ export function SellerGrid<Row extends { id: string }>({
 }) {
   const [search, setSearch] = useState('');
   const box = useRef<HTMLDivElement>(null);
+  /** Whether the columns have been sized to their content once. */
+  const sized = useRef(false);
   // AG Grid has no option for the grid's accessible name. It sets role="grid" on one of its own
   // elements, so the name goes on whichever element carries that role once the grid is ready.
   const nameGrid = useCallback(() => {
@@ -150,8 +155,17 @@ export function SellerGrid<Row extends { id: string }>({
             quickFilterText={search}
             enableCellTextSelection
             onGridReady={nameGrid}
-            onFirstDataRendered={(event) => fitColumns(event.api, box.current)}
-            onGridSizeChanged={(event) => fitColumns(event.api, box.current)}
+            autoSizeStrategy={autoSizeStrategy}
+            // A new width sizes the columns to their content again, which then fills the width again.
+            // Before the first sizing, when no row is drawn yet, there is nothing to measure.
+            onGridSizeChanged={(event) => {
+              if (sized.current) event.api.autoSizeAllColumns();
+            }}
+            onColumnResized={(event) => {
+              if (!event.finished || event.source !== 'autosizeColumns') return;
+              sized.current = true;
+              fillColumns(event.api, box.current);
+            }}
             onRowClicked={onOpen ? (event) => event.data && onOpen(event.data) : undefined}
             onCellKeyDown={
               onOpen

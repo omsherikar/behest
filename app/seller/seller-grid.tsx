@@ -1,8 +1,8 @@
 'use client';
 
-// The AG Grid behind the seller's catalog and orders pages, styled like the app's other grids
-// (app/(endpoints)/data-grid.tsx). Each page defines its columns in its own client component, so
-// they can format values and render cells; the rows come from the server.
+// The AG Grid behind the seller's catalog and orders pages and the operator's disputes list, styled
+// like the app's other grids (app/(endpoints)/data-grid.tsx). Each page defines its columns in its
+// own client component, so they can format values and render cells; the rows come from the server.
 
 import { useCallback, useRef, useState } from 'react';
 import {

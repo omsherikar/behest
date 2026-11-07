@@ -816,6 +816,20 @@ describe('a capture reported for an approval it does not fit', () => {
     return s;
   }
 
+  it('logs a pending capture of another order on a purchase charging its own, recording nothing', async () => {
+    const s = await setUpAwaiting({ approve: false });
+    await s.db.update(purchases).set({ status: 'charging' }).where(eq(purchases.id, s.purchaseId));
+    const other = await otherOrder(s.paypal);
+    s.paypal.failNext('captureOrder', { status: 'PENDING' });
+    const before = await purchaseRow(s.db, s.purchaseId);
+
+    await takePayment(s.deps, s.purchaseId, { orderId: other, requestId: 'another-purchase:capture' });
+
+    const [{ captureId }] = s.paypal.captures;
+    expect(await purchaseRow(s.db, s.purchaseId)).toEqual(before);
+    expect((await eventsOf(s.db, s.purchaseId)).at(-1)).toEqual({ kind: 'capture_unmatched', data: { captureId } });
+  });
+
   it.each(['COMPLETED', 'PENDING'] as const)(
     'logs a %s capture of another order on a purchase awaiting approval, recording nothing',
     async (status) => {

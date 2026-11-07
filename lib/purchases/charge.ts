@@ -363,7 +363,8 @@ async function recordPendingCapture(db: Db, purchaseId: string, { orderId, captu
     if (!purchase) throw new Error(`there is no purchase ${purchaseId}`);
     if (purchase.captureId === captureId) return;
     const approvedSince = approvedSinceReopen(purchase, orderId);
-    if (!approvedSince && !(purchase.status === 'charging' && purchase.captureId === null)) {
+    const fitsCharging = purchase.status === 'charging' && purchase.captureId === null && (purchase.orderId ?? orderId) === orderId;
+    if (!approvedSince && !fitsCharging) {
       await appendEvent(tx, purchaseId, 'capture_unmatched', { captureId });
       return;
     }

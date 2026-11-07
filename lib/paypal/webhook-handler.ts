@@ -121,17 +121,21 @@ async function orderApproved(deps: WebhookDeps, seen: Seen, orderId: string): Pr
 
 /**
  * PayPal completed a capture. The purchase is the one holding the capture id, such as a saved-wallet
- * charge PayPal held as PENDING. Failing that, it is the purchase named by the capture's invoice id,
- * but only while it is `charging` with no capture recorded and holds the capture's order. completeCapture
- * then records the capture, under the purchase lock, issues the receipt and delivers the order; a
- * capture it has already recorded is a quiet no-op.
+ * charge PayPal held as PENDING, as long as the event names no other order than the one it holds.
+ * Failing that, it is the purchase named by the capture's invoice id, but only while it is
+ * `charging` with no capture recorded and holds the capture's order. completeCapture then records
+ * the capture, under the purchase lock, issues the receipt and delivers the order; a capture it has
+ * already recorded is a quiet no-op.
  */
 async function captureCompleted(deps: WebhookDeps, seen: Seen, capture: z.infer<typeof CaptureResource>): Promise<void> {
   const { id: captureId, invoice_id: invoiceId } = capture;
   const eventOrderId = capture.supplementary_data?.related_ids?.order_id;
   const holder = await purchaseHolding(deps.db, captureId);
-  const orderId = eventOrderId ?? holder?.orderId;
-  if (holder && orderId) {
+  if (holder) {
+    const orderId = holder.orderId ?? eventOrderId;
+    if (!orderId || (eventOrderId !== undefined && eventOrderId !== orderId)) {
+      return ignore(seen, `purchase ${holder.id} holds capture ${captureId}, but not under the order the event names`);
+    }
     await completeCapture(deps, holder.id, { orderId, captureId });
     return;
   }

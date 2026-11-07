@@ -238,6 +238,17 @@ describe('handleWebhook: PAYMENT.CAPTURE.COMPLETED', () => {
     expect(warn).toHaveBeenCalledOnce();
   });
 
+  it('moves nothing, however often it comes, for a held capture the event puts under another order', async () => {
+    const s = await setUpPendingCapture();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const before = await snapshot(s);
+
+    await handleTwice(s, captureEvent('PAYMENT.CAPTURE.COMPLETED', { captureId: s.captureId, orderId: 'ORDER-OTHER', invoiceId: s.purchaseId }));
+
+    expect(await snapshot(s)).toEqual(before);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
   it('never matches a saved-wallet charge by invoice id, since Behest has stored no order for it', async () => {
     const s = await setUp('proposed');
     s.paypal.failNext('chargeSavedWallet', 'lost_response');

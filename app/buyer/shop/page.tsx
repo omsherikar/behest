@@ -41,9 +41,9 @@ function RecentPurchases({ rows }: { rows: LedgerRow[] }) {
       {rows.length === 0 ? (
         <p className="mt-3 text-body text-muted">Nothing yet. What your agent proposes appears here and in your ledger.</p>
       ) : (
-        <ul className="mt-3 divide-y divide-line">
+        <ul className="mt-3 grid divide-y divide-line sm:grid-cols-2 sm:gap-x-8 sm:divide-y-0">
           {rows.slice(0, RECENT).map((row) => (
-            <li key={row.id} className="grid gap-1.5 py-3">
+            <li key={row.id} className="grid gap-1.5 py-3 sm:border-t sm:border-line">
               <div className="flex items-baseline justify-between gap-3">
                 <span className="min-w-0 truncate text-body text-text">{row.seller}</span>
                 <Money cents={row.totalCents} mono className="shrink-0 text-meta text-text" />
@@ -80,17 +80,18 @@ export default async function ShopPage() {
           </Link>
         }
       />
-      {/* Source order is the phone's: the mandate, the console, then recent purchases. */}
+      {/* Source order is the phone's: the mandate, the console, then recent purchases, which sit under
+          the console from 1024 px so the two columns end close together. */}
       <div className="grid gap-x-6 gap-y-6 lg:grid-cols-12 lg:grid-rows-[auto_1fr] xl:gap-x-8">
-        <aside aria-label="Your mandate" className="min-w-0 lg:col-span-4 lg:col-start-9 lg:row-start-1 lg:self-start">
+        <aside aria-label="Your mandate" className="min-w-0 lg:col-span-4 lg:col-start-9 lg:row-span-2 lg:row-start-1 lg:self-start">
           <MandatePanel mandate={mandate} />
         </aside>
-        <div className="min-w-0 lg:col-span-8 lg:col-start-1 lg:row-span-2 lg:row-start-1">
+        <div className="min-w-0 lg:col-span-8 lg:col-start-1 lg:row-start-1">
           <ShopRun />
         </div>
-        <aside aria-label="Recent purchases" className="min-w-0 lg:col-span-4 lg:col-start-9 lg:row-start-2 lg:self-start">
+        <section aria-label="Recent purchases" className="min-w-0 lg:col-span-8 lg:col-start-1 lg:row-start-2 lg:self-start">
           <RecentPurchases rows={recent} />
-        </aside>
+        </section>
       </div>
     </>
   );

@@ -5,10 +5,12 @@ import { type FormEvent, useState } from 'react';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { isDeclineAnswer } from '@/lib/mandate/decline';
 import { SignWithPasskey } from './passkey-sign';
+import { post, type RequestFailed, type Signed } from './requests';
 
 // The buyer writes a mandate, Behest reads back the policy compiled from it, the buyer answers any
 // open questions until none is left, then confirms, which signs the mandate, and links PayPal unless
-// a wallet is already linked. The buyer can also confirm by signing the mandate with their passkey.
+// a wallet is already linked. The buyer can also confirm with a passkey registered to their account
+// signing the mandate.
 // Answers from every round are sent again with each compile, which keeps no state between calls.
 
 type Question = { id: string; question: string; options: string[] };
@@ -31,41 +33,6 @@ const primaryButton =
   'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-white transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
 const secondaryButton =
   'inline-flex h-10 items-center justify-center rounded-full border border-pp-blue px-5 font-semibold text-pp-blue transition-colors hover:bg-pp-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
-
-/** An error message from a route, as a sentence: capitalized, with a full stop. */
-function sentence(message: string): string {
-  const text = message.charAt(0).toUpperCase() + message.slice(1);
-  return /[.!?]$/.test(text) ? text : `${text}.`;
-}
-
-/** A failed request, with a message the buyer can read and the HTTP status, or null when nothing came back. */
-class RequestFailed extends Error {
-  constructor(
-    message: string,
-    readonly status: number | null,
-  ) {
-    super(message);
-  }
-}
-
-/** POSTs JSON to a route and returns its JSON body, or throws RequestFailed. */
-async function post<T>(url: string, body: unknown): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  } catch {
-    throw new RequestFailed('Could not reach Behest. Check your connection and try again.', null);
-  }
-  const json: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
-    const message = (json as { error?: { message?: unknown } } | null)?.error?.message;
-    throw new RequestFailed(typeof message === 'string' ? sentence(message) : 'Something went wrong. Try again.', response.status);
-  }
-  return json as T;
-}
-
-/** What a confirm returns. `approveUrl` is null when the buyer's wallet is already linked. */
-type Signed = { mandateId: string; approveUrl: string | null };
 
 export function MandateForm({ replacing }: { replacing: boolean }) {
   const router = useRouter();
@@ -321,8 +288,8 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
               <p className="mt-2 text-sm text-pp-muted">Answer the questions above before you confirm.</p>
             )}
             <p className="mt-2 text-sm text-pp-muted">
-              Signing with a passkey shows that your own device approved this exact mandate. Confirming without one rests on
-              your signed-in session alone.
+              Signing with a passkey adds your passkey&apos;s signature over this exact mandate. Confirming without one rests
+              on your signed-in session alone.
             </p>
           </div>
         </div>

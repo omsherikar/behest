@@ -8,7 +8,6 @@ import { findSeller } from '@/lib/seller-pages/seller';
 import { NotOnboarded } from '../not-onboarded';
 import { requireSeller } from '../require-seller';
 import { CatalogGrid } from './catalog-grid';
-import { fillWindow } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/ui/page-header';
 
@@ -27,7 +26,7 @@ export default async function SellerCatalogPage() {
   const hidden = rows.filter((row) => row.hiddenReason !== null).length;
 
   return (
-    <div className={fillWindow}>
+    <div className="flex flex-1 flex-col">
       <PageHeader
         id="catalog-heading"
         title="Your catalog"
@@ -40,7 +39,7 @@ export default async function SellerCatalogPage() {
       {!seller ? (
         <NotOnboarded />
       ) : rows.length > 0 ? (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div>
           <CatalogGrid rows={rows} labelledBy="catalog-heading" />
         </div>
       ) : (

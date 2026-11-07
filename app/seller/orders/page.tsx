@@ -8,7 +8,6 @@ import { findSeller } from '@/lib/seller-pages/seller';
 import { NotOnboarded } from '../not-onboarded';
 import { requireSeller } from '../require-seller';
 import { OrdersGrid } from './orders-grid';
-import { fillWindow } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/ui/page-header';
 
@@ -30,7 +29,7 @@ export default async function SellerOrdersPage() {
   const accepted = rows.filter((row) => row.status === 'accepted').length;
 
   return (
-    <div className={fillWindow}>
+    <div className="flex flex-1 flex-col">
       <PageHeader
         id="orders-heading"
         title="Your orders"
@@ -43,7 +42,7 @@ export default async function SellerOrdersPage() {
       {!seller ? (
         <NotOnboarded />
       ) : rows.length > 0 ? (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div>
           <OrdersGrid rows={rows} labelledBy="orders-heading" sellerSlug={seller.slug} />
         </div>
       ) : (

@@ -9,29 +9,10 @@ import { TopBar } from './top-bar';
 // sections and the persona switcher, then the page in the 1200 px container. The bar sticks to the
 // top while the page scrolls.
 
-/**
- * The header's height: a 12 px gap above the bar, then the 64 px bar from 1024 px, or below that
- * the bar's two rows, its wordmark and switcher over the section nav.
- */
-const SHELL_HEIGHT = '[--shell-h:7.75rem] lg:[--shell-h:4.75rem]';
-
-/**
- * For a page whose content should fill the window below the header, such as one built around a
- * grid: at least 36rem tall, so the grid keeps room on a phone, and otherwise exactly the space
- * left under the header and the page's 2rem padding above and below.
- */
-export const fillWindow = 'flex h-[max(36rem,calc(100dvh-var(--shell-h)-4rem))] flex-col';
-
-/**
- * The same from 1024 px only, for a page with more above its grid than a phone's window holds, such
- * as the ledger's figures: on a phone the page scrolls and the grid keeps a height of its own.
- */
-export const fillWindowFromLg = 'flex flex-col lg:h-[max(36rem,calc(100dvh-var(--shell-h)-4rem))]';
-
 export function AppShell({ persona, children }: { persona: Persona; children: ReactNode }) {
   const info = personaInfo(persona);
   return (
-    <div className={`flex min-h-dvh flex-col ${SHELL_HEIGHT}`}>
+    <div className="flex min-h-dvh flex-col">
       <a
         href="#content"
         className="sr-only rounded-full bg-text px-4 py-2 font-medium text-on-fill focus:not-sr-only focus:fixed focus:top-3 focus:left-4 focus:z-50"

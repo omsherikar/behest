@@ -5,7 +5,6 @@ import { plural } from '@/lib/domain/words';
 import { disputeRows } from '@/lib/ops-pages/disputes';
 import { requireOperator } from '../require-operator';
 import { DisputesGrid } from './disputes-grid';
-import { fillWindow } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/ui/empty-state';
 import { PageHeader } from '@/components/ui/page-header';
 
@@ -25,14 +24,14 @@ export default async function DisputesPage() {
   const submitted = rows.filter((row) => row.submitted).length;
 
   return (
-    <div className={fillWindow}>
+    <div className="flex flex-1 flex-col">
       <PageHeader
         id="disputes-heading"
         title="Disputes"
         purpose={`${plural(rows.length, 'dispute')} opened by buyers at PayPal, ${submitted} answered with evidence. Behest answers each one as the merchant of record, from its signed records. Open a dispute to draft, review and submit its answer.`}
       />
       {rows.length > 0 ? (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <div>
           <DisputesGrid rows={rows} labelledBy="disputes-heading" />
         </div>
       ) : (

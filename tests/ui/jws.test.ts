@@ -72,15 +72,40 @@ describe('jsonTokens', () => {
 });
 
 describe('jsonLines', () => {
+  const text = (lines: ReturnType<typeof jsonLines>) =>
+    lines.map((line) => ' '.repeat(line.indent) + line.tokens.map((token) => token.text).join('')).join('\n');
+
+  it('gives back the same JSON value', () => {
+    expect(JSON.parse(text(jsonLines(payload)))).toEqual(payload);
+    const receipt = { decision: { outcomes: Array.from({ length: 12 }, (_, i) => ({ result: 'pass', rule: `rule_${i}` })) } };
+    expect(JSON.parse(text(jsonLines(receipt)))).toEqual(receipt);
+  });
+
+  it('keeps a short object on one line and breaks a long one', () => {
+    const lines = jsonLines({ decision: { outcomes: [{ result: 'pass', rule: 'mandate_active' }, { result: 'ask', rule: 'ask_threshold' }] } });
+    expect(text(lines)).toBe(
+      [
+        '{',
+        '  "decision": {',
+        '    "outcomes": [',
+        '      { "result": "pass", "rule": "mandate_active" },',
+        '      { "result": "ask", "rule": "ask_threshold" }',
+        '    ]',
+        '  }',
+        '}',
+      ].join('\n'),
+    );
+  });
+
   it('gives each line its indentation and its tokens', () => {
     const lines = jsonLines({ mandate: { policyHash: 'f'.repeat(64) } });
     expect(lines.map((line) => line.indent)).toEqual([0, 2, 4, 2, 0]);
     expect(lines[2].tokens.map((token) => token.kind)).toEqual(['key', 'punctuation', 'punctuation', 'string']);
   });
 
-  it('gives back the indented JSON when each line is indented and joined', () => {
-    const lines = jsonLines(payload);
-    const json = lines.map((line) => ' '.repeat(line.indent) + line.tokens.map((token) => token.text).join('')).join('\n');
-    expect(json).toBe(JSON.stringify(payload, null, 2));
+  it('writes empty objects, arrays and plain values on one line', () => {
+    expect(text(jsonLines({}))).toBe('{}');
+    expect(text(jsonLines([]))).toBe('[]');
+    expect(text(jsonLines('EdDSA'))).toBe('"EdDSA"');
   });
 });

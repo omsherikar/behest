@@ -76,16 +76,49 @@ export function jsonTokens(value: unknown): JsonToken[] {
 
 export type JsonLine = { indent: number; tokens: JsonToken[] };
 
+/** How wide a line of formatted JSON may be before an object or array breaks over several lines. */
+const JSON_WIDTH = 56;
+
+/** A value as JSON on one line, with a space after each colon and comma and inside braces. */
+function inlineJson(value: unknown): string {
+  if (Array.isArray(value)) return value.length === 0 ? '[]' : `[${value.map(inlineJson).join(', ')}]`;
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.entries(value).filter(([, item]) => item !== undefined);
+    if (entries.length === 0) return '{}';
+    return `{ ${entries.map(([key, item]) => `${JSON.stringify(key)}: ${inlineJson(item)}`).join(', ')} }`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+/** The lines of `value` at `indent`, after `lead` (its key) and before `trail` (its comma). */
+function formatLines(value: unknown, indent: number, lead: string, trail: string): string[] {
+  const pad = ' '.repeat(indent);
+  const inline = inlineJson(value);
+  const container = value !== null && typeof value === 'object';
+  if (!container || pad.length + lead.length + inline.length + trail.length <= JSON_WIDTH) return [`${pad}${lead}${inline}${trail}`];
+  const array = Array.isArray(value);
+  const entries: [string | null, unknown][] = array
+    ? (value as unknown[]).map((item) => [null, item])
+    : Object.entries(value as object).filter(([, item]) => item !== undefined);
+  const [open, close] = array ? ['[', ']'] : ['{', '}'];
+  return [
+    `${pad}${lead}${open}`,
+    ...entries.flatMap(([key, item], index) =>
+      formatLines(item, indent + 2, key === null ? '' : `${JSON.stringify(key)}: `, index < entries.length - 1 ? ',' : ''),
+    ),
+    `${pad}${close}${trail}`,
+  ];
+}
+
 /**
  * A value as indented JSON, one entry per line: how many spaces the line is indented and the
- * tokens after them. A view can then indent each line with padding, so that a long value wrapping
- * onto a second line keeps its line's indentation instead of starting at the left edge.
+ * tokens after them. An object or array short enough stays on one line, so a list of small
+ * objects, such as a receipt's rule results, reads one per line. A view indents each line with
+ * padding, so a long value wrapping onto a second line keeps its line's indentation.
  */
 export function jsonLines(value: unknown): JsonLine[] {
-  return indented(value)
-    .split('\n')
-    .map((line) => {
-      const indent = line.length - line.trimStart().length;
-      return { indent, tokens: tokenize(line.slice(indent)) };
-    });
+  return formatLines(value, 0, '', '').map((line) => {
+    const indent = line.length - line.trimStart().length;
+    return { indent, tokens: tokenize(line.slice(indent)) };
+  });
 }

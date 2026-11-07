@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@electric-sql/pglite"],
   // The demo reset reads Ravi's catalog CSV at run time, which the tracer cannot see from its imports.
   outputFileTracingIncludes: { "/api/demo/reset": ["./lib/demo/ravi-spices.csv"] },
+  // The dashboard's sidebar footer sits bottom left, where the development badge renders by
+  // default and covers it. Development only; a production build shows no badge.
+  devIndicators: { position: "bottom-right" },
 };
 
 export default nextConfig;

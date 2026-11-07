@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { buttonClass } from '@/components/ui/button';
 import { Console, type ConsoleRow } from '@/components/ui/console';
+import { textLink } from '@/components/ui/link';
 import { Notice } from '@/components/ui/notice';
 import { ProposalCard } from '@/components/purchase/proposal-card';
 import { type AgentEvent, readAgentEvents, type RunOutcome } from '@/lib/buyer-pages/agent-events';
@@ -22,7 +23,6 @@ const PLACEHOLDER = 'Restock turmeric and cumin, one jar of each';
 const UNREACHABLE = 'Could not reach Behest. Check your connection and try again.';
 const CUT_OFF = 'The connection closed before your agent finished.';
 
-const textLink = 'font-medium text-action underline-offset-2 hover:text-action-strong hover:underline';
 
 /** Why a run did not end with the agent's own word: refused, unreachable or cut off. */
 type Problem = { text: string; kind: 'refused' | 'session' | 'unreachable' | 'cut_off' };
@@ -145,24 +145,31 @@ export function ShopRun() {
   }
 
   return (
-    <div className="grid gap-5">
+    // As tall as the column beside it from 1024 px: the console takes whatever height is left.
+    <div className="flex h-full flex-col gap-6">
+      {/* A command bar: the request, a line on what happens to it, and the button that sends the agent. */}
       <form onSubmit={start} className="grid gap-2.5">
-        <label htmlFor="shop-request" className="font-medium text-text">
+        <label htmlFor="shop-request" className="text-body font-medium text-text">
           What should your agent buy?
         </label>
-        <textarea
-          id="shop-request"
-          value={request}
-          onChange={(event) => setRequest(event.target.value)}
-          disabled={running}
-          rows={3}
-          maxLength={2000}
-          placeholder={PLACEHOLDER}
-          className="w-full rounded-control border border-line-strong bg-panel p-3 text-text placeholder:text-muted disabled:opacity-60"
-        />
-        <button type="submit" disabled={running || request.trim() === ''} className={buttonClass('primary', 'default', 'justify-self-start')}>
-          {running ? 'Your agent is shopping...' : 'Send your agent'}
-        </button>
+        <div className="rounded-frame border border-control bg-surface transition-colors focus-within:border-text hover:border-muted has-[textarea:disabled]:opacity-70">
+          <textarea
+            id="shop-request"
+            value={request}
+            onChange={(event) => setRequest(event.target.value)}
+            disabled={running}
+            rows={2}
+            maxLength={2000}
+            placeholder={PLACEHOLDER}
+            className="block w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-body text-text placeholder:text-muted focus-visible:outline-none"
+          />
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 pt-1 pb-3 sm:pr-3">
+            <p className="text-meta text-muted">Each purchase it proposes is checked against your mandate before anything is paid.</p>
+            <button type="submit" disabled={running || request.trim() === ''} className={buttonClass('primary', 'small')}>
+              {running ? 'Your agent is shopping...' : 'Send your agent'}
+            </button>
+          </div>
+        </div>
       </form>
 
       {problem && (
@@ -191,6 +198,7 @@ export function ShopRun() {
 
       <Console
         label="Your agent's run"
+        className="min-h-[26rem] flex-1"
         live
         header={
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-meta">
@@ -203,7 +211,13 @@ export function ShopRun() {
                 'Agent run'
               )}
             </p>
-            <p className="text-muted">{running ? 'Running' : lines.length > 0 ? 'Finished' : 'Idle'}</p>
+            <p className="flex items-center gap-1.5 text-muted">
+              <span
+                aria-hidden
+                className={`size-1.5 rounded-full ${running ? 'bg-seal motion-safe:animate-trace-pulse' : lines.length > 0 ? 'bg-muted' : 'bg-faint'}`}
+              />
+              {running ? 'Running' : lines.length > 0 ? 'Finished' : 'Idle'}
+            </p>
           </div>
         }
         empty="When you send your agent, each search it makes and each purchase it proposes appears here, with the trace that authorized it."

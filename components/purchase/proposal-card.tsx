@@ -6,6 +6,7 @@ import type { PurchaseDetail } from '@/lib/buyer-pages/detail';
 import { statusWords } from '@/lib/buyer-pages/words';
 import { AuthorityTrace } from '@/components/ui/authority-trace';
 import { buttonClass } from '@/components/ui/button';
+import { textLink } from '@/components/ui/link';
 import { Money } from '@/components/ui/money';
 import { ProofId } from '@/components/ui/proof-id';
 import { VerdictBadge } from '@/components/ui/verdict-badge';
@@ -29,7 +30,6 @@ function itemsLine(items: PurchaseDetail['items']): string {
   return `${first.quantity} × ${first.title}${more}`;
 }
 
-const textLink = 'font-medium text-action underline-offset-2 hover:text-action-strong hover:underline';
 
 export function ProposalCard({ outcome, view }: { outcome: RunOutcome | null; view: PurchaseDetail | null }) {
   const decided = outcome !== null;

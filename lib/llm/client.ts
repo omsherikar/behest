@@ -11,12 +11,31 @@ import { LLM_ROUTES, ROUTE_HEADER } from './routes';
 
 /**
  * Where LLM_STUB finds the reply recorded for each route: `<route>/stub.json`, or for a streamed
- * request the server-sent events of `<route>/stub.sse`.
+ * request the server-sent events of `<route>/stub.sse`. A `stub.json` holding an array scripts a
+ * conversation, such as a tool loop's turns: see scriptedReply.
  */
 const STUB_DIR = path.join('tests', 'fixtures', 'llm');
 
 function apiErrorResponse(status: number, type: string, message: string): Response {
   return Response.json({ type: 'error', error: { type, message } }, { status });
+}
+
+/**
+ * The reply to send from a recorded `stub.json`. An array scripts a conversation: a request is
+ * answered with the entry at the index of its count of assistant turns, so the first turn gets the
+ * first entry, and with the last entry once the script runs out. Anything else is sent as it is.
+ */
+function scriptedReply(recorded: string, sent: unknown): string {
+  let script: unknown;
+  try {
+    script = JSON.parse(recorded);
+  } catch {
+    return recorded;
+  }
+  if (!Array.isArray(script) || script.length === 0) return recorded;
+  const messages = (sent as { messages?: unknown } | null)?.messages;
+  const turn = Array.isArray(messages) ? messages.filter((message) => message?.role === 'assistant').length : 0;
+  return JSON.stringify(script[Math.min(turn, script.length - 1)]);
 }
 
 /** A `fetch` that answers each request with the reply recorded for the route its header names. */
@@ -37,7 +56,8 @@ const replayRecordedReply: typeof fetch = async (input, init) => {
     return apiErrorResponse(404, 'not_found_error', `No recorded reply at ${file}`);
   }
   const contentType = streamed ? 'text/event-stream' : 'application/json';
-  return new Response(body, { headers: { 'content-type': contentType, 'request-id': 'stub' } });
+  const reply = streamed ? body : scriptedReply(body, sent);
+  return new Response(reply, { headers: { 'content-type': contentType, 'request-id': 'stub' } });
 };
 
 /**

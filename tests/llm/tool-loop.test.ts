@@ -1,10 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages';
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { llmCalls } from '@/lib/db/schema';
-import { recordCall } from '@/lib/llm/client';
+import { createClaude, recordCall } from '@/lib/llm/client';
+import { ROUTE_HEADER } from '@/lib/llm/routes';
 import { runToolLoop } from '@/lib/llm/tool-loop';
 import { fakeClaude, iteration, messageJson } from '@/tests/helpers/fake-claude';
 import { createTestDb } from '@/tests/helpers/test-db';
@@ -21,6 +22,10 @@ const SERVER_ERROR = {
 };
 
 type Loop = Parameters<typeof runToolLoop>[2];
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 async function setup(
   responses: object[],
@@ -478,6 +483,90 @@ it('lets an error thrown by onMessage propagate once the turn is logged, without
   expect(await db.select().from(llmCalls)).toEqual([expect.objectContaining({ ok: true, stopReason: 'tool_use' })]);
 });
 
+/** A fetch that aborts `stop` as the first request goes out, then answers as `fake` does. */
+function abortingOnFirstRequest(fake: ReturnType<typeof fakeClaude>, stop: AbortController): typeof fetch {
+  return async (input, init) => {
+    stop.abort();
+    return fake.fetch(input, init);
+  };
+}
+
+it('stops at the next turn boundary when the signal aborts during a request: the reply is logged and its tools never run', async () => {
+  const { db, deps, run, search } = await setup([]);
+  const fake = fakeClaude([messageJson({ toolUses: [searchCall] }), messageJson({ text: 'Done.' })]);
+  const stop = new AbortController();
+  const claude = new Anthropic({ apiKey: 'test', fetch: abortingOnFirstRequest(fake, stop), maxRetries: 0 });
+
+  const result = await runToolLoop({ ...deps, claude }, 'shopping_agent', {
+    system: 'Find what the buyer asked for.',
+    messages,
+    tools: [search],
+    maxTurns: 4,
+    signal: stop.signal,
+  });
+
+  const rows = await db.select().from(llmCalls);
+  expect(result).toEqual({ ok: true, value: expect.objectContaining({ stop_reason: 'tool_use' }), callId: rows[0].id });
+  expect(rows).toEqual([expect.objectContaining({ ok: true, stopReason: 'tool_use' })]);
+  expect(run).not.toHaveBeenCalled();
+  expect(fake.requests).toHaveLength(1);
+});
+
+it('lets a request that is being retried when the signal aborts carry on', async () => {
+  const { db, deps, search } = await setup([]);
+  const fake = fakeClaude([SERVER_ERROR, messageJson({ text: 'Done.' })]);
+  const stop = new AbortController();
+  const claude = new Anthropic({ apiKey: 'test', fetch: abortingOnFirstRequest(fake, stop), maxRetries: 1 });
+
+  const result = await runToolLoop({ ...deps, claude }, 'shopping_agent', {
+    system: 'Find what the buyer asked for.',
+    messages,
+    tools: [search],
+    maxTurns: 4,
+    signal: stop.signal,
+  });
+
+  expect(result).toMatchObject({ ok: true, value: { stop_reason: 'end_turn' } });
+  expect(fake.requests).toHaveLength(2);
+  expect(await db.select().from(llmCalls)).toEqual([expect.objectContaining({ ok: true, requestId: 'req_fake_2' })]);
+});
+
+it('lets a tool that is running when the signal aborts finish, then sends no further request', async () => {
+  const { db, fake, run, loop } = await setup([messageJson({ toolUses: [searchCall] }), messageJson({ text: 'Done.' })]);
+  const stop = new AbortController();
+  let finished = false;
+  run.mockImplementationOnce(async ({ query }) => {
+    stop.abort();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    finished = true;
+    return `Turmeric, 100g, $4 (searched for ${query})`;
+  });
+
+  const result = await loop({ signal: stop.signal });
+
+  const rows = await db.select().from(llmCalls);
+  expect(result).toEqual({ ok: true, value: expect.objectContaining({ stop_reason: 'tool_use' }), callId: rows[0].id });
+  expect(finished).toBe(true);
+  expect(fake.requests).toHaveLength(1);
+  expect(rows).toHaveLength(1);
+});
+
+it('sends nothing and logs nothing when the signal aborted before the first request', async () => {
+  const { db, fake, run, loop } = await setup([messageJson({ text: 'Done.' })]);
+  const stop = new AbortController();
+  stop.abort();
+
+  expect(await loop({ signal: stop.signal })).toEqual({
+    ok: false,
+    error: 'api_error',
+    callId: null,
+    detail: 'The loop was stopped before its first request',
+  });
+  expect(fake.requests).toHaveLength(0);
+  expect(run).not.toHaveBeenCalled();
+  expect(await db.select().from(llmCalls)).toHaveLength(0);
+});
+
 it('refuses a maxTurns that is not a whole number of turns, 1 or more', async () => {
   const { fake, loop } = await setup([]);
 
@@ -535,4 +624,40 @@ it('sends each tool schema without the keywords strict mode refuses, and still c
   expect(run).not.toHaveBeenCalled();
   const [toolResult] = (fake.requests[1].body.messages as { content: { is_error?: boolean }[] }[])[2].content;
   expect(toolResult).toMatchObject({ type: 'tool_result', tool_use_id: 'toolu_1', is_error: true });
+});
+
+it('replays a scripted conversation from the route stub when LLM_STUB=1, one recorded reply per turn', async () => {
+  vi.stubEnv('LLM_STUB', '1');
+  const db = await createTestDb();
+  const ran = vi.fn(async (name: string) => `${name} ran`);
+  const tool = (name: string) =>
+    betaZodTool({ name, description: `The ${name} tool.`, inputSchema: z.object({}).loose(), strict: true, run: () => ran(name) });
+
+  const result = await runToolLoop({ db, claude: createClaude(), now: () => NOW, env: { NODE_ENV: 'test' } }, 'shopping_agent', {
+    system: 'Find what the buyer asked for.',
+    messages,
+    tools: [tool('search_sellers'), tool('propose_purchase')],
+    maxTurns: 12,
+  });
+
+  expect(result).toMatchObject({ ok: true, value: { id: 'msg_stub_shopping_agent_3', stop_reason: 'end_turn' } });
+  expect(ran.mock.calls).toEqual([['search_sellers'], ['propose_purchase']]);
+  expect(await db.select().from(llmCalls)).toEqual(
+    Array.from({ length: 3 }, () => expect.objectContaining({ route: 'shopping_agent', ok: true, requestId: 'stub' })),
+  );
+});
+
+it('answers with the last recorded reply of a stub once its script runs out', async () => {
+  vi.stubEnv('LLM_STUB', '1');
+  const earlier: BetaMessageParam[] = Array.from({ length: 4 }, () => [
+    { role: 'user' as const, content: 'Go on.' },
+    { role: 'assistant' as const, content: 'Going on.' },
+  ]).flat();
+
+  const reply = await createClaude().beta.messages.create(
+    { model: 'claude-opus-5-5', max_tokens: 1000, messages: [...earlier, { role: 'user', content: 'Are you done?' }] },
+    { headers: { [ROUTE_HEADER]: 'shopping_agent' } },
+  );
+
+  expect(reply.id).toBe('msg_stub_shopping_agent_3');
 });

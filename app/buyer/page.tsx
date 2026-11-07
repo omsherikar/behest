@@ -6,6 +6,7 @@ import { connection } from 'next/server';
 import { appDb, demoBuyerId } from '@/lib/app-deps';
 import { mandates, type WalletStatus, wallets } from '@/lib/db/schema';
 import { getPersona, SESSION_COOKIE } from '@/lib/session';
+import { BuyerNav } from './buyer-nav';
 import { MandateForm } from './mandate-form';
 
 export const metadata: Metadata = {
@@ -66,7 +67,8 @@ export default async function BuyerPage({ searchParams }: PageProps<'/buyer'>) {
 
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-10 font-paypal text-pp-ink sm:py-16">
-      <h1 className="text-3xl font-semibold text-pp-navy">Your mandate</h1>
+      <BuyerNav current="/buyer" />
+      <h1 className="mt-6 text-3xl font-semibold text-pp-navy">Your mandate</h1>
       <p className="mt-3 text-pp-muted">
         Tell your agent what it may buy, in your own words. Behest reads it back to you, and your agent can only pay
         within what you confirm.

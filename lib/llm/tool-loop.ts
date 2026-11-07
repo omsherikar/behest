@@ -57,7 +57,18 @@ export type ToolLoopRequest = {
   maxTurns: number;
   /** Called with each reply as it arrives, after it is logged. What it throws propagates. */
   onMessage?: (message: BetaMessage) => void;
+  /**
+   * Once aborted, the loop stops at the next turn boundary: a reply on its way is logged and its
+   * tools are not run, and tools already running finish before the loop stops instead of sending
+   * another request. Neither a request in flight nor a running tool is interrupted.
+   */
+  signal?: AbortSignal;
 };
+
+/** Thrown before a turn's request goes out once the loop's signal has aborted, so it is never sent. */
+class LoopStopped extends Error {
+  override name = 'LoopStopped';
+}
 
 /**
  * Runs the route's model over `req.tools` for at most `req.maxTurns` turns, unless today's spend has
@@ -65,6 +76,9 @@ export type ToolLoopRequest = {
  * would run, the last permitted turn's included, so once it is reached no tool runs and the loop
  * returns spend_cap. A loop that runs out of turns returns its last reply as it is: if that reply
  * called tools, they have run, but the model has not seen their results.
+ *
+ * A loop stopped through `req.signal` returns its last reply as it is, its tools run or not as the
+ * signal documents, or, when it stopped before its first request, an api_error with no call made.
  *
  * Every failure of a request comes back as an LlmResult failure, with the turns before it logged. A
  * refused or cut-off turn ends the loop without running its tool calls, and so does a reply holding
@@ -94,6 +108,8 @@ export async function runToolLoop(
   // latest response. Tools run between turns, so their time is not counted as the turn's.
   let turn: { startedAt: Date | null; requestId: string | null } = { startedAt: null, requestId: null };
   const observeTurn: Middleware = async (request, next) => {
+    // Checked before a turn's first attempt only: a retry belongs to a request already in flight.
+    if (turn.startedAt === null && req.signal?.aborted) throw new LoopStopped('The loop was stopped');
     turn.startedAt ??= deps.now();
     const response = await next(request);
     turn.requestId = response.headers.get('request-id');
@@ -149,6 +165,8 @@ export async function runToolLoop(
         if (!isMessage(message)) throw new Error('The response was not a message');
         billed = billedUsage(message, model);
       } catch (error) {
+        // No request went out for this turn, so there is no call to log.
+        if (error instanceof LoopStopped) break;
         const detail = error instanceof Error ? error.message : String(error);
         const callId = await recordCall(deps.db, {
           ...logged(),
@@ -173,6 +191,7 @@ export async function runToolLoop(
       req.onMessage?.(message);
       if (failure) return { ok: false, ...failure, callId };
       last = { message, callId };
+      if (req.signal?.aborted) break;
 
       // Also on the last permitted turn, whose tools the runner still runs.
       if (!FINAL_STOP_REASONS.has(message.stop_reason)) {
@@ -185,6 +204,9 @@ export async function runToolLoop(
     await turns.return?.();
   }
 
+  if (!last && req.signal?.aborted) {
+    return { ok: false, error: 'api_error', callId: null, detail: 'The loop was stopped before its first request' };
+  }
   if (!last) throw new Error('The tool runner finished without a reply');
   return { ok: true, value: last.message, callId: last.callId };
 }

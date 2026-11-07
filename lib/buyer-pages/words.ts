@@ -1,4 +1,5 @@
 import type { PurchaseStatus } from '@/lib/db/schema';
+import type { Verdict } from '@/lib/domain/verdict';
 import { plural } from '@/lib/domain/words';
 
 // How the buyer's pages word a purchase and an agent run, in the same terms the shopping agent uses
@@ -18,6 +19,20 @@ const STATUS_WORDS: Record<PurchaseStatus, string> = {
   failed: 'Not bought',
   cancelled: 'Not bought, approval cancelled',
 };
+
+const REASONS_HEADING: Record<Verdict, string> = {
+  ALLOW: 'Why it was allowed',
+  ASK: 'Why Behest asked you',
+  BLOCK: 'Why it was blocked',
+};
+
+/**
+ * The heading over a purchase's reasons, by its verdict. An allowed purchase's reasons are the intent
+ * check's confirmation that the cart matches the request, not reasons it was held or refused.
+ */
+export function reasonsHeading(verdict: Verdict): string {
+  return REASONS_HEADING[verdict];
+}
 
 /** A purchase status in the buyer's words, such as "Paid" for `captured`. A status Behest does not know is given as it is. */
 export function statusWords(status: string): string {

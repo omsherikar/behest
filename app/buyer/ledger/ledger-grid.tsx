@@ -4,7 +4,7 @@ import type { ColDef, ValueFormatterParams } from 'ag-grid-community';
 import type { CustomCellRendererProps } from 'ag-grid-react';
 import { useState } from 'react';
 import type { PurchaseDetail } from '@/lib/buyer-pages/detail';
-import { statusWords } from '@/lib/buyer-pages/words';
+import { reasonsHeading, statusWords } from '@/lib/buyer-pages/words';
 import { formatUsd } from '@/lib/domain/money';
 import { shortId } from '@/lib/ui/format';
 import { SellerGrid } from '@/app/seller/seller-grid';
@@ -156,7 +156,7 @@ function DetailPanel({ detail, onClose }: { detail: PurchaseDetail | null; onClo
           {detail.reasons.length > 0 && (
             <section aria-labelledby="ledger-detail-why">
               <h3 id="ledger-detail-why" className="text-meta text-muted">
-                Why it was not simply allowed
+                {reasonsHeading(detail.verdict)}
               </h3>
               <ul className="mt-1.5 grid gap-1">
                 {detail.reasons.map((reason, index) => (

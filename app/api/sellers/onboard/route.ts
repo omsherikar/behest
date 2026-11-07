@@ -1,7 +1,8 @@
 import { connection, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { llmDeps } from '@/lib/app-deps';
-import { CatalogInputError, type ListingPhoto, PHOTOS_BASE64_MAX } from '@/lib/catalog/build';
+import { CatalogInputError, type ListingPhoto, MAX_PHOTOS, PHOTOS_BASE64_MAX } from '@/lib/catalog/build';
+import { CSV_MAX_BYTES } from '@/lib/catalog/csv';
 import { OnboardError, type OnboardErrorCode, onboardSeller } from '@/lib/catalog/onboard';
 import { readBody } from '@/lib/http/read-body';
 import { clientAddress, MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
@@ -19,6 +20,8 @@ const MAX_BODY_BYTES = PHOTOS_BASE64_MAX + 1024 * 1024;
 
 const NOT_JSON = 'Send the shop details and the catalog as JSON.';
 const PHOTO = 'Each photo needs its image type, its image data in base64 and a price in cents.';
+const CSV_TOO_LARGE = `The catalog CSV can be at most ${CSV_MAX_BYTES / (1024 * 1024)} MB. Split it into smaller files.`;
+const TOO_MANY_PHOTOS = `At most ${MAX_PHOTOS} photos can be listed at once.`;
 
 const Photo = z.object(
   {
@@ -36,8 +39,17 @@ const OnboardRequest = z.object(
     name: z.string({ error: 'Give your shop a name.' }),
     slug: z.string({ error: 'Choose an address for your shop.' }),
     payoutEmail: z.string({ error: 'Give the email your payouts go to.' }),
-    csvText: z.string({ error: 'Send the catalog CSV as text.' }).optional(),
-    images: z.array(Photo, { error: PHOTO }).optional(),
+    // Capped before the CSV is read, so reading it, and listing the lines it rejects, stays small.
+    csvText: z
+      .string({ error: 'Send the catalog CSV as text.' })
+      .refine((text) => Buffer.byteLength(text, 'utf8') <= CSV_MAX_BYTES, { error: CSV_TOO_LARGE })
+      .optional(),
+    // Counted before any photo is checked, so a long list is refused for its length alone.
+    images: z
+      .array(z.unknown(), { error: PHOTO })
+      .max(MAX_PHOTOS, { error: TOO_MANY_PHOTOS })
+      .pipe(z.array(Photo))
+      .optional(),
   },
   { error: NOT_JSON },
 );

@@ -5,7 +5,8 @@ import { connection, NextRequest } from 'next/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/sellers/onboard/route';
 import { llmDeps } from '@/lib/app-deps';
-import { PHOTOS_BASE64_MAX } from '@/lib/catalog/build';
+import { MAX_PHOTOS, PHOTOS_BASE64_MAX } from '@/lib/catalog/build';
+import { parseCatalogCsv } from '@/lib/catalog/csv';
 import { searchMarket } from '@/lib/channel3/client';
 import type { Db } from '@/lib/db/client';
 import { products, sellers } from '@/lib/db/schema';
@@ -29,6 +30,11 @@ vi.mock('@/lib/ratelimit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/ratelimit')>()),
   rateLimit: vi.fn(() => true),
 }));
+// The CSV reader as it is, watched, so a test can tell whether a CSV was read at all.
+vi.mock('@/lib/catalog/csv', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/catalog/csv')>();
+  return { ...actual, parseCatalogCsv: vi.fn(actual.parseCatalogCsv) };
+});
 // The market finds nothing, so no test reaches Channel3.
 vi.mock('@/lib/channel3/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/channel3/client')>()),
@@ -114,6 +120,44 @@ describe('POST /api/sellers/onboard', () => {
     const fake = claudeAnswers([raviReply]);
 
     expect(await answer(await POST(await request(body)))).toEqual({ status: 400, body: { error: { message } } });
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it.each([
+    ['over 1 MB of text', 'a'.repeat(1024 * 1024 + 1)],
+    // Counted in UTF-8 bytes: 600 KiB characters of two bytes each.
+    ['over 1 MB of UTF-8', '\u00e9'.repeat(600 * 1024)],
+  ])('refuses a CSV of %s with 400 before reading it', async (_, csvText) => {
+    const fake = claudeAnswers([raviReply]);
+
+    expect(await answer(await POST(await request({ ...RAVI, csvText })))).toEqual({
+      status: 400,
+      body: { error: { message: 'The catalog CSV can be at most 1 MB. Split it into smaller files.' } },
+    });
+    expect(parseCatalogCsv).not.toHaveBeenCalled();
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('reads a CSV of exactly 1 MB', async () => {
+    claudeAnswers([raviReply]);
+    const csvText = RAVI_CSV.padEnd(1024 * 1024, '\n');
+
+    expect((await POST(await request({ ...RAVI, csvText }))).status).toBe(201);
+    expect(parseCatalogCsv).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['nine photos', MAX_PHOTOS + 1],
+    ['ten thousand photos', 10_000],
+  ])('refuses %s with 400 before checking any of them', async (_, count) => {
+    const fake = claudeAnswers([]);
+    // Not even photos: the count alone refuses the list.
+    const images = Array.from({ length: count }, () => ({}));
+
+    expect(await answer(await POST(await request({ ...RAVI, images })))).toEqual({
+      status: 400,
+      body: { error: { message: 'At most 8 photos can be listed at once.' } },
+    });
     expect(fake.requests).toHaveLength(0);
   });
 

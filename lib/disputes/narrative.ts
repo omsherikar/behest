@@ -134,7 +134,7 @@ function evidenceTool(pack: EvidencePack): BetaRunnableTool<{ id: string }> {
     strict: true,
     run: ({ id }) => {
       const item = pack.items.find((candidate) => candidate.id === id);
-      return item ? `${item.title}\n\n${bodyForModel(item)}` : NO_SUCH_ITEM;
+      return item ? `${item.title}\n\n${framed(bodyForModel(item))}` : NO_SUCH_ITEM;
     },
   });
 }
@@ -156,12 +156,20 @@ function investigation(pack: EvidencePack, dispute: DisputeDetail): string {
   ].join('\n\n');
 }
 
+/** A quote exactly as wrapUntrusted writes it, which holds no less-than sign. Captured, so split keeps it. */
+const QUOTE = /(<untrusted source="[a-z_]+">[^<]*<\/untrusted>)/;
+
 /**
- * An item's text as it sits inside its <item> tag: every less-than sign that does not begin or end
- * a quote is escaped, so nothing in the item can close the item or the evidence block around it.
+ * An item's text as the model reads it, in a tool result or inside its <item> tag: whole quotes are
+ * kept, and every other less-than sign is escaped, a stray or unclosed untrusted tag's included. So
+ * nothing in the item can close the item or the evidence block, and no unquoted text can look quoted.
  */
 function framed(body: string): string {
-  return body.replace(/<(?!untrusted source="[a-z_]+">|\/untrusted>)/g, '\\u003c');
+  // split puts the captured quotes at the odd indexes.
+  return body
+    .split(QUOTE)
+    .map((part, index) => (index % 2 === 1 ? part : part.replaceAll('<', '\\u003c')))
+    .join('');
 }
 
 function narrativeRequest(pack: EvidencePack, dispute: DisputeDetail, findings: string): string {

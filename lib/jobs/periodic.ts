@@ -1,5 +1,4 @@
-import { and, asc, count, eq, exists, gt, gte, inArray, is, isNotNull, isNull, lt, max, notExists, notInArray, or, type SQL, sql } from 'drizzle-orm';
-import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { and, asc, count, eq, exists, gt, gte, inArray, isNotNull, isNull, lt, max, notExists, notInArray, or, type SQL, sql } from 'drizzle-orm';
 import { Pool } from 'pg';
 import type { Db } from '@/lib/db/client';
 import { jobs, payouts, purchaseEvents, purchases, refunds } from '@/lib/db/schema';
@@ -108,11 +107,13 @@ async function runSteps(deps: JobDeps): Promise<void> {
  * runPeriodicPass is the only one needed.
  */
 async function withPassLock(db: Db, work: () => Promise<void>): Promise<void> {
-  if (!is(db, NodePgDatabase) || !(db.$client instanceof Pool)) {
+  // A node-postgres database exposes its pool as `$client`; a PGlite one, its PGlite instance.
+  const pool = (db as unknown as { $client?: unknown }).$client;
+  if (!(pool instanceof Pool)) {
     await work();
     return;
   }
-  const client = await db.$client.connect();
+  const client = await pool.connect();
   let closeClient = false;
   try {
     const { rows } = await client.query<{ locked: boolean }>('select pg_try_advisory_lock($1) as locked', [PASS_LOCK_KEY]);

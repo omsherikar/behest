@@ -505,7 +505,7 @@ describe('runPeriodicPass: one pass at a time', () => {
     const pool = new Pool({ connectionString: 'postgres://behest@127.0.0.1:1/never' });
     const statements: string[] = [];
     const client = {
-      query: vi.fn(async (text: string) => {
+      query: vi.fn<(text: string, values?: unknown[]) => Promise<{ rows: { locked: boolean }[] }>>(async (text) => {
         statements.push(text);
         if (text.includes('pg_advisory_unlock') && unlockFails) throw new Error('connection reset');
         return { rows: [{ locked }] };

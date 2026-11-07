@@ -34,20 +34,13 @@ Other scripts: `npm run build` (production build), `npm run start` (serve the bu
 
 Set `AG_STUDIO` in `.env.local` to your AG Studio licence key. The dashboard passes it to `AgStudioProvider`.
 
-### AI assistant (optional)
+### AI analyst (optional)
 
-The AG Studio dashboard at `/dashboard` has an AI assistant backed by OpenAI. The key is taken from the first of these that is set; with neither, the assistant is hidden:
+The AG Studio dashboard at `/dashboard` has an AI analyst, run by Claude. Ask it about the data in front of you ("Which purchases needed approval this week and why?") and it answers, or adds widgets to the report. It is shown when `ANTHROPIC_API_KEY` is set. In development, `LLM_STUB=1` shows it with a recorded reply instead, so no model is called.
 
-1. `AG_STUDIO_OPENAI_API_KEY`, specific to this app. Put it in `.env.local` to choose the key for this demo.
-2. `OPENAI_API_KEY`, the name OpenAI's own tools use. If you already export one (e.g. in `~/.zshrc`), the demo uses it with no setup, and spends against it.
+The key never reaches the browser. Studio's adapter ([`anthropic-adapter.ts`](app/dashboard/studio/anthropic-adapter.ts)) runs client-side: it turns Studio's conversation and tool schemas into a Messages API request and posts it to [`/api/ai/studio`](app/api/ai/studio/route.ts). That route needs a persona, rate limits each client address and persona, accepts only text, calls of the dashboard's own tools and their results, and calls Claude through `lib/llm` on the `studio_analyst` route: its model and effort (`CLAUDE_MODEL_STUDIO_ANALYST`, `CLAUDE_EFFORT_STUDIO_ANALYST`), the daily spend cap (`LLM_DAILY_CAP_USD`) and the `llm_calls` log. It streams Claude's own stream events back, and the adapter turns them into Studio's text, reasoning and tool call events.
 
-A separate name is needed because Next.js prefers variables already in the environment over `.env.local`, so a globally exported `OPENAI_API_KEY` can't be overridden per project. The server logs which variable it used (never the key) the first time the assistant is configured.
-
-`OPENAI_MODELS` lists the model ids the assistant may use, comma-separated, first one the default (`gpt-5.4-mini` when unset); with two or more, the chat offers a model picker.
-
-The key never reaches the browser. Studio's adapter ([`openai-adapter.ts`](app/dashboard/studio/openai-adapter.ts), copied from the AG Studio docs) runs client-side and posts to this app's own [`/api/ai/responses`](app/api/ai/responses/route.ts), which adds the key, only allows the configured models, caps output tokens, and streams OpenAI's reply back.
-
-In production `.env.local` isn't deployed: set the variable in your host's environment (e.g. Vercel project settings, `docker run --env-file`, or a secrets manager), as with the PayPal credentials. The route has no auth or rate limiting, so don't deploy it publicly with a real key without adding one.
+Studio runs the tools in the browser, against the rows already loaded for the persona, so the analyst sees nothing the dashboard does not show.
 
 ## How it works
 
@@ -56,7 +49,7 @@ lib/paypal/              Every PayPal call: OAuth token, paging, retries, respon
 lib/dashboard/           The dashboard's rows, scoped to the persona viewing them
 app/(endpoints)/         One page per endpoint, each rendering an AG Grid
 app/dashboard/           The AG Studio dashboard
-app/api/ai/responses/    Server-side proxy for the dashboard's AI assistant
+app/api/ai/studio/       The dashboard analyst: each Studio turn sent to Claude, the reply streamed back
 ```
 
 [`lib/paypal`](lib/paypal) calls the REST API with plain `fetch`, no SDK. It gets an OAuth access token with the client-credentials grant and caches it until just before it expires. It follows `page`/`total_pages` paging, and retries on 401, 429 and 5xx responses. Its types are hand-written for the fields this demo reads, in the API's own snake_case.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRateLimiter, MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
+import { clientAddress, createRateLimiter, MODEL_ROUTE_LIMIT, rateLimit, STUDIO_ANALYST_LIMIT } from '@/lib/ratelimit';
 
 /** A limiter on a clock the test moves by hand. */
 function limiterAt(start = 0) {
@@ -16,6 +16,10 @@ function allowed(limit: ReturnType<typeof createRateLimiter>, key: string, attem
 describe('rate limiter', () => {
   it('uses a bucket of 10 refilled at 10 a minute for model routes', () => {
     expect(MODEL_ROUTE_LIMIT).toEqual({ capacity: 10, refillPerMinute: 10 });
+  });
+
+  it('uses a bucket of 30 refilled at 20 a minute for the dashboard analyst, whose questions take several turns', () => {
+    expect(STUDIO_ANALYST_LIMIT).toEqual({ capacity: 30, refillPerMinute: 20 });
   });
 
   it('allows 10 then refuses', () => {
@@ -67,5 +71,21 @@ describe('rate limiter', () => {
     const key = `system-clock-${Math.random()}`;
     expect(rateLimit(key, opts)).toBe(true);
     expect(rateLimit(key, opts)).toBe(false);
+  });
+});
+
+describe('client address', () => {
+  const requestWith = (headers: Record<string, string>) => new Request('http://localhost/api', { headers });
+
+  it('takes the address the platform sets in x-real-ip', () => {
+    expect(clientAddress(requestWith({ 'x-real-ip': '198.51.100.4', 'x-forwarded-for': '203.0.113.7' }))).toBe('198.51.100.4');
+  });
+
+  it('takes the first x-forwarded-for address when there is no x-real-ip', () => {
+    expect(clientAddress(requestWith({ 'x-forwarded-for': ' 203.0.113.7 , 10.0.0.1' }))).toBe('203.0.113.7');
+  });
+
+  it('reads unknown when neither header is set', () => {
+    expect(clientAddress(requestWith({}))).toBe('unknown');
   });
 });

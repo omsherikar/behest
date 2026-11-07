@@ -1,5 +1,6 @@
 import type { Middleware } from '@anthropic-ai/sdk';
 import type { BetaRunnableTool } from '@anthropic-ai/sdk/lib/tools/BetaRunnableTool';
+import { transformJSONSchema } from '@anthropic-ai/sdk/lib/transform-json-schema';
 import type { BetaMessage, BetaMessageParam, BetaStopReason } from '@anthropic-ai/sdk/resources/beta/messages';
 import { dailyCapUsd, type LlmDeps, type LlmFailure, type LlmResult, recordCall, spendCapFailure } from './client';
 import { type LlmRoute, ROUTE_HEADER, routeConfig } from './routes';
@@ -31,6 +32,20 @@ function hasDeclinedToolCall(message: BetaMessage): boolean {
   const lastFallback = message.content.findLastIndex((block) => block.type === 'fallback');
   if (lastFallback === -1) return false;
   return message.content.slice(0, lastFallback).some((block) => block.type === 'tool_use');
+}
+
+/**
+ * `tool` with its input schema in the form strict mode accepts. The API refuses a strict schema
+ * holding minimum, maximum, minLength, maxLength or an array limit other than minItems 0 or 1, and
+ * `betaZodTool` sends the schema as Zod writes it, so each such limit moves into its field's
+ * description, as the SDK does for structured outputs, and the `$schema` dialect keyword is dropped.
+ * The tool's own `parse` still checks the input against its whole schema before the tool runs.
+ */
+function strictInputSchema(tool: BetaRunnableTool): BetaRunnableTool {
+  if (!('input_schema' in tool)) return tool;
+  const schema: Record<string, unknown> = { ...tool.input_schema };
+  delete schema.$schema;
+  return { ...tool, input_schema: { ...transformJSONSchema(schema), type: 'object' } };
 }
 
 export type ToolLoopRequest = {
@@ -92,7 +107,7 @@ export async function runToolLoop(
       max_tokens: maxTokens,
       system: req.system,
       messages: req.messages,
-      tools: req.tools,
+      tools: req.tools.map(strictInputSchema),
       output_config: { effort },
       // Automatic prompt caching: the marker moves to the end of the conversation each turn, so the
       // next turn reads everything before its new tool results from the cache.

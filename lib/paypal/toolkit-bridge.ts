@@ -74,8 +74,11 @@ function claudeTool(toolkit: ToolkitLike, name: string, definition: ToolkitFunct
   return betaTool({
     name,
     description: definition.description?.trim() || name,
-    // Sent to Claude as the toolkit wrote it. The cast only tells betaTool it describes an object.
+    // Given as the toolkit wrote it. The cast only tells betaTool it describes an object. The tool
+    // loop sends it in the form strict mode accepts, with keywords such as pattern, minimum and
+    // default moved into descriptions, so invalidArgument below still enforces the patterns.
     inputSchema: (definition.parameters ?? { type: 'object' }) as { type: 'object' },
+    strict: true,
     run: async (input) => {
       const invalid = invalidArgument(definition.parameters, input);
       if (invalid) {

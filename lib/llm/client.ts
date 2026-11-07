@@ -9,7 +9,10 @@ import { LLM_ROUTES, ROUTE_HEADER } from './routes';
 // Every model call goes through lib/llm. Each one is logged to llm_calls with its estimated cost, and
 // no call starts once the day's logged cost reaches LLM_DAILY_CAP_USD.
 
-/** Where LLM_STUB finds the reply recorded for each route: `<route>/stub.json`. */
+/**
+ * Where LLM_STUB finds the reply recorded for each route: `<route>/stub.json`, or for a streamed
+ * request the server-sent events of `<route>/stub.sse`.
+ */
 const STUB_DIR = path.join('tests', 'fixtures', 'llm');
 
 function apiErrorResponse(status: number, type: string, message: string): Response {
@@ -18,11 +21,14 @@ function apiErrorResponse(status: number, type: string, message: string): Respon
 
 /** A `fetch` that answers each request with the reply recorded for the route its header names. */
 const replayRecordedReply: typeof fetch = async (input, init) => {
-  const route = new Request(input, init).headers.get(ROUTE_HEADER);
+  const request = new Request(input, init);
+  const route = request.headers.get(ROUTE_HEADER);
   if (!route || !(LLM_ROUTES as string[]).includes(route)) {
     return apiErrorResponse(400, 'invalid_request_error', `The ${ROUTE_HEADER} header names no known route`);
   }
-  const file = path.join(STUB_DIR, route, 'stub.json');
+  const sent: unknown = await request.json().catch(() => null);
+  const streamed = typeof sent === 'object' && sent !== null && 'stream' in sent && sent.stream === true;
+  const file = path.join(STUB_DIR, route, streamed ? 'stub.sse' : 'stub.json');
   let body: string;
   try {
     body = await readFile(path.join(process.cwd(), file), 'utf8');
@@ -30,7 +36,8 @@ const replayRecordedReply: typeof fetch = async (input, init) => {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     return apiErrorResponse(404, 'not_found_error', `No recorded reply at ${file}`);
   }
-  return new Response(body, { headers: { 'content-type': 'application/json', 'request-id': 'stub' } });
+  const contentType = streamed ? 'text/event-stream' : 'application/json';
+  return new Response(body, { headers: { 'content-type': contentType, 'request-id': 'stub' } });
 };
 
 /**

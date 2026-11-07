@@ -1,0 +1,159 @@
+{
+  "products": [
+    {
+      "id": "4qTz8Lm",
+      "title": "Organic Ground Turmeric Root Powder, 2.4 oz Jar",
+      "description": "Single-origin ground turmeric from Erode, India. Steam sterilized and packed in glass.",
+      "brands": [{ "id": "b_kesarvalley", "name": "Kesar Valley" }],
+      "images": [
+        {
+          "url": "https://images.example-merchant.com/turmeric-jar-side.jpg",
+          "cleaned_url": null,
+          "is_main_image": false,
+          "shot_type": "angle_view",
+          "alt_text": "Turmeric jar from the side"
+        },
+        {
+          "url": "https://images.example-merchant.com/turmeric-jar-front.jpg",
+          "cleaned_url": "https://cdn.trychannel3.com/cleaned/4qTz8Lm-front.png",
+          "is_main_image": true,
+          "shot_type": "hero",
+          "alt_text": "Glass jar of ground turmeric"
+        }
+      ],
+      "category": {
+        "slug": "ground-spices",
+        "title": "Ground Spices",
+        "path": [
+          { "slug": "food-beverages", "title": "Food & Beverages" },
+          { "slug": "spices-seasonings", "title": "Spices & Seasonings" },
+          { "slug": "ground-spices", "title": "Ground Spices" }
+        ],
+        "has_children": false
+      },
+      "gender": null,
+      "age": null,
+      "materials": null,
+      "key_features": ["USDA Organic", "Non-GMO", "Steam sterilized"],
+      "colors": [{ "hex": "#d98a1c", "percentage": 0.71 }],
+      "offers": [
+        {
+          "url": "https://buy.trychannel3.com/r/4qTz8Lm-spicebarn",
+          "domain": "spicebarn.com",
+          "price": { "price": 2.5, "compare_at_price": 3.25, "currency": "USD" },
+          "availability": "InStock",
+          "condition": "new",
+          "max_commission_rate": 0.04,
+          "dimensions": null
+        },
+        {
+          "url": "https://buy.trychannel3.com/r/4qTz8Lm-pantryhouse",
+          "domain": "pantryhouse.com",
+          "price": { "price": 3, "compare_at_price": null, "currency": "USD" },
+          "availability": "InStock",
+          "condition": "new",
+          "max_commission_rate": 0,
+          "dimensions": null
+        },
+        {
+          "url": "https://buy.trychannel3.com/r/4qTz8Lm-maplepantry",
+          "domain": "maplepantry.ca",
+          "price": { "price": 1.99, "compare_at_price": null, "currency": "CAD" },
+          "availability": "InStock",
+          "condition": "new",
+          "max_commission_rate": 0,
+          "dimensions": null
+        },
+        {
+          "url": "https://buy.trychannel3.com/r/4qTz8Lm-gourmetgrocer",
+          "domain": "gourmetgrocer.com",
+          "price": { "price": 9, "compare_at_price": null, "currency": "USD" },
+          "availability": "InStock",
+          "condition": "new",
+          "max_commission_rate": 0.08,
+          "dimensions": {
+            "height": { "value": 3.9, "unit": "in" },
+            "length": null,
+            "width": { "value": 1.8, "unit": "in" },
+            "weight": { "value": 2.4, "unit": "oz" }
+          }
+        }
+      ],
+      "variants": null,
+      "structured_attributes": { "form": ["ground"], "dietary_preference": ["organic", "vegan"] },
+      "ratings": { "value": 4.7, "count": 1312, "source_count": 3 }
+    },
+    {
+      "id": "9Hc2vNe",
+      "title": "Turmeric Powder (Haldi) 7 oz Resealable Pouch, Bright Yellow Lakadong Variety With High Curcumin Content, Ideal for Curries, Golden Milk and Lattes",
+      "description": null,
+      "brands": [],
+      "images": [
+        {
+          "url": "https://images.example-merchant.com/haldi-pouch.jpg",
+          "cleaned_url": null,
+          "is_main_image": true,
+          "shot_type": "packaging",
+          "alt_text": null
+        }
+      ],
+      "category": null,
+      "gender": null,
+      "age": null,
+      "materials": null,
+      "key_features": null,
+      "colors": [],
+      "offers": [
+        {
+          "url": "https://buy.trychannel3.com/r/9Hc2vNe-desibazaar",
+          "domain": "desibazaar.com",
+          "price": { "price": 5.49, "compare_at_price": null, "currency": "USD" },
+          "availability": "InStock",
+          "condition": "new",
+          "max_commission_rate": 0,
+          "dimensions": null
+        },
+        {
+          "url": "https://buy.trychannel3.com/r/9Hc2vNe-spicebarn",
+          "domain": "spicebarn.com",
+          "price": { "price": 6, "compare_at_price": null, "currency": "USD" },
+          "availability": "InStock",
+          "condition": null,
+          "max_commission_rate": 0.04,
+          "dimensions": null
+        }
+      ],
+      "variants": null,
+      "structured_attributes": {},
+      "ratings": null
+    },
+    {
+      "id": "Rb71xQa",
+      "title": "Kurkuma gemahlen, 100 g",
+      "description": "Gemahlene Kurkumawurzel.",
+      "brands": [{ "id": "b_gewuerzhaus", "name": "Gewuerzhaus" }],
+      "images": [],
+      "category": null,
+      "gender": null,
+      "age": null,
+      "materials": null,
+      "key_features": null,
+      "colors": [],
+      "offers": [
+        {
+          "url": "https://buy.trychannel3.com/r/Rb71xQa-gewuerzhaus",
+          "domain": "gewuerzhaus.de",
+          "price": { "price": 3.79, "compare_at_price": null, "currency": "EUR" },
+          "availability": "InStock",
+          "condition": "new",
+          "max_commission_rate": 0,
+          "dimensions": null
+        }
+      ],
+      "variants": null,
+      "structured_attributes": {},
+      "ratings": { "value": 4.2, "count": 58, "source_count": 1 }
+    }
+  ],
+  "next_page_token": null
+}

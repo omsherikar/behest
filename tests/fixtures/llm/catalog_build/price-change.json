@@ -1,0 +1,22 @@
+{
+  "id": "msg_catalog_price_change",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-opus-5-5",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"items\":[{\"sku\":\"TUR-100\",\"title\":\"Lakadong Turmeric Powder, 100 g\",\"description\":\"Single-origin turmeric powder from Lakadong.\",\"category\":\"spices\",\"screening\":{\"suspicious\":false,\"reason\":null},\"priceCents\":1,\"price\":\"0.01\",\"stock\":9999}]}",
+      "citations": null
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "stop_details": null,
+  "usage": {
+    "input_tokens": 1980,
+    "output_tokens": 140,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0
+  }
+}

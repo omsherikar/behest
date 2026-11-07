@@ -11,8 +11,7 @@ import { ProofFields } from '@/components/ui/proof-fields';
 import { ProofId } from '@/components/ui/proof-id';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { disputeView, type DisputeView } from '@/lib/ops-pages/disputes';
-import { logTimeline } from '@/lib/ops-pages/evidence';
-import { consoleTime } from '@/lib/ui/format';
+import { eventWords, logMoments, logTimeline } from '@/lib/ops-pages/evidence';
 import { requireOperator } from '../../require-operator';
 import { DisputeEvidence } from './dispute-evidence';
 import { EvidenceItems } from './evidence-items';
@@ -95,18 +94,26 @@ export default async function DisputePage({ params }: PageProps<'/ops/disputes/[
   );
 }
 
-type TimelineEntry = { at: string; what: string; detail?: string; mono?: boolean };
+type TimelineEntry = { at: string; what: string; detail?: string };
 
 /**
- * The dispute's own moments, opened and answered, and every step of the purchase log the evidence
- * pack recorded, in time order. Before a draft gathers the evidence, the purchase's steps are not
- * known here, and the timeline says so.
+ * The whole story in time order: when the purchase was proposed and captured, as the purchase log's
+ * opening lines record it, every step the log recorded, worded, and the dispute's own moments,
+ * opened and answered. Before a draft gathers the evidence, the purchase's side is not known here,
+ * and the timeline says so.
  */
 function Timeline({ dispute }: { dispute: DisputeView }) {
   const log = dispute.items?.find((item) => item.id === 'purchase_log');
-  const steps = log ? (logTimeline(log.body)?.steps ?? []) : [];
+  const timeline = log ? logTimeline(log.body) : null;
+  const moments = timeline ? logMoments(timeline.intro) : { createdAt: null, capturedAt: null };
+  const steps = timeline?.steps ?? [];
+  const logged = (kind: string) => steps.some((step) => step.kind === kind);
+
   const entries: TimelineEntry[] = [
-    ...steps.map((step) => ({ at: step.at, what: step.kind, mono: true })),
+    ...(moments.createdAt ? [{ at: moments.createdAt, what: 'Purchase proposed by the agent' }] : []),
+    ...steps.map((step) => ({ at: step.at, what: eventWords(step.kind) })),
+    // The capture time is on the purchase itself; a logged capture event already says it.
+    ...(moments.capturedAt && !logged('capture') ? [{ at: moments.capturedAt, what: 'Captured at PayPal' }] : []),
     ...(dispute.openedAt ? [{ at: dispute.openedAt, what: 'Dispute opened at PayPal', detail: dispute.reason }] : []),
     ...(dispute.submitted ? [{ at: dispute.submitted.at, what: 'Evidence submitted to PayPal' }] : []),
   ].sort((a, b) => a.at.localeCompare(b.at));
@@ -125,10 +132,10 @@ function Timeline({ dispute }: { dispute: DisputeView }) {
               {index < entries.length - 1 && <span aria-hidden className="absolute top-4 bottom-0 left-[7px] w-0.5 bg-line" />}
               <span aria-hidden className="mt-1.5 size-2.5 justify-self-center rounded-full border-2 border-muted bg-bg" />
               <div className="min-w-0">
+                <p className="text-body text-text">{entry.what}</p>
                 <time dateTime={entry.at} title={entry.at} className="block font-mono text-meta text-muted tabular-nums">
-                  {entry.at.slice(0, 10)} {consoleTime(entry.at)}
+                  {utc(entry.at)}
                 </time>
-                <p className={`mt-0.5 text-body text-text ${entry.mono ? 'font-mono text-meta' : ''}`}>{entry.what}</p>
                 {entry.detail && <p className="text-meta text-muted">{entry.detail}</p>}
               </div>
             </li>

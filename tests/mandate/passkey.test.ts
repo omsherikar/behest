@@ -6,7 +6,7 @@ import { buyerPasskeys, buyers, mandates } from '@/lib/db/schema';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { confirmMandate, MandateConfirmError } from '@/lib/mandate/confirm';
 import { mandateChallenge } from '@/lib/mandate/challenge';
-import { signingOptions, verifyMandateAssertion, verifyMandatePasskey } from '@/lib/mandate/passkey';
+import { type PasskeySignature, signingOptions, verifyMandateAssertion, verifyMandatePasskey } from '@/lib/mandate/passkey';
 import { renderReadback } from '@/lib/mandate/readback';
 import { registerPasskey, registrationOptions } from '@/lib/passkeys/register';
 import { readTicket } from '@/lib/passkeys/ticket';
@@ -352,6 +352,20 @@ describe('verifyMandatePasskey', () => {
 
     expect(await verifyMandatePasskey({ ...row, jws: 'not-a-jws' })).toEqual({ verified: false, reason: 'malformed' });
     expect(await verifyMandatePasskey({ ...row, buyerAssertion: null })).toEqual({ verified: false, reason: 'malformed' });
+  });
+});
+
+describe('PasskeySignature', () => {
+  it('can be made only by verifyMandateAssertion, which the type system enforces', () => {
+    const plain = {
+      passkeyId: crypto.randomUUID(),
+      counter: 1,
+      passkey: { credentialId: 'Y3JlZA', publicKey: 'cGs', alg: -7 },
+      assertion: { credentialId: 'Y3JlZA', authenticatorData: 'YQ', clientDataJSON: 'Yg', signature: 'Yw', challenge: 'ZA', nonce: 'ZQ', exp: 1 },
+    };
+    // @ts-expect-error A signature that did not come from verifyMandateAssertion is not a PasskeySignature.
+    const signature: PasskeySignature = plain;
+    expect(signature).toBe(plain);
   });
 });
 

@@ -26,7 +26,7 @@ export function ProofId({
 }) {
   const shown = full ? value : shortId(value);
   return (
-    <span className={`inline-flex max-w-full items-center gap-2 align-middle ${className}`}>
+    <span className={`inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 align-middle ${className}`}>
       <span className={`min-w-0 font-mono text-meta text-text ${full ? 'break-all' : 'whitespace-nowrap'}`} title={full ? undefined : value}>
         <span className="sr-only">
           {label}: {value}

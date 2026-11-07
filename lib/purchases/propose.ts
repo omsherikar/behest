@@ -7,15 +7,20 @@ import type { Verdict } from '@/lib/domain/verdict';
 import { evaluateGateSafely, type CatalogEntry, type GateInput } from '@/lib/gate/evaluate';
 import { periodStart } from '@/lib/gate/period';
 import { quoteAgentText } from '@/lib/gate/rules/check';
+import { applyIntent } from '@/lib/intent/apply';
 import { hashOf } from '@/lib/receipts/canonical';
-import type { IntentInput, PurchaseDeps } from './deps';
-import { appendEvent } from './events';
+import { startApproval } from './approval';
+import { chargeAllowed, purchaseOutcome } from './charge';
+import type { IntentInput, IntentResult, ProposalOutcome, PurchaseDeps } from './deps';
+import { appendEvent, transition } from './events';
 import { COUNTS_AGAINST_BUDGET } from './transitions';
 
-// Reserving a shopping agent's proposed purchase (architecture section 5.1). The gate decides inside
-// one transaction that holds the buyer's mandate row, and the purchase is inserted before that
-// transaction commits, so its total is reserved against the budget at once and two proposals can
-// never both fit into the same remaining budget.
+// Turning a shopping agent's proposal into a decision and acting on it (architecture sections 5.1,
+// 5.2 and 6.2 to 6.4). The gate decides inside one transaction that holds the buyer's mandate row,
+// and the purchase is inserted before that transaction commits, so its total is reserved against the
+// budget at once and two proposals can never both fit into the same remaining budget. The intent
+// check then runs with no lock held and can only tighten the gate's verdict. The final verdict is
+// routed: BLOCK ends the purchase, ALLOW charges the saved wallet, ASK sends the buyer to PayPal.
 
 /** A purchase the shopping agent proposes for a buyer. */
 export type ProposalRequest = {
@@ -33,6 +38,9 @@ type Reserved = { purchaseId: string; gateVerdict: Verdict; check: IntentInput |
 
 const HOUR_MS = 60 * 60 * 1000;
 
+/** The reason recorded when the intent check throws instead of answering. */
+const CHECK_FAILED = 'internal_error';
+
 const MANDATE_FIELDS = {
   id: mandates.id,
   sourceText: mandates.sourceText,
@@ -43,6 +51,33 @@ const MANDATE_FIELDS = {
   expiresAt: mandates.expiresAt,
 };
 type LockedMandate = Pick<typeof mandates.$inferSelect, keyof typeof MANDATE_FIELDS>;
+
+/**
+ * Decides a proposed purchase and carries it as far as it can go. The gate decides and the purchase
+ * is reserved by reservePurchase; a purchase the gate blocked ends there, with no intent check and no
+ * call to PayPal. Otherwise the intent check reads the buyer's own request and mandate beside the
+ * cart, and its result can only tighten the gate's verdict: a check that throws counts as
+ * unavailable, which sends the purchase to its buyer. The result and the final verdict are stored,
+ * and the final verdict routed: BLOCK leaves the purchase `blocked`, ALLOW charges the buyer's saved
+ * wallet with chargeAllowed, and ASK asks the buyer to approve at PayPal with startApproval. Returns
+ * where the purchase then stands. Throws, recording nothing, for a buyer who never had a mandate.
+ */
+export async function proposePurchase(deps: PurchaseDeps, i: ProposalRequest): Promise<ProposalOutcome> {
+  const { purchaseId, gateVerdict, check } = await reservePurchase(deps, i);
+  if (!check) return purchaseOutcome(deps.db, purchaseId);
+
+  const intent = await runIntentCheck(deps.intent, check);
+  const verdict = applyIntent(gateVerdict, intent);
+  await recordIntent(deps.db, purchaseId, intent, verdict);
+  switch (verdict) {
+    case 'ALLOW':
+      return chargeAllowed(deps, purchaseId);
+    case 'ASK':
+      return startApproval(deps, purchaseId);
+    case 'BLOCK':
+      return purchaseOutcome(deps.db, purchaseId);
+  }
+}
 
 /**
  * Runs the gate and reserves the purchase in one transaction. It first locks the buyer's active
@@ -56,7 +91,7 @@ type LockedMandate = Pick<typeof mandates.$inferSelect, keyof typeof MANDATE_FIE
  * rule's outcome, and logs the `gate` event. Throws, inserting nothing, for a buyer who never had a
  * mandate.
  */
-export async function reservePurchase({ db, now: clock }: Pick<PurchaseDeps, 'db' | 'now'>, i: ProposalRequest): Promise<Reserved> {
+async function reservePurchase({ db, now: clock }: Pick<PurchaseDeps, 'db' | 'now'>, i: ProposalRequest): Promise<Reserved> {
   return db.transaction(async (tx) => {
     const mandate = await lockMandate(tx, i.buyerId);
     if (!mandate) throw new Error(`buyer ${i.buyerId} has no mandate, so there is nothing to check a purchase against`);
@@ -212,4 +247,30 @@ async function hasLinkedWallet(tx: Db, buyerId: string): Promise<boolean> {
     .from(wallets)
     .where(and(eq(wallets.buyerId, buyerId), eq(wallets.status, 'linked'), isNotNull(wallets.paymentTokenId)));
   return wallet !== undefined;
+}
+
+/** The intent check's answer. A check that throws counts as unavailable, which sends the purchase to its buyer. */
+async function runIntentCheck(intent: PurchaseDeps['intent'], input: IntentInput): Promise<IntentResult> {
+  try {
+    return await intent(input);
+  } catch (error) {
+    console.error('The intent check failed, so the purchase goes to its buyer:', error);
+    return { verdict: 'unavailable', reasons: [CHECK_FAILED] };
+  }
+}
+
+/**
+ * Stores the intent check's result and the final verdict, logs them as the `intent` event, and moves
+ * a purchase the check blocked to `blocked`, all in one transaction. The event carries the verdicts
+ * only: the check's reasons can repeat seller-written titles, and stay on the purchase.
+ */
+async function recordIntent(db: Db, purchaseId: string, intent: IntentResult, verdict: Verdict): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(purchases)
+      .set({ intent: { verdict: intent.verdict, reasons: intent.reasons }, finalVerdict: verdict })
+      .where(eq(purchases.id, purchaseId));
+    await appendEvent(tx, purchaseId, 'intent', { verdict: intent.verdict, finalVerdict: verdict });
+    if (verdict === 'BLOCK') await transition(tx, purchaseId, 'proposed', 'blocked');
+  });
 }

@@ -145,15 +145,16 @@ function ApprovalDetail({ approval, qrCode }: { approval: PurchaseDetail; qrCode
       <WhatWouldChange change={approval.change} reasons={approval.reasons} />
 
       {approval.approveUrl ? (
-        <div className="flex flex-col gap-5 border-t border-line pt-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-x-8 gap-y-5 border-t border-line pt-6">
           <div className="grid gap-2">
             <a href={approval.approveUrl} className={buttonClass('primary', 'large', 'justify-self-start')}>
               Approve at PayPal
             </a>
             <p className="text-meta text-muted">Nothing is paid until you approve it there.</p>
           </div>
+          {/* Not on a phone, where the buyer already is: the button is the way there. */}
           {qrCode && (
-            <figure className="flex items-center gap-3 sm:flex-row-reverse sm:text-right">
+            <figure className="hidden items-center gap-3 sm:flex">
               <Image
                 src={qrCode}
                 alt="QR code of the PayPal approval link"
@@ -162,7 +163,7 @@ function ApprovalDetail({ approval, qrCode }: { approval: PurchaseDetail; qrCode
                 unoptimized
                 className="size-28 rounded-control border border-line bg-white p-1"
               />
-              <figcaption className="max-w-40 text-meta text-muted">Scan it to approve on your phone.</figcaption>
+              <figcaption className="text-meta whitespace-nowrap text-muted">Or scan it on your phone</figcaption>
             </figure>
           )}
         </div>

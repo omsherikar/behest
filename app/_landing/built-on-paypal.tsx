@@ -1,27 +1,99 @@
 import { ArrowRight, ArrowUUpLeft, Bank, Scales, ShoppingCartSimple, Toolbox, Vault, WebhooksLogo } from '@phosphor-icons/react/ssr';
 import type { ReactNode } from 'react';
+import { Money } from '@/components/ui/money';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { FeatureCard } from '@/components/vui/feature-card';
+import { shortId } from '@/lib/ui/format';
+import {
+  EVIDENCE_IDS,
+  ORDER_CAPTURE_STATUSES,
+  PAYOUT_STATUSES,
+  REFUND_REQUEST_SUFFIX,
+  type StatusChip,
+  TOOLKIT_TOOLS,
+  VAULT_TOKENS,
+  WEBHOOK_EVENT_TYPES,
+} from './paypal-facts';
+import { SAMPLE } from './sample';
 import { Section } from './section';
 
-// What Behest uses PayPal for, as a bento grid: one tile per API, with its path and one line on what
-// Behest does with it, from lib/paypal. The two wide tiles show the parts a reader asks about: the
-// two tokens behind a saved wallet, and the only toolkit tools the dispute agent can call.
+// What Behest uses PayPal for, as a bento grid: one tile per API, with its path, a small view of the
+// values Behest handles there and one line on what it does with them. The values come from the code
+// (./paypal-facts.ts, held to it by a test) or from the sample purchase's signed receipt.
 
-const chip = 'rounded-full border border-line bg-raised/70 px-3 py-1 font-mono text-meta text-text';
+const chip = 'rounded-full border border-line bg-raised/70 px-2.5 py-0.5 font-mono text-[0.75rem] text-text';
 
-/** `wide` tiles span two columns: from 768 px, or from 1024 px only where a narrower grid would leave a gap. */
-const TILES: { name: string; path: string; use: string; icon: ReactNode; wide?: boolean; wideFrom?: 'lg'; visual?: ReactNode }[] = [
+function Chips({ items, label }: { items: readonly string[]; label: string }) {
+  return (
+    <ul aria-label={label} className="flex flex-wrap justify-center gap-1.5">
+      {items.map((item) => (
+        <li key={item} className={chip}>
+          {item}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Statuses({ items, label }: { items: readonly StatusChip[]; label: string }) {
+  return (
+    <ul aria-label={label} className="grid w-full max-w-xs gap-2.5">
+      {items.map(({ code, tone, meaning }) => (
+        <li key={code} className="flex items-center justify-between gap-3">
+          <StatusBadge tone={tone}>
+            <span className="font-mono">{code}</span>
+          </StatusBadge>
+          <span className="text-right text-meta text-muted">{meaning}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function RefundRequest() {
+  const { payment, decision } = SAMPLE.receipt;
+  return (
+    <div className="grid w-full max-w-xs gap-2.5 text-center">
+      <p className="flex flex-wrap items-center justify-center gap-1.5">
+        <span className={chip}>
+          refund <Money cents={payment.amountCents} />
+        </span>
+        <span className="text-meta text-muted">of</span>
+        <span className={chip}>capture {shortId(payment.captureId, 4, 4)}</span>
+      </p>
+      <p className="font-mono text-[0.75rem] text-muted">
+        request id {decision.purchaseId.slice(0, 8)}...{REFUND_REQUEST_SUFFIX}
+      </p>
+      <p className="text-meta text-muted">The request as it would go for the sample purchase</p>
+    </div>
+  );
+}
+
+const SHOWN_EVENTS = ['CHECKOUT.ORDER.APPROVED', 'PAYMENT.CAPTURE.COMPLETED', 'CUSTOMER.DISPUTE.CREATED', 'PAYMENT.PAYOUTS-ITEM.SUCCEEDED'];
+
+function Webhooks() {
+  const more = WEBHOOK_EVENT_TYPES.length - SHOWN_EVENTS.length;
+  return (
+    <div className="grid justify-items-center gap-3">
+      <StatusBadge tone="seal">Signature verified</StatusBadge>
+      <Chips items={SHOWN_EVENTS} label="Some of the events Behest acts on" />
+      <p className="text-meta text-muted">and {more} more events</p>
+    </div>
+  );
+}
+
+const TILES: { name: string; path: string; use: string; icon: ReactNode; span?: string; visual: ReactNode }[] = [
   {
     name: 'Vault v3 saved wallets',
     path: '/v3/vault/payment-tokens',
     use: 'The buyer saves their PayPal wallet once, with no purchase, while signing the mandate. Allowed purchases charge it with no click.',
     icon: <Vault weight="regular" />,
-    wide: true,
+    span: 'md:col-span-2',
     visual: (
       <div className="flex flex-wrap items-center justify-center gap-2">
-        <span className={chip}>setup token</span>
-        <ArrowRight aria-hidden className="size-4 text-muted" />
-        <span className={chip}>payment token</span>
+        <span className={chip}>{VAULT_TOKENS[0]}</span>
+        <ArrowRight aria-label="becomes a" className="size-4 text-muted" />
+        <span className={chip}>{VAULT_TOKENS[1]}</span>
       </div>
     ),
   },
@@ -30,47 +102,44 @@ const TILES: { name: string; path: string; use: string; icon: ReactNode; wide?: 
     path: '/v2/checkout/orders',
     use: 'Creates and captures every order: charged to the saved wallet when allowed, approved by the buyer at PayPal when held.',
     icon: <ShoppingCartSimple weight="regular" />,
+    visual: <Statuses items={ORDER_CAPTURE_STATUSES} label="Capture statuses Behest acts on" />,
   },
   {
     name: 'Payouts',
     path: '/v1/payments/payouts',
-    use: 'Pays the seller once it has verified the receipt and accepted the order.',
+    use: 'Pays the seller once it has verified the receipt and accepted the order, and polls the payout until PayPal settles it.',
     icon: <Bank weight="regular" />,
+    visual: <Statuses items={PAYOUT_STATUSES} label="Payout statuses Behest polls for" />,
   },
   {
     name: 'Refunds',
     path: '/v2/payments/captures/{id}/refund',
-    use: 'Refunds the buyer from Behest’s capture when a seller rejects the order.',
+    use: 'Refunds the buyer from Behest’s capture when a seller rejects the order, once, under the purchase’s own request id.',
     icon: <ArrowUUpLeft weight="regular" />,
+    visual: <RefundRequest />,
   },
   {
     name: 'Disputes with evidence',
     path: '/v1/customer/disputes',
-    use: 'Matches each dispute to its purchase and answers it with the operator’s reviewed, cited narrative.',
+    use: 'Matches each dispute to its purchase and answers it with the operator’s reviewed narrative, citing these evidence items.',
     icon: <Scales weight="regular" />,
+    visual: <Chips items={EVIDENCE_IDS} label="Evidence items a pack can hold" />,
   },
   {
     name: 'Webhooks',
     path: '/v1/notifications/verify-webhook-signature',
-    use: 'Accepts an order, capture, refund, payout or dispute event only after PayPal confirms its signature.',
+    use: 'Acts on an order, capture, refund, payout or dispute event only after PayPal confirms its signature.',
     icon: <WebhooksLogo weight="regular" />,
+    visual: <Webhooks />,
   },
   {
     name: 'Agent Toolkit, read only',
     path: '@paypal/agent-toolkit',
     use: 'Gives the dispute evidence agent these four tools and no other.',
     icon: <Toolbox weight="regular" />,
-    wide: true,
-    wideFrom: 'lg',
-    visual: (
-      <ul className="flex flex-wrap justify-center gap-2">
-        {['list_disputes', 'get_dispute', 'get_order', 'get_shipment_tracking'].map((tool) => (
-          <li key={tool} className={chip}>
-            {tool}
-          </li>
-        ))}
-      </ul>
-    ),
+    // Wide only in three columns: in two, it pairs with Webhooks.
+    span: 'lg:col-span-2',
+    visual: <Chips items={TOOLKIT_TOOLS} label="The toolkit tools the agent can call" />,
   },
 ];
 
@@ -92,8 +161,8 @@ export function BuiltOnPayPal() {
             icon={tile.icon}
             meta={tile.path}
             description={tile.use}
-            className={tile.wide ? (tile.wideFrom === 'lg' ? 'lg:col-span-2' : 'md:col-span-2') : undefined}
-            visualClassName="min-h-0 py-5"
+            className={tile.span}
+            visualClassName="min-h-40 py-6"
           >
             {tile.visual}
           </FeatureCard>

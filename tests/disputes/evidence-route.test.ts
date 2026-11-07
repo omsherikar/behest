@@ -95,33 +95,22 @@ describe('POST /api/disputes/[id]/evidence', () => {
     expect(await disputeRow()).toMatchObject({ narrative: NARRATIVE, submittedAt: expect.any(Date) });
   });
 
-  it('keeps only the citations of items the evidence pack holds, and drops a claim left citing none', async () => {
+  it('refuses with 400 a narrative citing items the evidence pack does not hold, naming each such claim, and drops nothing', async () => {
     const edited: Narrative = {
       summary: NARRATIVE.summary,
       claims: [
+        NARRATIVE.claims[0],
         { text: 'The parcel was delivered.', evidenceIds: ['tracking'] },
-        { text: 'The buyer approved the order.', evidenceIds: ['approval', 'mandate'] },
+        { text: 'The buyer approved the order.', evidenceIds: ['approval', 'mandate', 'tracking'] },
       ],
     };
-    const submitted: Narrative = {
-      summary: NARRATIVE.summary,
-      claims: [{ text: 'The buyer approved the order.', evidenceIds: ['mandate'] }],
-    };
 
-    expect(await submit(edited)).toEqual({ status: 200, body: { narrative: submitted } });
-    const [[, { notes }]] = paypal.callsTo('provideEvidence');
-    expect(notes).not.toContain('[tracking]');
-    expect(notes).not.toContain('[approval]');
-    expect(notes).not.toContain('The parcel was delivered.');
-    expect((await disputeRow()).narrative).toEqual(submitted);
-  });
-
-  it('answers 400 to a narrative with no claim citing an item the evidence pack holds, submitting nothing', async () => {
-    const uncited = { summary: NARRATIVE.summary, claims: [{ text: 'The parcel was delivered.', evidenceIds: ['tracking'] }] };
-
-    expect(await submit(uncited)).toEqual({
+    expect(await submit(edited)).toEqual({
       status: 400,
-      body: error('No claim cites an evidence item this dispute has. Cite at least one before submitting.'),
+      body: error(
+        'Some claims cite evidence this dispute does not have: claim 2 cites tracking; claim 3 cites approval and tracking. ' +
+          'Its evidence is mandate, readback, receipt, cart and purchase_log.',
+      ),
     });
     expect(paypal.callsTo('provideEvidence')).toEqual([]);
     expect(await disputeRow()).toMatchObject({ narrative: null, submittedAt: null });
@@ -132,7 +121,18 @@ describe('POST /api/disputes/[id]/evidence', () => {
     ['no summary', { claims: NARRATIVE.claims }, 'Send the narrative as a summary and a list of claims.'],
     ['an empty summary', { ...NARRATIVE, summary: '  ' }, 'Write a summary.'],
     ['claims that are not a list', { ...NARRATIVE, claims: 'all of them' }, 'Send the narrative as a summary and a list of claims.'],
+    ['no claims', { ...NARRATIVE, claims: [] }, 'Write at least one claim.'],
     ['an empty claim', { ...NARRATIVE, claims: [{ text: '', evidenceIds: ['mandate'] }] }, 'Every claim needs its text.'],
+    [
+      'a claim citing nothing',
+      { ...NARRATIVE, claims: [{ text: 'It was paid.', evidenceIds: [] }] },
+      'Every claim must cite at least one evidence item.',
+    ],
+    [
+      'a claim citing one item twice',
+      { ...NARRATIVE, claims: [{ text: 'It was paid.', evidenceIds: ['receipt', 'receipt'] }] },
+      'Cite each evidence item once in a claim.',
+    ],
     [
       'a citation of no kind of evidence item',
       { ...NARRATIVE, claims: [{ text: 'It was paid.', evidenceIds: ['invoice'] }] },

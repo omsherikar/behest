@@ -3,35 +3,42 @@ import { connection, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { appDb, appPaypal, appUrl } from '@/lib/app-deps';
 import { disputes } from '@/lib/db/schema';
-import { dropUncited } from '@/lib/disputes/narrative';
-import { assembleEvidencePack, EVIDENCE_IDS } from '@/lib/disputes/pack';
+import type { Narrative } from '@/lib/disputes/narrative';
+import { assembleEvidencePack, EVIDENCE_IDS, type EvidencePack } from '@/lib/disputes/pack';
 import { SubmitEvidenceError, type SubmitEvidenceErrorCode, submitEvidence } from '@/lib/disputes/submit';
 import { FORM_BODY_BYTES, readBody } from '@/lib/http/read-body';
 import { personaRefusal } from '@/lib/session';
 
-// Submits the narrative the operator reviewed to PayPal as the dispute's evidence. The evidence
-// pack is built again from Behest's records and the narrative keeps only its citations of items
-// the pack holds, so an edited narrative can never cite evidence the dispute does not have.
+// Submits the narrative the operator reviewed to PayPal as the dispute's evidence, exactly as the
+// operator sent it. The evidence pack is built again from Behest's records, and a narrative citing
+// an item the pack does not hold is refused, naming the claims to fix: submitting cannot be undone,
+// so nothing the operator approved is dropped on the way to PayPal.
+
+/** `items` as a list in a sentence, such as `a, b and c`. */
+const inProse = (items: readonly string[], conjunction: 'and' | 'or') =>
+  items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${conjunction} ${items.at(-1)}`;
 
 const NOT_JSON = 'Send the narrative as JSON.';
 const SHAPE = 'Send the narrative as a summary and a list of claims.';
-const CITE = `Cite evidence items by their ids: ${EVIDENCE_IDS.slice(0, -1).join(', ')} or ${EVIDENCE_IDS.at(-1)}.`;
-const NO_CLAIMS = 'No claim cites an evidence item this dispute has. Cite at least one before submitting.';
+const CITE = `Cite evidence items by their ids: ${inProse(EVIDENCE_IDS, 'or')}.`;
+
+/** One claim: its text, and the evidence items that show it, each cited once. */
+const Claim = z.strictObject(
+  {
+    text: z.string({ error: SHAPE }).trim().min(1, { error: 'Every claim needs its text.' }),
+    evidenceIds: z
+      .array(z.enum(EVIDENCE_IDS, { error: CITE }), { error: SHAPE })
+      .min(1, { error: 'Every claim must cite at least one evidence item.' })
+      .refine((ids) => new Set(ids).size === ids.length, { error: 'Cite each evidence item once in a claim.' }),
+  },
+  { error: SHAPE },
+);
 
 /** A narrative as the operator edited it, in the shape of a Narrative. */
 const NarrativeRequest = z.strictObject(
   {
     summary: z.string({ error: SHAPE }).trim().min(1, { error: 'Write a summary.' }),
-    claims: z.array(
-      z.strictObject(
-        {
-          text: z.string({ error: SHAPE }).trim().min(1, { error: 'Every claim needs its text.' }),
-          evidenceIds: z.array(z.enum(EVIDENCE_IDS, { error: CITE }), { error: SHAPE }),
-        },
-        { error: SHAPE },
-      ),
-      { error: SHAPE },
-    ),
+    claims: z.array(Claim, { error: SHAPE }).min(1, { error: 'Write at least one claim.' }),
   },
   { error: SHAPE },
 );
@@ -48,7 +55,21 @@ const REFUSALS: Record<Exclude<SubmitEvidenceErrorCode, 'notes_too_long'>, [stat
 const error = (status: number, message: string) => Response.json({ error: { message } }, { status });
 const refuse = (code: keyof typeof REFUSALS) => error(...REFUSALS[code]);
 
-/** `POST { summary, claims }`: submits the narrative and returns `{ narrative }`, the narrative as submitted. */
+/**
+ * Why the narrative cannot be submitted as it stands: the claims, numbered from 1, that cite items
+ * the pack does not hold. Null when every citation names an item of the pack.
+ */
+function uncitedClaims(narrative: Narrative, pack: EvidencePack): string | null {
+  const held = pack.items.map((item) => item.id);
+  const uncited = narrative.claims.flatMap(({ evidenceIds }, index) => {
+    const missing = evidenceIds.filter((id) => !held.includes(id));
+    return missing.length > 0 ? [`claim ${index + 1} cites ${inProse(missing, 'and')}`] : [];
+  });
+  if (uncited.length === 0) return null;
+  return `Some claims cite evidence this dispute does not have: ${uncited.join('; ')}. Its evidence is ${inProse(held, 'and')}.`;
+}
+
+/** `POST { summary, claims }`: submits the narrative and returns `{ narrative }`, as submitted after trimming. */
 export async function POST(request: NextRequest, ctx: RouteContext<'/api/disputes/[id]/evidence'>) {
   // Reads and writes the database on every request, never at build time.
   await connection();
@@ -84,8 +105,9 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/dispute
   if (!dispute.purchaseId) return refuse('unmatched');
   if (dispute.submittedAt) return refuse('already_submitted');
 
-  const narrative = dropUncited(parsed.data, await assembleEvidencePack(db, id, base));
-  if (narrative.claims.length === 0) return error(400, NO_CLAIMS);
+  const narrative = parsed.data;
+  const uncited = uncitedClaims(narrative, await assembleEvidencePack(db, id, base));
+  if (uncited) return error(400, uncited);
 
   try {
     await submitEvidence({ db, paypal, now: () => new Date(), appUrl: base }, { disputeId: id, narrative });

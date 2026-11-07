@@ -58,10 +58,10 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
 
   if (onboarded) {
     return (
-      <>
+      <div className="grid gap-4">
         {outcome && <OutcomePanel outcome={outcome} />}
         {children}
-      </>
+      </div>
     );
   }
 

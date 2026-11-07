@@ -2,92 +2,89 @@
 
 import { browserSupportsWebAuthn, startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { useState } from 'react';
+import { nextPasskeyStep } from '@/lib/buyer-pages/passkey-flow';
 import type { MandatePolicy } from '@/lib/domain/policy';
+import { post, RequestFailed, type Signed } from './requests';
 
-// Confirming a mandate with the buyer's passkey: their own device signs the exact mandate they
-// confirm, which a session confirmation cannot show. A buyer with no passkey yet registers one
-// first. Self-contained, so any page that confirms a mandate can place it beside its confirm button.
+// Confirming a mandate with a passkey registered to the buyer's account, which signs the exact
+// mandate they confirm, something a session confirmation cannot show. Every visitor shares the demo
+// buyer, so the account's passkeys may live on other devices: when this device cannot sign, or the
+// buyer asks to use a passkey here, it registers one of its own and signs once more. Self-contained,
+// so any page that confirms a mandate can place it beside its confirm button.
 
 /** What the confirm route signs: the compiled mandate and its confirm token. */
 export type Confirmable = { text: string; policy: MandatePolicy; confirmToken: string };
-/** What a confirm returns. `approveUrl` is null when the buyer's wallet is already linked. */
-export type Signed = { mandateId: string; approveUrl: string | null };
 
 type Ceremony<T> = { options: T; ticket: string };
+type SigningOptions = Ceremony<Parameters<typeof startAuthentication>[0]['optionsJSON']>;
 
-/** A failed step, with a message the buyer can read, the HTTP status and the route's error code, if any. */
-class StepFailed extends Error {
-  constructor(
-    message: string,
-    readonly status: number | null,
-    readonly code?: string,
-  ) {
-    super(message);
-  }
-}
+const NOT_CREATED = 'Your passkey was not created. Try again, or confirm without it.';
+const NOT_SIGNED = 'Your passkey did not sign the mandate. Try again, or confirm without it.';
 
-/** An error message from a route, as a sentence: capitalized, with a full stop. */
-function sentence(message: string): string {
-  const text = message.charAt(0).toUpperCase() + message.slice(1);
-  return /[.!?]$/.test(text) ? text : `${text}.`;
-}
-
-/** POSTs JSON to a route and returns its JSON body, or throws StepFailed. */
-async function post<T>(url: string, body: unknown): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  } catch {
-    throw new StepFailed('Could not reach Behest. Check your connection and try again.', null);
-  }
-  const json: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
-    const error = (json as { error?: { message?: unknown; code?: unknown } } | null)?.error;
-    const message = typeof error?.message === 'string' ? sentence(error.message) : 'Something went wrong. Try again.';
-    throw new StepFailed(message, response.status, typeof error?.code === 'string' ? error.code : undefined);
-  }
-  return json as T;
-}
-
-/** Runs the browser's passkey prompt, turning a cancel or an authenticator error into a StepFailed. */
+/** Runs the browser's passkey prompt, turning a cancel or an authenticator error into a RequestFailed. */
 async function onDevice<T>(prompt: () => Promise<T>, message: string): Promise<T> {
   try {
     return await prompt();
   } catch {
-    throw new StepFailed(message, null);
+    throw new RequestFailed(message, null);
   }
 }
 
-/** Registers a passkey for the buyer on this device. */
-async function registerPasskey(): Promise<void> {
+/** Registers a passkey on this device. The options exclude the account's passkeys, so a device registers once. */
+async function registerHere(): Promise<void> {
   const { options, ticket } = await post<Ceremony<Parameters<typeof startRegistration>[0]['optionsJSON']>>(
     '/api/passkeys/register/options',
     {},
   );
-  const response = await onDevice(
-    () => startRegistration({ optionsJSON: options }),
-    'Your passkey was not created. Try again, or confirm without it.',
-  );
+  const response = await onDevice(() => startRegistration({ optionsJSON: options }), NOT_CREATED);
   await post('/api/passkeys/register/verify', { response, ticket });
 }
 
-type SigningOptions = Ceremony<Parameters<typeof startAuthentication>[0]['optionsJSON']>;
-
-/** The options for signing this mandate, registering a passkey first when the buyer has none. */
-async function signingOptions(mandate: Confirmable): Promise<SigningOptions> {
+/** The options for signing this mandate, or null when the account has no passkey yet. */
+async function signingOptions(mandate: Confirmable): Promise<SigningOptions | null> {
   try {
     return await post<SigningOptions>('/api/mandates/sign/options', mandate);
   } catch (failure) {
-    if (!(failure instanceof StepFailed) || failure.code !== 'no_passkey') throw failure;
+    if (failure instanceof RequestFailed && failure.code === 'no_passkey') return null;
+    throw failure;
   }
-  await registerPasskey();
-  return post<SigningOptions>('/api/mandates/sign/options', mandate);
 }
 
 /**
- * A "Sign with passkey" button that signs `mandate` with the buyer's passkey and confirms it. It
- * calls `onStart` when it begins, then `onSigned` or `onFailed`, so the page can show progress and
- * the outcome as it does for its own confirm.
+ * Signs `mandate` with a passkey and confirms it. Registers a passkey on this device first when
+ * `onThisDevice`, and otherwise when the account has none or this device could not sign; after
+ * registering it signs once more, then gives up.
+ */
+async function signMandate(mandate: Confirmable, onThisDevice: boolean): Promise<Signed> {
+  let registeredHere = false;
+  let step = nextPasskeyStep('start', { onThisDevice, registeredHere });
+  for (;;) {
+    if (step === 'register') {
+      await registerHere();
+      registeredHere = true;
+    }
+    const signing = await signingOptions(mandate);
+    if (signing === null) {
+      step = nextPasskeyStep('no_passkey', { onThisDevice, registeredHere });
+      if (step === 'give_up') throw new RequestFailed(NOT_SIGNED, null);
+      continue;
+    }
+    let assertion;
+    try {
+      assertion = await startAuthentication({ optionsJSON: signing.options });
+    } catch {
+      step = nextPasskeyStep('not_signed', { onThisDevice, registeredHere });
+      if (step === 'give_up') throw new RequestFailed(NOT_SIGNED, null);
+      continue;
+    }
+    return post<Signed>('/api/mandates/confirm', { ...mandate, assertion, ticket: signing.ticket });
+  }
+}
+
+/**
+ * A "Sign with passkey" button, and a "Use a passkey on this device" one that registers a passkey
+ * here before signing. Either signs `mandate` and confirms it, calling `onStart` when it begins, then
+ * `onSigned` or `onFailed`, so the page can show progress and the outcome as it does for its confirm.
  */
 export function SignWithPasskey({
   mandate,
@@ -106,22 +103,17 @@ export function SignWithPasskey({
 }) {
   const [signing, setSigning] = useState(false);
 
-  async function sign() {
+  async function sign(onThisDevice: boolean) {
     if (!mandate) return;
     setSigning(true);
     onStart();
     try {
       if (!browserSupportsWebAuthn()) {
-        throw new StepFailed('This browser cannot use passkeys. Confirm without one instead.', null);
+        throw new RequestFailed('This browser cannot use passkeys. Confirm without one instead.', null);
       }
-      const { options, ticket } = await signingOptions(mandate);
-      const assertion = await onDevice(
-        () => startAuthentication({ optionsJSON: options }),
-        'Your passkey did not sign the mandate. Try again, or confirm without it.',
-      );
-      onSigned(await post<Signed>('/api/mandates/confirm', { ...mandate, assertion, ticket }));
+      onSigned(await signMandate(mandate, onThisDevice));
     } catch (failure) {
-      const known = failure instanceof StepFailed;
+      const known = failure instanceof RequestFailed;
       onFailed(known ? failure.message : 'Something went wrong. Try again.', known ? failure.status : null);
     } finally {
       setSigning(false);
@@ -129,8 +121,18 @@ export function SignWithPasskey({
   }
 
   return (
-    <button type="button" onClick={() => void sign()} disabled={disabled || !mandate} className={className}>
-      {signing ? 'Waiting for your passkey...' : 'Sign with passkey'}
-    </button>
+    <>
+      <button type="button" onClick={() => void sign(false)} disabled={disabled || !mandate} className={className}>
+        {signing ? 'Waiting for your passkey...' : 'Sign with passkey'}
+      </button>
+      <button
+        type="button"
+        onClick={() => void sign(true)}
+        disabled={disabled || !mandate}
+        className="text-sm font-semibold text-pp-blue hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Use a passkey on this device
+      </button>
+    </>
   );
 }

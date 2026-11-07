@@ -74,6 +74,7 @@ function isPurchaseDetail(value: unknown): value is PurchaseDetail {
     isString(mandate.policyHash) &&
     isString(mandate.confirmedAt) &&
     oneOf(mandate.confirmation, ['session', 'passkey']) &&
+    isStringOrNull(mandate.credentialId) &&
     Array.isArray(outcomes) &&
     outcomes.every((o) => isRecord(o) && isString(o.rule) && oneOf(o.result, ['pass', 'ask', 'block', 'skip']) && isString(o.detail)) &&
     (intent === null || (isRecord(intent) && oneOf(intent.verdict, ['consistent', 'needs_human', 'inconsistent', 'unavailable']) && isStringList(intent.reasons))) &&
@@ -82,7 +83,8 @@ function isPurchaseDetail(value: unknown): value is PurchaseDetail {
     isStringOrNull(paypal.captureId) &&
     isStringOrNull(paypal.capturedAt) &&
     isStringOrNull(approveUrl) &&
-    (receipt === null || (isRecord(receipt) && isString(receipt.id) && isString(receipt.keyId) && isString(receipt.jws))) &&
+    (receipt === null ||
+      (isRecord(receipt) && isString(receipt.id) && isString(receipt.keyId) && isString(receipt.jws) && isStringOrNull(receipt.decisionHash))) &&
     (cart === null || isRecord(cart)) &&
     (change === null || (isRecord(change) && oneOf(change.kind, ['allowed', 'changes', 'cannot'])))
   );

@@ -12,6 +12,7 @@ import {
 } from '@/lib/db/schema';
 import type { Cart } from '@/lib/domain/cart';
 import type { Verdict } from '@/lib/domain/verdict';
+import { mandateCredentialId, receiptDecisionHash } from '@/lib/ui/signed-claims';
 import { type TraceStates, trailFromPurchase } from '@/lib/ui/trail';
 import { paypalApproveUrl } from './approve-url';
 import { purchaseReasons } from './reasons';
@@ -39,13 +40,21 @@ export type PurchaseDetail = {
   /** Why it was not simply allowed: failed gate rules, then the intent check's reasons. */
   reasons: string[];
   trace: TraceStates;
-  mandate: { id: string; policyHash: string; confirmedAt: string; confirmation: 'session' | 'passkey' };
+  mandate: {
+    id: string;
+    policyHash: string;
+    confirmedAt: string;
+    confirmation: 'session' | 'passkey';
+    /** The credential id of the passkey that signed it, as the signed mandate names it; null when confirmed by session. */
+    credentialId: string | null;
+  };
   outcomes: StoredRuleOutcome[];
   intent: StoredIntentResult | null;
   paypal: { orderId: string | null; captureId: string | null; capturedAt: string | null };
   /** The PayPal link to approve it, while it waits for the buyer. */
   approveUrl: string | null;
-  receipt: { id: string; keyId: string; jws: string } | null;
+  /** The signed receipt; `decisionHash` is the agent's decision record it commits to, or null when it names none. */
+  receipt: { id: string; keyId: string; jws: string; decisionHash: string | null } | null;
   /** The canonical cart, which the receipt verifier checks the receipt against. */
   cart: Cart | null;
   /** What would have let it through; null for a purchase the gate and the intent check allowed. */
@@ -105,6 +114,7 @@ export async function purchaseDetails(
           policyHash: mandate.policyHash,
           confirmedAt: mandate.confirmedAt.toISOString(),
           confirmation: mandate.confirmation,
+          credentialId: mandateCredentialId(mandate.jws),
         },
         outcomes: purchase.gateOutcomes,
         intent: purchase.intent,
@@ -114,7 +124,12 @@ export async function purchaseDetails(
           capturedAt: purchase.capturedAt?.toISOString() ?? null,
         },
         approveUrl: purchase.status === 'awaiting_approval' ? paypalApproveUrl(purchase.approveUrl) : null,
-        receipt: receipt && { id: receipt.id, keyId: keyIdOf(receipt.jws, receipt.keyId), jws: receipt.jws },
+        receipt: receipt && {
+          id: receipt.id,
+          keyId: keyIdOf(receipt.jws, receipt.keyId),
+          jws: receipt.jws,
+          decisionHash: receiptDecisionHash(receipt.jws),
+        },
         cart: purchase.cart,
         change: allowed ? null : await changeFor(db, purchase.id, now),
       };

@@ -181,7 +181,7 @@ describe("a proposal's description", () => {
     status: 'awaiting_approval',
     reasons: ['Over $25.00, so you approve it.'],
     trace: { mandate: 'done', gate: 'held', intent: 'done', paypal: 'held', receipt: 'not_reached' },
-    mandate: { id: 'mandate-1', policyHash: 'a'.repeat(64), confirmedAt: '2026-11-01T09:00:00.000Z', confirmation: 'session' },
+    mandate: { id: 'mandate-1', policyHash: 'a'.repeat(64), confirmedAt: '2026-11-01T09:00:00.000Z', confirmation: 'session', credentialId: null },
     outcomes: [{ rule: 'ask_threshold', result: 'ask', detail: '$9.00 is over your $5.00 approval limit' }],
     intent: { verdict: 'consistent', reasons: [] },
     paypal: { orderId: 'ORDER-1', captureId: null, capturedAt: null },
@@ -195,12 +195,23 @@ describe("a proposal's description", () => {
     expect(parseChunks([frame({ type: 'proposal', outcome, view })])).toEqual([{ type: 'proposal', outcome, view }]);
   });
 
+  it('keeps the passkey the mandate names and the decision record the receipt commits to', () => {
+    const signed = {
+      ...view,
+      mandate: { ...view.mandate, confirmation: 'passkey' as const, credentialId: 'cred-1' },
+      receipt: { id: 'r', keyId: 'k', jws: 'a.b.c', decisionHash: 'd'.repeat(64) },
+    };
+    expect(parseChunks([frame({ type: 'proposal', outcome, view: signed })])).toEqual([{ type: 'proposal', outcome, view: signed }]);
+  });
+
   it('is left out, keeping the outcome, when it is malformed or for another purchase', () => {
     for (const bad of [
       { ...view, trace: { ...view.trace, gate: 'maybe' } },
       { ...view, items: [{ sku: 'TUR-100' }] },
       { ...view, outcomes: [{ rule: 'ask_threshold', result: 'perhaps', detail: '' }] },
       { ...view, receipt: { id: 'r' } },
+      { ...view, receipt: { id: 'r', keyId: 'k', jws: 'a.b.c', decisionHash: 7 } },
+      { ...view, mandate: { ...view.mandate, credentialId: undefined } },
       { ...view, id: 'another-purchase' },
       'a description',
     ]) {

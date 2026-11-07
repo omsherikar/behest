@@ -1,6 +1,7 @@
 import { AuthorityTrace } from '@/components/ui/authority-trace';
 import { buttonClass } from '@/components/ui/button';
 import { JwsView } from '@/components/ui/jws-view';
+import { confirmationFields } from '@/components/ui/mandate-confirmation';
 import { Money } from '@/components/ui/money';
 import { ProofFields } from '@/components/ui/proof-fields';
 import { ProofId } from '@/components/ui/proof-id';
@@ -78,7 +79,7 @@ export function Hero() {
                   { label: 'Mandate id', value: <ProofId value={mandate.id} label="Mandate id" /> },
                   { label: 'Policy hash', value: <ProofId value={mandate.policyHash} label="Policy hash" /> },
                   { label: 'Signed at', value: <span className="font-mono text-meta">{utcMinute(mandate.confirmedAt)}</span> },
-                  { label: 'Confirmed by', value: 'Your signed-in session' },
+                  ...confirmationFields(mandate.confirmation, mandate.confirmation === 'passkey' ? mandate.passkey.credentialId : null),
                 ]}
               />
             ),

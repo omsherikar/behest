@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { connection } from 'next/server';
 import { JwsView } from '@/components/ui/jws-view';
+import { confirmationFields } from '@/components/ui/mandate-confirmation';
 import { Notice, TONE_KIND } from '@/components/ui/notice';
 import { PageHeader } from '@/components/ui/page-header';
 import { ProofFields } from '@/components/ui/proof-fields';
@@ -11,6 +12,7 @@ import { ProofId } from '@/components/ui/proof-id';
 import { StateGlyph } from '@/components/ui/state-glyph';
 import { appDb, demoBuyerId } from '@/lib/app-deps';
 import { mandates, type WalletStatus, wallets } from '@/lib/db/schema';
+import { mandateCredentialId } from '@/lib/ui/signed-claims';
 import { getPersona, SESSION_COOKIE } from '@/lib/session';
 import { MandateForm } from './mandate-form';
 
@@ -156,7 +158,7 @@ function SignedMandate({ mandate, wallet }: { mandate: ActiveMandate; wallet: Wa
             { label: 'Mandate id', value: <ProofId value={mandate.id} label="Mandate id" /> },
             { label: 'Policy hash', value: <ProofId value={mandate.policyHash} label="Policy hash" /> },
             { label: 'Signed at', value: <span className="font-mono text-meta">{dateTime.format(mandate.confirmedAt)} UTC</span> },
-            { label: 'Confirmed by', value: mandate.confirmation === 'passkey' ? 'Your passkey' : 'Your signed-in session' },
+            ...confirmationFields(mandate.confirmation, mandateCredentialId(mandate.jws)),
             { label: 'Expires', value: mandate.expiresAt ? `${dateTime.format(mandate.expiresAt)} UTC` : 'Never' },
           ]}
         />

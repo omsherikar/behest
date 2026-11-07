@@ -4,6 +4,7 @@ import type { PurchaseDetail } from '@/lib/buyer-pages/detail';
 import { AuthorityTrace, type TraceProof } from '@/components/ui/authority-trace';
 import { buttonClass } from '@/components/ui/button';
 import { JwsView } from '@/components/ui/jws-view';
+import { confirmationFields } from '@/components/ui/mandate-confirmation';
 import { ProofFields } from '@/components/ui/proof-fields';
 import { ProofId } from '@/components/ui/proof-id';
 import { RuleResults } from '@/components/ui/rule-results';
@@ -41,7 +42,7 @@ export function purchaseProof(detail: PurchaseDetail): TraceProof {
           { label: 'Mandate id', value: <ProofId value={mandate.id} label="Mandate id" /> },
           { label: 'Policy hash', value: <ProofId value={mandate.policyHash} label="Policy hash" /> },
           { label: 'Signed at', value: <Time iso={mandate.confirmedAt} /> },
-          { label: 'Confirmed by', value: mandate.confirmation === 'passkey' ? 'Your passkey' : 'Your signed-in session' },
+          ...confirmationFields(mandate.confirmation, mandate.credentialId),
         ]}
       />
     ),
@@ -95,6 +96,9 @@ export function purchaseProof(detail: PurchaseDetail): TraceProof {
           fields={[
             { label: 'Receipt id', value: <ProofId value={receipt.id} label="Receipt id" /> },
             { label: 'Key id', value: <ProofId value={receipt.keyId} label="Key id" /> },
+            ...(receipt.decisionHash
+              ? [{ label: 'Decision record', value: <ProofId value={receipt.decisionHash} label="Decision record hash" /> }]
+              : []),
           ]}
         />
         <JwsView jws={receipt.jws} decoded="folded" token="short" />

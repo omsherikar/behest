@@ -115,9 +115,26 @@ describe('purchaseDetails', () => {
     const [paid] = await purchaseDetails(db, { buyerId, purchaseId: ids.paid }, NOW);
     expect(paid.trace).toEqual({ mandate: 'done', gate: 'done', intent: 'done', paypal: 'done', receipt: 'done' });
     expect(paid.paypal).toEqual({ orderId: 'ORDER-1', captureId: 'CAPTURE-1', capturedAt: at(2).toISOString() });
-    expect(paid.receipt).toEqual({ id: RECEIPT_ID, keyId: 'stored-kid', jws: 'not.a.jws' });
-    expect(paid.mandate).toMatchObject({ id: mandateId, confirmation: 'session' });
+    expect(paid.receipt).toEqual({ id: RECEIPT_ID, keyId: 'stored-kid', jws: 'not.a.jws', decisionHash: null });
+    expect(paid.mandate).toMatchObject({ id: mandateId, confirmation: 'session', credentialId: null });
     expect(paid.change).toBeNull();
+  });
+
+  it('names the passkey that signed the mandate and the decision record the receipt commits to', async () => {
+    const token = (payload: object) =>
+      [{ alg: 'EdDSA' }, payload].map((part) => Buffer.from(JSON.stringify(part)).toString('base64url')).join('.') + '.c2ln';
+    const passkey = { credentialId: 'cred-AbC_123', publicKey: 'pQECAyYgASFYIA', alg: -7 };
+    const [{ jws: mandateJws }] = await db.select({ jws: mandates.jws }).from(mandates).where(eq(mandates.id, mandateId));
+    await db.update(mandates).set({ confirmation: 'passkey', jws: token({ confirmation: 'passkey', passkey }) }).where(eq(mandates.id, mandateId));
+    await db.update(receipts).set({ jws: token({ v: 1, agent: { decisionHash: 'd'.repeat(64) } }) }).where(eq(receipts.id, RECEIPT_ID));
+    try {
+      const [paid] = await purchaseDetails(db, { buyerId, purchaseId: ids.paid }, NOW);
+      expect(paid.mandate).toMatchObject({ confirmation: 'passkey', credentialId: 'cred-AbC_123' });
+      expect(paid.receipt?.decisionHash).toBe('d'.repeat(64));
+    } finally {
+      await db.update(mandates).set({ confirmation: 'session', jws: mandateJws }).where(eq(mandates.id, mandateId));
+      await db.update(receipts).set({ jws: 'not.a.jws' }).where(eq(receipts.id, RECEIPT_ID));
+    }
   });
 
   it('gives a held purchase its approval link and the changes that would have allowed it', async () => {

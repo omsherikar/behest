@@ -40,16 +40,21 @@ describe('enrichListing', () => {
     await expect(enrichListing(draft, searchReturning(product('c3-pallet', 3000)))).resolves.toBeNull();
   });
 
-  it('accepts a median from 0.2 to 5 times the draft price, both ends included', async () => {
+  it('keeps a median below the draft price however far below, up to 5 times above it, end included', async () => {
     for (const [median, accepted] of [
-      [59, false],
+      [1, true],
+      [59, true],
       [60, true],
       [1500, true],
       [1501, false],
     ] as const) {
       const result = await enrichListing(draft, searchReturning(product('c3', median)));
-      expect(result === null ? 'rejected' : 'accepted').toBe(accepted ? 'accepted' : 'rejected');
+      expect(result === null ? 'rejected' : 'accepted', `median ${median}`).toBe(accepted ? 'accepted' : 'rejected');
     }
+  });
+
+  it('rejects a median of 0, which benchmarks nothing', async () => {
+    await expect(enrichListing(draft, searchReturning(product('c3-free', 0)))).resolves.toBeNull();
   });
 
   it('rejects a draft priced at 0, or at something that is not a number', async () => {

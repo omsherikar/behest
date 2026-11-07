@@ -61,8 +61,10 @@ const STATUS: Record<OnboardErrorCode, number> = {
   invalid_name: 400,
   invalid_slug: 400,
   invalid_payout_email: 400,
+  name_screened: 400,
   no_listings: 400,
   slug_taken: 409,
+  name_taken: 409,
   build_failed: 502,
 };
 

@@ -21,7 +21,7 @@ The full design, with its invariants, state machine, receipt format and decision
 
 ## What the demo shows
 
-Open the app and pick a persona on the home page. There is no sign-up: the persona is held in a signed, HTTP-only cookie, and every route checks it on the server. The demo buyer is Priya; the demo seller is Ravi's Spice Co.
+Open the app and pick a persona on the home page. There is no sign-up: the persona is held in a signed, HTTP-only cookie, and every page and route that needs a persona checks it on the server. The seller catalog and order intake, receipt verification, PayPal webhooks, the public key set, the health check and the session route itself are public by design. The demo buyer is Priya; the demo seller is Ravi's Spice Co.
 
 ### Buyer
 
@@ -70,7 +70,7 @@ The operator also sees the starter's PayPal data pages (`/products`, `/plans`, `
 
 **AI and data**
 
-- **Claude (Opus 5.5) through the Anthropic API**, with the official TypeScript SDK. Six uses, all routed through [lib/llm](lib/llm), which logs every call's tokens and cost and enforces a daily spend cap:
+- **Claude (Opus 5.5) through the Anthropic API**, with the official TypeScript SDK. Six uses, all routed through [lib/llm](lib/llm), which logs every call's tokens and cost and enforces daily spend caps:
   - mandate compiler (structured output);
   - shopping agent (tool loop, at most 12 turns);
   - intent check (structured output, can only tighten);
@@ -113,11 +113,12 @@ What to put in `.env` (each variable is described in [.env.example](.env.example
 | `AG_STUDIO` | Optional AG Studio licence key |
 | `DATABASE_URL` | Optional locally; required in production |
 | `LLM_DAILY_CAP_USD` | Optional daily model budget, default `5` |
+| `LLM_ANALYST_DAILY_CAP_USD`, `LLM_CATALOG_DAILY_CAP_USD` | Optional daily budgets of their own for the dashboard analyst and the catalog builder, default `1` each; their spend also counts toward `LLM_DAILY_CAP_USD` |
 | `DEMO_RESET_KEY` | Optional; turns on the operator's demo reset |
 
 **Free runs with `LLM_STUB=1`.** With `LLM_STUB=1`, no request reaches Claude: each model route replays a recorded Claude answer from [tests/fixtures/llm](tests/fixtures/llm), at no cost. Every route gives its recorded answer whatever you type: the mandate compiles to $60 a month on groceries and spices, approval above $25, never electronics; the shopping agent proposes one bag of turmeric from Ravi's Spice Co.; the intent check finds the cart consistent. PayPal sandbox calls are still real. The stub is refused when `NODE_ENV` is `production`.
 
-**Resetting the demo.** `npm run seed` can be run again safely. To clear purchases, mandates and jobs on a running app, the operator persona can POST to `/api/demo/reset` with the `x-demo-reset-key` header set to `DEMO_RESET_KEY` (at least 16 characters) and the body `{"confirm":"reset"}`. A linked wallet is kept unless the body also has `"full": true`. The reset refuses to run while a payment is in progress.
+**Resetting the demo.** `npm run seed` can be run again safely. To clear purchases, mandates and jobs on a running app, the operator persona can POST to `/api/demo/reset` with the `x-demo-reset-key` header set to `DEMO_RESET_KEY` (at least 16 characters) and the body `{"confirm":"reset"}`. A linked wallet is kept unless the body also has `"full": true`. The reset refuses to run while a purchase that changed in the last 30 minutes is being charged, or while a job is running.
 
 Other scripts: `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`, `npm run start`.
 
@@ -150,7 +151,7 @@ Rate limits key on the client address. Behind Caddy, `TRUSTED_PROXY_HOPS=1` pick
 
 - **The gate decides.** Every purchase is decided by plain TypeScript ([lib/gate](lib/gate)) with no model in it. Prices, categories and sellers are re-loaded from Behest's database; the agent contributes only SKUs and quantities. Any exception in the gate blocks.
 - **Models only tighten.** Claude's intent check can move ALLOW to ASK and ASK to BLOCK, never the other way. A failed, refused or capped model call sends the purchase to the buyer. The readback the buyer confirms is rendered by code from the policy.
-- **Untrusted text is quoted.** Seller listings, Channel3 results, PayPal dispute text and the agent's own rationale reach Claude only inside delimited tags it is told to treat as data, and they never reach the gate. Listings whose text speaks to AI agents are flagged at onboarding and hidden from agents; the gate also blocks any cart that contains one.
+- **Untrusted text is quoted.** Seller listings, Channel3 results, PayPal dispute text and the agent's own rationale reach Claude only inside delimited tags it is told to treat as data. One gate input does come from seller text: each listing's category, which the catalog builder assigns from what the seller wrote (see [Known limitations](#known-limitations)). Listings whose text speaks to AI agents are flagged at onboarding and hidden from agents; the gate also blocks any cart that contains one.
 - **Signed receipts with a public JWKS.** Mandates and receipts are Ed25519 JWS, and the policy and cart hashes inside them are SHA-256 over RFC 8785 canonical JSON. Anyone can verify them against [`/.well-known/jwks.json`](app/.well-known/jwks.json/route.ts); sellers check signature, freshness (15 minutes), seller, cart hash, amount and replay, and seller intake never reads Behest's purchase tables.
 - **Idempotent PayPal calls.** Every money-moving request carries a `PayPal-Request-Id` derived from the purchase and the step (`charge`, `capture`, `refund`), and payouts a matching `sender_batch_id`, so a retry can never charge, pay or refund twice.
 - **Sandbox only.** Behest uses PayPal sandbox accounts and moves no real money. Secrets live in environment variables and are never committed.
@@ -158,6 +159,17 @@ Rate limits key on the client address. Behind Caddy, `TRUSTED_PROXY_HOPS=1` pick
 ## Sandbox honesty
 
 Discovery through Channel3 is real: the shopping agent and seller onboarding query Channel3's live product search for open-web prices. Checkout happens only at sellers registered on Behest, because sandbox money moves only between sandbox accounts. Open-web products are shown to the agent for price comparison and are never bought.
+
+## Known limitations
+
+- **Spend caps are checked, not reserved.** Each model call checks the daily caps before it starts, so calls already running, or several started at once, can spend past a cap.
+- **A lost charge can be replayed after its mandate is revoked.** When PayPal's answer to a charge is lost, Behest sends the same request again, under the same request id, for up to 5 hours. It does so even if the buyer revoked the mandate after the first attempt was sent: PayPal may already have taken the money, and refusing the replay would leave that payment unrecorded.
+- **A refund event can run out of retries first.** A refund or reversal PayPal reports while Behest's own refund of the same purchase still awaits PayPal's answer is retried for about 26 minutes, but a refund whose answer was lost is retried for about an hour. If the lost answer takes longer, the event's job ends dead before it records what the event reports.
+- **What needs an operator has no page.** Events that ask for an operator, such as a purchase left charging for half an hour (`charge_stale`), a seller that never answers or a refund that is stuck, and jobs that ran out of retries are kept only in the database; [docs/deploy.md](docs/deploy.md#checks-for-the-operator) has the two queries that list them. A purchase can wait there for good: an order whose delivery kept failing for more than 15 minutes comes back `expired` when it is delivered again, and the purchase stays `captured`, with the buyer charged and the seller unpaid, until an operator acts.
+- **The demo reset is broad.** It does not refuse while a captured purchase awaits delivery or a payout is unfinished, and it removes their records with the rest even though sandbox money may still be moving. It keeps every seller, including ones visitors onboarded.
+- **Cancelling at PayPal does not cancel the purchase.** A buyer who cancels on PayPal's approval page sees a notice, but the purchase stays awaiting approval, holding its budget, until its 3-hour approval window expires.
+- **A listing's category is written by a model from seller text.** The catalog builder assigns each listing's category from what the seller wrote, and the gate's category rules read it, so a dishonest seller can list earbuds as spices. The intent check and the mandate's seller lists are the backstop.
+- **Someone else can present a receipt first.** Every persona's dashboard data carries receipt signatures, and the seller order route is public. After a failed first delivery, a third party could present the still-fresh receipt before Behest delivers again; Behest's redelivery then comes back `replayed`, and the purchase stays `captured` for an operator.
 
 ## Credits
 

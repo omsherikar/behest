@@ -13,7 +13,7 @@ describe('statusWords', () => {
 
   it('says a charge is still being confirmed, and that an asked purchase waits for PayPal', () => {
     expect(statusWords('charging')).toBe('Confirming payment');
-    expect(statusWords('awaiting_approval')).toBe('Approve at PayPal');
+    expect(statusWords('awaiting_approval')).toBe('Waiting for your approval');
   });
 
   it('says not bought for a purchase that was blocked, failed or cancelled', () => {

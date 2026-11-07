@@ -7,7 +7,7 @@ import { plural } from '@/lib/domain/words';
 const STATUS_WORDS: Record<PurchaseStatus, string> = {
   proposed: 'Being checked',
   charging: 'Confirming payment',
-  awaiting_approval: 'Approve at PayPal',
+  awaiting_approval: 'Waiting for your approval',
   captured: 'Paid',
   accepted: 'Paid',
   settled: 'Paid',

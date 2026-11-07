@@ -12,7 +12,7 @@ import type { DisputeDetail } from '@/lib/paypal/port';
 import { paypalReadOnlyTools, READ_ONLY_TOOLS, type ToolkitLike } from '@/lib/paypal/toolkit-bridge';
 import { appendEvent } from '@/lib/purchases/events';
 import { fakeClaude, type FakeClaudeRequest, type FakeToolUse, messageJson } from '@/tests/helpers/fake-claude';
-import { PASSED, setUpCaptured } from '@/tests/helpers/purchase-deps';
+import { jwks, PASSED, setUpCaptured } from '@/tests/helpers/purchase-deps';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 // The first createTestDb() call in a file migrates a template database, which can take several
@@ -162,7 +162,7 @@ async function poisonedPack(): Promise<EvidencePack> {
     .insert(disputes)
     .values({ paypalDisputeId: 'PP-D-1001', purchaseId: s.purchaseId, reason: 'UNAUTHORISED', status: 'OPEN', amountCents: 1875 })
     .returning({ id: disputes.id });
-  return assembleEvidencePack(s.db, row.id, 'https://behest.example.com');
+  return assembleEvidencePack(s.db, row.id, 'https://behest.example.com', jwks);
 }
 
 type Block = { type: string; tool_use_id?: string; content?: unknown; is_error?: boolean };
@@ -472,7 +472,7 @@ describe('draftNarrative', () => {
       .insert(disputes)
       .values({ paypalDisputeId: 'PP-D-1001', purchaseId: s.purchaseId, reason: 'UNAUTHORISED', status: 'OPEN', amountCents: 1875 })
       .returning({ id: disputes.id });
-    const evidence = await assembleEvidencePack(s.db, row.id, 'https://behest.example.com');
+    const evidence = await assembleEvidencePack(s.db, row.id, 'https://behest.example.com', jwks);
     const { fake: claude, draft } = await setup(
       [
         messageJson({ toolUses: [readEvidence('mandate'), readEvidence('purchase_log')] }),
@@ -580,6 +580,29 @@ describe('dropUncited', () => {
     };
 
     expect(dropUncited(narrative, pack)).toEqual(NARRATIVE);
+  });
+
+  it("keeps a claim citing the agent's decision when the pack has that item, and drops it when not", () => {
+    const decided: EvidencePack = {
+      ...pack,
+      items: [...pack.items, { id: 'decision', title: "The agent's decision", body: 'Decision record hash: abc.' }],
+    };
+    const claim = { text: 'The agent compared two listings and chose the cheaper one.', evidenceIds: ['decision', 'cart'] };
+    const narrative = { summary: NARRATIVE.summary, claims: [claim] };
+
+    expect(dropUncited(narrative, decided).claims).toEqual([claim]);
+    expect(dropUncited(narrative, pack).claims).toEqual([{ ...claim, evidenceIds: ['cart'] }]);
+  });
+
+  it('describes a passkey mandate exactly: a passkey registered to the account signed its hashes, with the user present', () => {
+    expect(DISPUTE_SYSTEM_PROMPT).toContain("a passkey registered to the buyer's Behest account");
+    expect(DISPUTE_SYSTEM_PROMPT).toContain('with the user present');
+    expect(DISPUTE_SYSTEM_PROMPT).not.toMatch(/own device|not Behest/);
+  });
+
+  it('tells the evidence agent what the decision item holds and how its quotes are marked', () => {
+    expect(DISPUTE_SYSTEM_PROMPT).toContain('- decision:');
+    expect(DISPUTE_SYSTEM_PROMPT).toContain('quoted as shopping_agent');
   });
 
   it('keeps the summary and every claim citing only items in the pack, in order', () => {

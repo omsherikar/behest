@@ -169,6 +169,7 @@ Discovery through Channel3 is real: the shopping agent and seller onboarding que
 - **The demo reset is broad.** It does not refuse while a captured purchase awaits delivery or a payout is unfinished, and it removes their records with the rest even though sandbox money may still be moving. It keeps every seller, including ones visitors onboarded.
 - **Cancelling at PayPal does not cancel the purchase.** A buyer who cancels on PayPal's approval page sees a notice, but the purchase stays awaiting approval, holding its budget, until its 3-hour approval window expires.
 - **A listing's category is written by a model from seller text.** The catalog builder assigns each listing's category from what the seller wrote, and the gate's category rules read it, so a dishonest seller can list earbuds as spices. The intent check and the mandate's seller lists are the backstop.
+- **One signing key, no rotation yet.** Behest signs every mandate and receipt with one Ed25519 key. If that key were rotated, the published key set would have to keep the old public key, or older mandates and receipts, and the evidence built from them, would honestly report that they no longer verify.
 - **Someone else can present a receipt first.** Every persona's dashboard data carries receipt signatures, and the seller order route is public. After a failed first delivery, a third party could present the still-fresh receipt before Behest delivers again; Behest's redelivery then comes back `replayed`, and the purchase stays `captured` for an operator.
 
 ## Credits

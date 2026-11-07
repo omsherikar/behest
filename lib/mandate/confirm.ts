@@ -1,22 +1,28 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
-import { buyers, mandates } from '@/lib/db/schema';
+import { buyerPasskeys, buyers, mandates } from '@/lib/db/schema';
 import { MandatePolicy } from '@/lib/domain/policy';
 import type { MandatePayload } from '@/lib/domain/receipt';
+import { TICKET_SECONDS } from '@/lib/passkeys/ticket';
 import { hashOf, sha256Hex } from '@/lib/receipts/canonical';
 import type { Signer } from '@/lib/receipts/sign';
+import { mandateChallenge } from './challenge';
+import type { PasskeySignature } from './passkey';
 import { renderReadback } from './readback';
 
 // Turns a policy the buyer has confirmed into their signed mandate. The callers only pass a policy
 // whose compile left no open questions. The readback is rendered again here from the validated
-// policy, so the stored and signed readback is the one this code produces, not one sent in.
+// policy, so the stored and signed readback is the one this code produces, not one sent in. A buyer
+// may also have signed the mandate's hashes with a passkey registered to their account; the mandate
+// then names that passkey and keeps the signature beside it.
 
-export type MandateConfirmErrorCode = 'invalid_policy' | 'expired' | 'unknown_buyer';
+export type MandateConfirmErrorCode = 'invalid_policy' | 'expired' | 'unknown_buyer' | 'passkey';
 
 const MESSAGES: Record<MandateConfirmErrorCode, string> = {
   invalid_policy: 'the mandate policy is not valid',
   expired: 'the mandate expiry is not after the time it is confirmed',
   unknown_buyer: 'the mandate names a buyer that does not exist',
+  passkey: 'the passkey signature does not confirm this mandate',
 };
 
 /** Why a mandate was not confirmed. Nothing is stored when one is thrown. */
@@ -39,35 +45,67 @@ function validPolicy(input: MandatePolicy): MandatePolicy {
 }
 
 /**
+ * The policy as a mandate stores it, its readback, and the hashes a signed mandate carries: exactly
+ * what confirmMandate would store and sign for it. Throws a MandateConfirmError for a policy that is
+ * not valid.
+ */
+export function mandateHashes(input: MandatePolicy): {
+  policy: MandatePolicy;
+  readback: string[];
+  policyHash: string;
+  readbackHash: string;
+} {
+  const policy = validPolicy(input);
+  const readback = renderReadback(policy);
+  return { policy, readback, policyHash: hashOf(policy), readbackHash: hashOf(readback) };
+}
+
+/**
  * Validates and signs the buyer's confirmed policy, then stores it as their one active mandate:
  * in one transaction it locks the buyer, revokes any active mandate they hold and inserts the
  * new one. Throws a MandateConfirmError, storing nothing, for an invalid policy, an expiry that is
  * not after now, or a buyer that does not exist.
+ *
+ * With a `passkey` signature, which only verifyMandateAssertion can make, the mandate is confirmed
+ * by passkey: the signed payload names the passkey and the assertion is stored. In the same
+ * transaction the passkey's counter moves on to the one the assertion reported. Throws a
+ * MandateConfirmError `passkey`, storing nothing, for a signature whose challenge does not commit to
+ * this policy and readback, that is confirmed outside its five-minute signing window, whose nonce
+ * already confirmed a mandate, or that the passkey has since signed past.
  */
 export async function confirmMandate(
   deps: { db: Db; signer: Signer; now: () => Date },
-  i: { buyerId: string; text: string; policy: MandatePolicy },
+  i: { buyerId: string; text: string; policy: MandatePolicy; passkey?: PasskeySignature },
 ): Promise<{ mandateId: string; jws: string }> {
-  const policy = validPolicy(i.policy);
+  const { policy, readback, policyHash, readbackHash } = mandateHashes(i.policy);
   const confirmedAt = deps.now();
   if (policy.expiresAt !== null && Date.parse(policy.expiresAt) <= confirmedAt.getTime()) {
     throw new MandateConfirmError('expired');
   }
+  const signature = i.passkey;
+  if (signature) {
+    const { nonce, exp, challenge } = signature.assertion;
+    if (mandateChallenge({ policyHash, readbackHash, nonce, exp }) !== challenge) throw new MandateConfirmError('passkey');
+    // The window verifyMandatePasskey holds the stored mandate to, so a mandate stored here passes it.
+    const at = confirmedAt.getTime();
+    if (at < (exp - TICKET_SECONDS) * 1000 || at >= exp * 1000) throw new MandateConfirmError('passkey');
+  }
 
   const id = crypto.randomUUID();
-  const readback = renderReadback(policy);
-  const payload: MandatePayload = {
-    v: 1,
+  const fields = {
+    v: 1 as const,
     id,
-    iss: 'behest',
+    iss: 'behest' as const,
     iat: Math.floor(confirmedAt.getTime() / 1000),
     buyer: { ref: sha256Hex(i.buyerId) },
-    policyHash: hashOf(policy),
-    readbackHash: hashOf(readback),
+    policyHash,
+    readbackHash,
     confirmedAt: confirmedAt.toISOString(),
-    confirmation: 'session',
     expiresAt: policy.expiresAt,
   };
+  const payload: MandatePayload = signature
+    ? { ...fields, confirmation: 'passkey', passkey: signature.passkey }
+    : { ...fields, confirmation: 'session' };
   const jws = await deps.signer.sign(payload, 'behest-mandate+jws');
 
   await deps.db.transaction(async (tx) => {
@@ -81,6 +119,7 @@ export async function confirmMandate(
       .where(eq(buyers.id, i.buyerId))
       .for('no key update');
     if (!buyer) throw new MandateConfirmError('unknown_buyer');
+    if (signature) await usePasskey(tx, i.buyerId, signature, confirmedAt);
 
     // The database allows one active mandate per buyer, so the old one is revoked first.
     await tx
@@ -92,10 +131,12 @@ export async function confirmMandate(
       buyerId: i.buyerId,
       sourceText: i.text,
       policy,
-      policyHash: payload.policyHash,
+      policyHash,
       readback,
-      readbackHash: payload.readbackHash,
+      readbackHash,
       jws,
+      confirmation: payload.confirmation,
+      buyerAssertion: signature?.assertion ?? null,
       status: 'active',
       confirmedAt,
       expiresAt: policy.expiresAt === null ? null : new Date(policy.expiresAt),
@@ -103,4 +144,28 @@ export async function confirmMandate(
   });
 
   return { mandateId: id, jws };
+}
+
+/**
+ * Spends a passkey signature, under the buyer's lock: refuses one whose nonce already confirmed a
+ * mandate, then moves the passkey's counter on to the signature's and records when it was used. The
+ * counter must go up, or stay at zero for an authenticator that keeps none, so a signature the
+ * passkey has since signed past is refused even if a confirm racing this one got there first.
+ */
+async function usePasskey(tx: Db, buyerId: string, signature: PasskeySignature, usedAt: Date): Promise<void> {
+  const [spent] = await tx
+    .select({ id: mandates.id })
+    .from(mandates)
+    .where(and(eq(mandates.buyerId, buyerId), sql`${mandates.buyerAssertion}->>'nonce' = ${signature.assertion.nonce}`))
+    .limit(1);
+  if (spent) throw new MandateConfirmError('passkey');
+
+  const { counter } = signature;
+  const advances = counter === 0 ? eq(buyerPasskeys.counter, 0) : lt(buyerPasskeys.counter, counter);
+  const moved = await tx
+    .update(buyerPasskeys)
+    .set({ counter, lastUsedAt: usedAt })
+    .where(and(eq(buyerPasskeys.id, signature.passkeyId), eq(buyerPasskeys.buyerId, buyerId), advances))
+    .returning({ id: buyerPasskeys.id });
+  if (moved.length === 0) throw new MandateConfirmError('passkey');
 }

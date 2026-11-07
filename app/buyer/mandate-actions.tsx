@@ -1,14 +1,16 @@
+import type { ReactNode } from 'react';
 import { buttonClass } from '@/components/ui/button';
 
 // The one place the mandate form's signing actions go: confirming the readback, which signs the
-// mandate. Other ways to sign, such as a passkey, belong here beside it, so the form around it does
-// not change when one is added. Rendered only by the mandate form, a client component.
+// mandate, and signing it with a passkey beside it. The form around it does not change when a way to
+// sign is added. Rendered only by the mandate form, a client component.
 
 export function MandateActions({
   onConfirm,
   confirming,
   disabled,
   questionsOpen,
+  passkey,
 }: {
   onConfirm: () => void;
   /** Whether the confirmation is under way. */
@@ -17,6 +19,8 @@ export function MandateActions({
   disabled: boolean;
   /** Whether questions are still open above, so the buyer is told to answer them first. */
   questionsOpen: boolean;
+  /** The passkey signing action, shown beside Confirm. */
+  passkey?: ReactNode;
 }) {
   return (
     <div className="grid gap-2 rounded-panel border border-line bg-panel p-4">
@@ -27,8 +31,15 @@ export function MandateActions({
         <button type="button" onClick={onConfirm} disabled={disabled} className={buttonClass('primary')}>
           {confirming ? 'Signing...' : 'Confirm and sign'}
         </button>
+        {passkey}
       </div>
       {questionsOpen && <p className="text-meta text-muted">Answer the questions above before you confirm.</p>}
+      {passkey && (
+        <p className="text-meta text-muted">
+          Signing with a passkey adds your device&apos;s signature over this exact mandate, which anyone can check
+          later. Confirming without one rests on your signed-in session alone.
+        </p>
+      )}
     </div>
   );
 }

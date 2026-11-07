@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { buyers, mandates, products, purchases, receipts, sellers, wallets, type PurchaseStatus, type WalletStatus } from '@/lib/db/schema';
+import type { DecisionRecord } from '@/lib/domain/decision';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import type { PurchaseProposal } from '@/lib/domain/proposal';
 import { evaluateGate, type CatalogEntry } from '@/lib/gate/evaluate';
@@ -168,6 +169,33 @@ async function stepsOf(s: SetUp, purchaseId: string): Promise<string[]> {
 const gateEvent = (verdict: string, results: Partial<Record<(typeof GATE_RULES)[number], string>> = {}) => ({
   kind: 'gate',
   data: { verdict, rulesetVersion: 'gate-v1', outcomes: GATE_RULES.map((rule) => ({ rule, result: results[rule] ?? 'pass' })) },
+});
+
+it("stores the agent's decision record with the purchase, and none for a purchase proposed without one", async () => {
+  const s = await setUp();
+  const decision: DecisionRecord = {
+    v: 1,
+    runId: RUN_ID,
+    steps: [{ tool: 'search_sellers', input: { query: 'turmeric' }, listings: [] }],
+    choice: { sellerSlug: SEEDED_SELLER.slug, items: [{ sku: 'TUR-100', quantity: 1 }] },
+    rationale: RATIONALE,
+  };
+
+  const withRecord = await proposePurchase(s.deps, { buyerId: s.buyerId, runId: RUN_ID, request: REQUEST, proposal: proposal(['TUR-100', 1]), decision });
+  const without = await propose(s, proposal(['GAR-200', 1]));
+
+  expect((await purchaseRow(s.db, withRecord.purchaseId)).decisionRecord).toEqual(decision);
+  expect((await purchaseRow(s.db, without.purchaseId)).decisionRecord).toBeNull();
+});
+
+it('refuses a decision record that is not one, storing nothing', async () => {
+  const s = await setUp();
+  const decision = { v: 1, runId: RUN_ID, steps: [], choice: { sellerSlug: SEEDED_SELLER.slug, items: [] }, rationale: '' } as unknown as DecisionRecord;
+
+  await expect(
+    proposePurchase(s.deps, { buyerId: s.buyerId, runId: RUN_ID, request: REQUEST, proposal: proposal(['TUR-100', 1]), decision }),
+  ).rejects.toThrow();
+  expect(await s.db.select().from(purchases)).toEqual([]);
 });
 
 it('blocks electronics without calling intent or PayPal', async () => {

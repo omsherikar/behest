@@ -16,6 +16,8 @@ import {
 } from 'drizzle-orm/pg-core';
 import type { Cart } from '../domain/cart';
 import type { Category } from '../domain/categories';
+import type { DecisionRecord } from '../domain/decision';
+import type { BuyerAssertion } from '../domain/passkey';
 import type { MandatePolicy } from '../domain/policy';
 import type { PurchaseProposal } from '../domain/proposal';
 
@@ -47,8 +49,9 @@ export const buyers = pgTable('buyers', {
 });
 
 /**
- * A buyer's passkey (a WebAuthn credential). The buyer's device holds the private key; Behest keeps
- * the public key so anyone can check that the buyer, not Behest, signed a mandate.
+ * A buyer's passkey (a WebAuthn credential). The authenticator holds the private key; Behest keeps
+ * the public key so anyone can check that a passkey registered to the buyer's account signed a
+ * mandate's hashes.
  */
 export const buyerPasskeys = pgTable(
   'buyer_passkeys',
@@ -110,15 +113,10 @@ export const mandates = pgTable(
     confirmation: mandateConfirmation('confirmation').notNull().default('session'),
     /**
      * The buyer's passkey assertion over the mandate's hashes (base64url fields, as WebAuthn returns
-     * them). Null when the buyer confirmed by session alone.
+     * them), with the nonce and expiry its challenge commits to. Null when the buyer confirmed by
+     * session alone.
      */
-    buyerAssertion: jsonb('buyer_assertion').$type<{
-      credentialId: string;
-      authenticatorData: string;
-      clientDataJSON: string;
-      signature: string;
-      challenge: string;
-    }>(),
+    buyerAssertion: jsonb('buyer_assertion').$type<BuyerAssertion>(),
     status: mandateStatus('status').notNull().default('active'),
     /** When the buyer confirmed; the start of a `once` budget period. */
     confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
@@ -217,7 +215,7 @@ export const purchases = pgTable(
      * What the agent looked at before proposing: its searches, the options each returned and the
      * option it chose. Its hash goes into the signed receipt. Null for purchases made outside an agent run.
      */
-    decisionRecord: jsonb('decision_record').$type<Record<string, unknown>>(),
+    decisionRecord: jsonb('decision_record').$type<DecisionRecord>(),
     /** The canonical cart rebuilt from the catalog. Null when the gate could not build a valid cart. */
     cart: jsonb('cart').$type<Cart>(),
     cartHash: text('cart_hash'),

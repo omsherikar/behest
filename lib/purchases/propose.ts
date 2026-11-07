@@ -2,6 +2,7 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, sum } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '@/lib/db/client';
 import { mandates, products, purchases, sellers, wallets } from '@/lib/db/schema';
+import { DecisionRecord } from '@/lib/domain/decision';
 import { MandatePolicy } from '@/lib/domain/policy';
 import { PurchaseProposal } from '@/lib/domain/proposal';
 import type { Verdict } from '@/lib/domain/verdict';
@@ -34,6 +35,11 @@ export type ProposalRequest = {
   request: string;
   /** Written by the agent, so untrusted: the gate reads only its seller, SKUs and quantities. */
   proposal: PurchaseProposal;
+  /**
+   * What the agent looked at, chose and why, stored with the purchase so its receipt can carry the
+   * record's hash. Purchases proposed outside an agent run have none.
+   */
+  decision?: DecisionRecord;
 };
 
 /**
@@ -78,10 +84,12 @@ type LockedMandate = Pick<typeof mandates.$inferSelect, keyof typeof MANDATE_FIE
  * purchase `blocked`, ALLOW charges the buyer's saved wallet with chargeAllowed, and ASK asks the
  * buyer to approve at PayPal with startApproval. A purchase something else moved on from `proposed`
  * during the check is not routed. Returns where the purchase then stands. Throws, recording
- * nothing, for a buyer who never had a mandate.
+ * nothing, for a buyer who never had a mandate or a decision record that is not one.
  */
 export async function proposePurchase(deps: PurchaseDeps, i: ProposalRequest): Promise<ProposalOutcome> {
-  const { purchaseId, mandateId, gateVerdict, check } = await reservePurchase(deps, i);
+  // A malformed record is refused before anything is stored, since its hash goes on the receipt.
+  const decision = i.decision === undefined ? null : DecisionRecord.parse(i.decision);
+  const { purchaseId, mandateId, gateVerdict, check } = await reservePurchase(deps, { ...i, decision });
   if (!check) return purchaseOutcome(deps.db, purchaseId);
 
   const intent = await runIntentCheck(deps.intent, check);
@@ -113,7 +121,10 @@ export async function proposePurchase(deps: PurchaseDeps, i: ProposalRequest): P
  * rule's outcome, and logs the `gate` event. Throws, inserting nothing, for a buyer who never had a
  * mandate.
  */
-async function reservePurchase({ db, now: clock }: Pick<PurchaseDeps, 'db' | 'now'>, i: ProposalRequest): Promise<Reserved> {
+async function reservePurchase(
+  { db, now: clock }: Pick<PurchaseDeps, 'db' | 'now'>,
+  i: Omit<ProposalRequest, 'decision'> & { decision: DecisionRecord | null },
+): Promise<Reserved> {
   return db.transaction(async (tx) => {
     const mandate = await lockMandate(tx, i.buyerId);
     if (!mandate) throw new Error(`buyer ${i.buyerId} has no mandate, so there is nothing to check a purchase against`);
@@ -144,6 +155,7 @@ async function reservePurchase({ db, now: clock }: Pick<PurchaseDeps, 'db' | 'no
         runId: i.runId,
         request: i.request,
         proposal: i.proposal,
+        decisionRecord: i.decision,
         cart: gate.cart,
         cartHash: gate.cart ? hashOf(gate.cart) : null,
         totalCents: gate.cart?.totalCents ?? null,

@@ -1,5 +1,7 @@
+import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { receipts } from '@/lib/db/schema';
+import { purchases, receipts } from '@/lib/db/schema';
+import type { DecisionRecord } from '@/lib/domain/decision';
 import { ReceiptPayload } from '@/lib/domain/receipt';
 import { issueReceipt } from '@/lib/purchases/receipt';
 import { hashOf, sha256Hex } from '@/lib/receipts/canonical';
@@ -53,6 +55,31 @@ describe('issueReceipt', () => {
       expect.objectContaining({ id: receiptId, purchaseId, jws, payloadHash: hashOf(payload), keyId: key.kid }),
     ]);
     expect(await eventsOf(db, purchaseId)).toEqual([{ kind: 'receipt', data: { receiptId } }]);
+  });
+
+  it("carries the hash of the agent's decision record when the purchase has one", async () => {
+    const { db, deps, purchaseId } = await setUpCaptured();
+    const decision: DecisionRecord = {
+      v: 1,
+      runId: 'run-1',
+      steps: [{ tool: 'search_sellers', input: { query: 'turmeric' }, listings: [] }],
+      choice: { sellerSlug: SEEDED_SELLER.slug, items: [{ sku: 'TUR-100', quantity: 2 }] },
+      rationale: 'The buyer asked for turmeric.',
+    };
+    await db.update(purchases).set({ decisionRecord: decision }).where(eq(purchases.id, purchaseId));
+
+    const { jws } = await issueReceipt(deps, purchaseId);
+
+    const payload = await verifyJws(jws, 'behest-receipt+jws', jwks, ReceiptPayload);
+    expect(payload.agent).toEqual({ decisionHash: hashOf(decision) });
+  });
+
+  it('makes no agent claim for a purchase with no decision record', async () => {
+    const { deps, purchaseId } = await setUpCaptured();
+
+    const { jws } = await issueReceipt(deps, purchaseId);
+
+    expect(await verifyJws(jws, 'behest-receipt+jws', jwks, ReceiptPayload)).not.toHaveProperty('agent');
   });
 
   it('names the buyer as the approver of a purchase they approved', async () => {

@@ -11,7 +11,8 @@ import { appendEvent } from './events';
 
 // The signed receipt of a captured purchase (architecture section 5.3): the artifact the seller
 // verifies with only Behest's public key, and the core of a dispute's evidence pack. A purchase has
-// at most one receipt, which the unique `receipts.purchase_id` enforces.
+// at most one receipt, which the unique `receipts.purchase_id` enforces. For a purchase a shopping
+// agent proposed, the receipt also commits to the agent's decision record by its hash.
 
 type ReceiptDeps = Pick<PurchaseDeps, 'db' | 'signer' | 'now'>;
 type IssuedReceipt = { receiptId: string; jws: string };
@@ -132,7 +133,10 @@ async function receiptPayload({ db, now }: ReceiptDeps, purchaseId: string): Pro
   );
 }
 
-/** A receipt's claims, before they are checked: everything but the payment comes from `source`. */
+/**
+ * A receipt's claims, before they are checked: everything but the payment comes from `source`. A
+ * purchase an agent proposed with a decision record gets the record's hash as its `agent` claim.
+ */
 function receiptClaims(
   { purchase, mandate, sellerSlug }: ReceiptSource,
   cart: Cart,
@@ -156,5 +160,6 @@ function receiptClaims(
       outcomes: purchase.gateOutcomes.map(({ rule, result }) => ({ rule, result })),
     },
     payment,
+    ...(purchase.decisionRecord ? { agent: { decisionHash: hashOf(purchase.decisionRecord) } } : {}),
   };
 }

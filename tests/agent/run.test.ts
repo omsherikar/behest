@@ -1,12 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { asc } from 'drizzle-orm';
+import { decodeJwt } from 'jose';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SHOPPING_SYSTEM_PROMPT } from '@/lib/agent/prompt';
 import { type AgentEvent, runShoppingAgent } from '@/lib/agent/run';
 import type { MarketSearch } from '@/lib/agent/tools';
-import { buyers, llmCalls, mandates, products, purchases, sellers, wallets, type MandateStatus } from '@/lib/db/schema';
+import { buyers, llmCalls, mandates, products, purchases, receipts, sellers, wallets, type MandateStatus } from '@/lib/db/schema';
+import { DecisionRecord } from '@/lib/domain/decision';
 import { createClaude, recordCall } from '@/lib/llm/client';
 import type { IntentInput, IntentResult, PurchaseDeps } from '@/lib/purchases/deps';
-import { hashOf } from '@/lib/receipts/canonical';
+import { hashOf, sha256Hex } from '@/lib/receipts/canonical';
 import { fakeClaude, messageJson, type FakeToolUse } from '@/tests/helpers/fake-claude';
 import { FakePaypal } from '@/tests/helpers/fake-paypal';
 import { demoPolicy } from '@/tests/helpers/fixtures';
@@ -286,6 +289,90 @@ describe('runShoppingAgent', () => {
     expect(fake.requests).toHaveLength(1);
     expect(await s.db.select().from(llmCalls)).toHaveLength(1);
     expect(s.events).toEqual([STARTED]);
+  });
+
+  it('stores what the agent looked at, chose and why with the purchase, and its receipt signs the hash', async () => {
+    const search = vi.fn<MarketSearch>(async () => [{ title: 'Turmeric 100g', medianPriceCents: 500, offers: [{ priceCents: 480 }] }]);
+    const marketCall = { id: 'toolu_market', name: 'search_market', input: { query: 'turmeric 100g' } };
+    const s = await setUp(
+      [
+        messageJson({ toolUses: [searchCall('toolu_search')] }),
+        messageJson({ toolUses: [marketCall] }),
+        messageJson({ toolUses: [proposeCall] }),
+        messageJson({ text: SUMMARY }),
+      ],
+      { search },
+    );
+
+    const { runId } = await s.run();
+
+    const [purchase] = await s.db.select().from(purchases);
+    expect(purchase.decisionRecord).toEqual({
+      v: 1,
+      runId,
+      steps: [
+        {
+          tool: 'search_sellers',
+          input: { query: 'turmeric' },
+          listings: [{ sellerSlug: 'ravi-spices', sku: 'TUR-100', priceCents: 450, stock: 40, titleHash: sha256Hex('Turmeric powder 100g') }],
+        },
+        {
+          tool: 'search_market',
+          input: { query: 'turmeric 100g' },
+          results: [{ titleHash: sha256Hex('Turmeric 100g'), medianPriceCents: 500, cheapestCents: 480 }],
+        },
+      ],
+      choice: { sellerSlug: 'ravi-spices', items: [{ sku: 'TUR-100', quantity: 1 }] },
+      rationale: RATIONALE,
+    });
+    const [receipt] = await s.db.select().from(receipts);
+    expect(decodeJwt(receipt.jws).agent).toEqual({ decisionHash: hashOf(purchase.decisionRecord) });
+    expect(JSON.stringify(purchase.decisionRecord)).not.toMatch(/Turmeric powder|Spice Co/);
+  });
+
+  it('snapshots the record at each proposal, so a later one also holds what the agent looked at since', async () => {
+    const lookup = { id: 'toolu_lookup', name: 'get_product', input: { sellerSlug: SEEDED_SELLER.slug, sku: 'GAR-200' } };
+    const second = {
+      id: 'toolu_propose_2',
+      name: 'propose_purchase',
+      input: { sellerSlug: SEEDED_SELLER.slug, items: [{ sku: 'GAR-200', quantity: 1 }], rationale: 'Garam masala too.' },
+    };
+    const s = await setUp([
+      messageJson({ toolUses: [searchCall('toolu_search')] }),
+      messageJson({ toolUses: [proposeCall] }),
+      messageJson({ toolUses: [lookup] }),
+      messageJson({ toolUses: [second] }),
+      messageJson({ text: SUMMARY }),
+    ]);
+
+    await s.run();
+
+    const [first, later] = await s.db.select().from(purchases).orderBy(asc(purchases.createdAt), asc(purchases.id));
+    const records = [first, later].map((purchase) => purchase.decisionRecord!);
+    records.sort((a, b) => a.steps.length - b.steps.length);
+    expect(records[0].steps.map((step) => step.tool)).toEqual(['search_sellers']);
+    expect(records[0].choice.items).toEqual([{ sku: 'TUR-100', quantity: 1 }]);
+    expect(records[1].steps.map((step) => step.tool)).toEqual(['search_sellers', 'get_product']);
+    expect(records[1]).toMatchObject({ choice: { items: [{ sku: 'GAR-200', quantity: 1 }] }, rationale: 'Garam masala too.' });
+  });
+
+  it('tells the agent its proposal failed, and stores nothing, when its decision record is not one', async () => {
+    const s = await setUp([messageJson({ toolUses: [proposeCall] }), messageJson({ text: SUMMARY })]);
+    // A record the tools build always parses, so the parse is made to refuse it here.
+    vi.spyOn(DecisionRecord, 'parse').mockImplementationOnce(() => {
+      throw new Error('not a decision record');
+    });
+
+    const result = await s.run();
+
+    const sent = s.fake.requests[1].body.messages as { role: string; content: { type: string; content: string }[] }[];
+    expect(sent[2].content[0]).toMatchObject({
+      type: 'tool_result',
+      content: 'Behest could not finish this proposal. Do not propose it again; ask the buyer to check their ledger.',
+    });
+    expect(result.outcomes).toEqual([]);
+    expect(await s.db.select().from(purchases)).toEqual([]);
+    expect(console.error).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('propose_purchase failed'));
   });
 
   it('gives the agent the market search it is handed', async () => {

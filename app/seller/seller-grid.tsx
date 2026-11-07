@@ -9,6 +9,7 @@ import { useCallback, useRef, useState } from 'react';
 import {
   CellStyleModule,
   ClientSideRowModelModule,
+  ColumnApiModule,
   ColumnAutoSizeModule,
   enableDevValidations,
   NumberFilterModule,
@@ -19,28 +20,34 @@ import {
   themeQuartz,
   type ColDef,
   type GetRowIdParams,
+  type GridApi,
 } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact } from 'ag-grid-react';
+import { fieldClass } from '@/components/ui/field';
+import { cn } from '@/lib/utils';
 
 if (process.env.NODE_ENV !== 'production') {
   enableDevValidations();
 }
 
 // Only the grid features these pages use: in-memory rows, text and number filters, the search box
-// (quick filter), sizing columns to their content, cell classes (right-aligned amounts, SKUs) and
-// rows as tall as their wrapped text (the ledger's reasons).
+// (quick filter), sizing columns to their content and to the grid's width, cell classes
+// (right-aligned amounts, SKUs) and rows as tall as their wrapped text (the ledger's reasons).
 const modules = [
   ClientSideRowModelModule,
   TextFilterModule,
   NumberFilterModule,
   QuickFilterModule,
   ColumnAutoSizeModule,
+  // Reads the columns' widths, to tell whether they fill the grid.
+  ColumnApiModule,
   CellStyleModule,
   RowAutoHeightModule,
 ];
 
 // The Behest tokens (app/globals.css) on AG Grid's dark colour scheme: panel rows with hairline
-// dividers, a raised header and hover, and the action colour for focus and selection.
+// dividers, a raised header and hover, the text colour for focus and selection, and the radii and
+// control border of the app's own panels and fields.
 const theme = themeQuartz.withPart(colorSchemeDark).withParams({
   fontFamily: 'var(--font-sans-stack)',
   fontSize: 13,
@@ -60,15 +67,39 @@ const theme = themeQuartz.withPart(colorSchemeDark).withParams({
   rowBorder: { color: 'var(--line)' },
   columnBorder: false,
   headerColumnBorder: false,
-  wrapperBorderRadius: 8,
-  borderRadius: 4,
+  wrapperBorderRadius: 16,
+  borderRadius: 12,
   menuBackgroundColor: 'var(--raised)',
   inputBackgroundColor: 'var(--bg)',
-  inputBorder: { color: 'var(--line-strong)' },
+  inputBorder: { color: 'var(--control)' },
 });
 
 const defaultColDef: ColDef = { filter: true };
-const autoSizeStrategy = { type: 'fitCellContents' } as const;
+
+/**
+ * Sizes every column to its header and its cells, so nothing is cut short. When that leaves room on
+ * the right, the columns marked `context: { fill: true }` (such as the ledger's reasons) take all of
+ * it; without such a column every column widens in proportion. A grid narrower than its content
+ * scrolls sideways instead of cutting a header.
+ */
+function fitColumns(api: GridApi, box: HTMLElement | null) {
+  api.autoSizeAllColumns();
+  const room = box?.querySelector('.ag-body-viewport')?.clientWidth ?? 0;
+  const columns = api.getAllDisplayedColumns();
+  const used = columns.reduce((sum, column) => sum + column.getActualWidth(), 0);
+  if (room === 0 || used >= room) return;
+  const fill = (column: (typeof columns)[number]) => (column.getColDef().context as { fill?: boolean } | undefined)?.fill === true;
+  if (!columns.some(fill)) {
+    api.sizeColumnsToFit();
+    return;
+  }
+  // Every other column keeps the width its content needs.
+  api.sizeColumnsToFit({
+    columnLimits: columns
+      .filter((column) => !fill(column))
+      .map((column) => ({ key: column.getColId(), minWidth: column.getActualWidth(), maxWidth: column.getActualWidth() })),
+  });
+}
 /** Rows keep their database id as the grid's row id. One function for every render: AG Grid reads it once. */
 function rowId<Row extends { id: string }>({ data }: GetRowIdParams<Row>): string {
   return data.id;
@@ -106,7 +137,7 @@ export function SellerGrid<Row extends { id: string }>({
         onChange={(event) => setSearch(event.target.value)}
         placeholder={`Search ${label}...`}
         aria-label={`Search ${label}`}
-        className="h-9 w-full rounded-control border border-line-strong bg-panel px-3 text-body text-text placeholder:text-muted sm:w-72"
+        className={cn(fieldClass, 'h-10 py-0 sm:w-80')}
       />
       <div ref={box} className={`min-h-72 flex-1 ${onOpen ? '[&_.ag-row]:cursor-pointer' : ''}`}>
         <AgGridProvider modules={modules}>
@@ -117,9 +148,10 @@ export function SellerGrid<Row extends { id: string }>({
             defaultColDef={defaultColDef}
             getRowId={rowId<Row>}
             quickFilterText={search}
-            autoSizeStrategy={autoSizeStrategy}
             enableCellTextSelection
             onGridReady={nameGrid}
+            onFirstDataRendered={(event) => fitColumns(event.api, box.current)}
+            onGridSizeChanged={(event) => fitColumns(event.api, box.current)}
             onRowClicked={onOpen ? (event) => event.data && onOpen(event.data) : undefined}
             onCellKeyDown={
               onOpen

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { purchaseStatus } from '@/lib/db/schema';
-import { statusWords, toolStep } from '@/lib/buyer-pages/words';
+import { runRefusal, statusWords, toolStep } from '@/lib/buyer-pages/words';
 
 describe('statusWords', () => {
   it('says paid for a captured purchase and every status after it that kept the money', () => {
@@ -70,5 +70,30 @@ describe('toolStep', () => {
     expect(toolStep('search_sellers', { query: 'turmeric\n\tand   cumin' })).toBe('Searching Behest sellers for "turmeric and cumin"');
     const long = 'saffron '.repeat(20);
     expect(toolStep('search_market', { query: long })).toBe(`Checking market prices for "${long.slice(0, 77).trim()}..."`);
+  });
+});
+
+describe('runRefusal', () => {
+  const answer = (message: unknown) => ({ error: { message } });
+
+  it("gives Behest's own message, as a sentence", () => {
+    expect(runRefusal(429, answer('Your agent is already shopping. Wait for it to finish.'))).toBe(
+      'Your agent is already shopping. Wait for it to finish.',
+    );
+    expect(runRefusal(429, answer('Too many requests at once. Try again in a minute.'))).toBe(
+      'Too many requests at once. Try again in a minute.',
+    );
+    expect(runRefusal(403, answer('only the buyer persona can do this'))).toBe('Only the buyer persona can do this.');
+  });
+
+  it('words each refusal when the answer carries no message', () => {
+    expect(runRefusal(400, null)).toBe('Behest could not read your request. Check it and try again.');
+    expect(runRefusal(401, undefined)).toBe('Your session has ended. Pick the buyer persona on the home page.');
+    expect(runRefusal(403, {})).toBe('Only the buyer can send the agent shopping. Pick the buyer persona on the home page.');
+    expect(runRefusal(413, 'Payload Too Large')).toBe('Your request is too long. Keep it to 2,000 characters or fewer.');
+    expect(runRefusal(429, answer(''))).toBe('Your agent is busy. Wait a minute and try again.');
+    expect(runRefusal(404, answer(42))).toBe('Behest could not start your agent. Try again in a minute.');
+    expect(runRefusal(500, { error: 'boom' })).toBe('Behest could not start your agent. Try again in a minute.');
+    expect(runRefusal(502, answer('   '))).toBe('Behest could not start your agent. Try again in a minute.');
   });
 });

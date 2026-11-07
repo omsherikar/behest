@@ -78,3 +78,27 @@ export function toolStep(name: string, input: unknown): string {
       return `Using ${name}`;
   }
 }
+
+const REFUSALS = new Map<number, string>([
+  [400, 'Behest could not read your request. Check it and try again.'],
+  [401, 'Your session has ended. Pick the buyer persona on the home page.'],
+  [403, 'Only the buyer can send the agent shopping. Pick the buyer persona on the home page.'],
+  [413, 'Your request is too long. Keep it to 2,000 characters or fewer.'],
+  [429, 'Your agent is busy. Wait a minute and try again.'],
+]);
+const NOT_STARTED = 'Behest could not start your agent. Try again in a minute.';
+
+/**
+ * What the buyer reads when the run route answers with an error instead of a run: the route's own
+ * message, which says why, as a sentence, or plain words for the status when it sent none.
+ */
+export function runRefusal(status: number, body: unknown): string {
+  const error = typeof body === 'object' && body !== null ? (body as { error?: unknown }).error : undefined;
+  const message = typeof error === 'object' && error !== null ? (error as { message?: unknown }).message : undefined;
+  if (typeof message === 'string' && message.trim() !== '') {
+    const text = message.trim();
+    const capitalized = text.charAt(0).toUpperCase() + text.slice(1);
+    return /[.!?]$/.test(capitalized) ? capitalized : `${capitalized}.`;
+  }
+  return REFUSALS.get(status) ?? NOT_STARTED;
+}

@@ -75,9 +75,9 @@ export const LIMITS: { title: string; detail: string }[] = [
       "A new seller can call itself Ravi's Spice Co, and the screen does not read seller names. Each seller has its own slug, which the agent sees and the receipt names, and a mandate that lists the sellers it allows blocks every other; the demo mandate allows any seller.",
   },
   {
-    title: 'The price benchmark has a window.',
+    title: 'The price check needs a market benchmark.',
     detail:
-      'Enrichment drops a market median below 0.2 times or above 5 times the listing price as a probable mismatch, so a listing priced over five times its median has no benchmark and the gate skips the price check. The replay tests pin this.',
+      'Enrichment keeps a market median below the listing price however far below, so a listing priced far over the market is held for the buyer; the replay tests pin a listing at six times its median. It drops a median more than 5 times the listing price as a probable mismatch, since a listing far cheaper than the market cannot hurt the buyer on price. A listing the market search finds nothing for has no benchmark, and the gate skips its price check.',
   },
   {
     title: 'Exfiltration has little to take, but is not screened.',

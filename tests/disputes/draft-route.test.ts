@@ -7,9 +7,11 @@ import { appDb, appPaypal, llmDeps } from '@/lib/app-deps';
 import type { Db } from '@/lib/db/client';
 import { disputes, receipts } from '@/lib/db/schema';
 import { assembleEvidencePack } from '@/lib/disputes/pack';
+import { createClaude } from '@/lib/llm/client';
 import type { DisputeDetail } from '@/lib/paypal/port';
 import { MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
+import stubReply from '@/tests/fixtures/llm/dispute_evidence/stub.json';
 import { fakeClaude, messageJson } from '@/tests/helpers/fake-claude';
 import { FakePaypal } from '@/tests/helpers/fake-paypal';
 import { seedPurchase } from '@/tests/helpers/seed-purchase';
@@ -159,6 +161,18 @@ describe('POST /api/disputes/[id]/draft', () => {
     for (const { headers } of fake.requests) expect(headers['x-behest-route']).toBe('dispute_evidence');
     // The investigation reads the dispute as PayPal reported it, the buyer's notes included.
     expect(JSON.stringify(fake.requests[0].body.messages)).toContain(BUYER_NOTES);
+  });
+
+  it('drafts from the recorded reply when LLM_STUB=1, so the page can be tried without spending', async () => {
+    vi.stubEnv('LLM_STUB', '1');
+    const disputeId = await openDispute();
+    vi.mocked(llmDeps).mockReturnValue({ db, claude: createClaude(), now: () => NOW, env: { NODE_ENV: 'test' } });
+
+    const { status, body } = await draft(disputeId);
+
+    expect(status).toBe(200);
+    expect(body.narrative).toEqual(JSON.parse(stubReply.content[0].text));
+    expect(body.narrative.claims.length).toBeGreaterThan(0);
   });
 
   it('stores the pack it drafted from, and never a narrative', async () => {

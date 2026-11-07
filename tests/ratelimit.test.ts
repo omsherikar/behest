@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { clientAddress, createRateLimiter, MODEL_ROUTE_LIMIT, rateLimit, STUDIO_ANALYST_LIMIT } from '@/lib/ratelimit';
+import {
+  clientAddress,
+  createRateLimiter,
+  MODEL_ROUTE_LIMIT,
+  PUBLIC_READ_LIMIT,
+  PUBLIC_WRITE_LIMIT,
+  rateLimit,
+  STUDIO_ANALYST_LIMIT,
+} from '@/lib/ratelimit';
 
 /** A limiter on a clock the test moves by hand. */
 function limiterAt(start = 0) {
@@ -20,6 +28,11 @@ describe('rate limiter', () => {
 
   it('uses a bucket of 30 refilled at 20 a minute for the dashboard analyst, whose questions take several turns', () => {
     expect(STUDIO_ANALYST_LIMIT).toEqual({ capacity: 30, refillPerMinute: 20 });
+  });
+
+  it('uses a bucket of 60 refilled at 60 a minute for public reads, and 20 at 20 a minute for public writes', () => {
+    expect(PUBLIC_READ_LIMIT).toEqual({ capacity: 60, refillPerMinute: 60 });
+    expect(PUBLIC_WRITE_LIMIT).toEqual({ capacity: 20, refillPerMinute: 20 });
   });
 
   it('allows 10 then refuses', () => {

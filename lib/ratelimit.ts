@@ -1,5 +1,5 @@
-// In-memory token buckets for routes that call a model. Each key (for example a route and a
-// visitor) gets `capacity` tokens; a request spends one, and tokens come back at
+// In-memory token buckets for routes that call a model or are open to anyone. Each key (for example
+// a route and a visitor) gets `capacity` tokens; a request spends one, and tokens come back at
 // `refillPerMinute`. Buckets live in this server process only, which suits a single-instance demo.
 
 export type RateLimitOptions = { capacity: number; refillPerMinute: number };
@@ -12,6 +12,12 @@ export const MODEL_ROUTE_LIMIT: Readonly<RateLimitOptions> = { capacity: 10, ref
  * one request, and a question that runs tools takes several turns.
  */
 export const STUDIO_ANALYST_LIMIT: Readonly<RateLimitOptions> = { capacity: 30, refillPerMinute: 20 };
+
+/** The limit for public reads, such as a seller's catalog or a receipt check: bursts of 60, then 60 a minute. */
+export const PUBLIC_READ_LIMIT: Readonly<RateLimitOptions> = { capacity: 60, refillPerMinute: 60 };
+
+/** The limit for public writes, such as an agent placing an order: bursts of 20, then 20 a minute. */
+export const PUBLIC_WRITE_LIMIT: Readonly<RateLimitOptions> = { capacity: 20, refillPerMinute: 20 };
 
 type Bucket = { tokens: number; at: number };
 

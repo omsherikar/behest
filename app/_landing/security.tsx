@@ -25,8 +25,8 @@ const RULES = [
 /** One number: the label first for a screen reader, the number first on screen. */
 function Stat({ children, label }: { children: ReactNode; label: string }) {
   return (
-    <div className="flex flex-col-reverse border-t border-line-strong pt-5">
-      <dt className="mt-2 text-body text-muted">{label}</dt>
+    <div className="flex flex-col border-t border-line-strong pt-5">
+      <dt className="order-last mt-2 text-body text-muted">{label}</dt>
       <dd className="text-section font-medium text-text">{children}</dd>
     </div>
   );

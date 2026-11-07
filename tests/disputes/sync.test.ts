@@ -30,6 +30,7 @@ function openDispute(changes: Partial<DisputeDetail> = {}): DisputeDetail {
     captureId: CAPTURE_ID,
     createTime: '2026-11-04T16:22:41.000Z',
     buyerNotes: 'My agent bought turmeric and cumin and nothing has arrived.',
+    outcome: null,
     ...changes,
   };
 }

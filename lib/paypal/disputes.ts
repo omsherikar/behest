@@ -23,6 +23,8 @@ type Dispute = {
   /** Present on a dispute read by id. List items usually leave it out. */
   disputed_transactions?: { seller_transaction_id?: string }[];
   messages?: Message[];
+  /** Present once PayPal has decided the dispute. */
+  dispute_outcome?: { outcome_code?: string };
 };
 type DisputePage = { items?: Dispute[]; links?: Link[] };
 
@@ -92,7 +94,11 @@ export const getDispute: PaypalPort['getDispute'] = async (id) => {
   const dispute = await paypalRequest<Dispute | undefined>('GET', `${DISPUTES}/${encodeURIComponent(id)}`);
   // PayPal keeps what each side wrote in `messages`. The buyer's earliest written message is taken
   // as their account of the dispute.
-  return { ...toSummary(dispute ?? {}), buyerNotes: firstBuyerMessage(dispute?.messages)?.content ?? null };
+  return {
+    ...toSummary(dispute ?? {}),
+    buyerNotes: firstBuyerMessage(dispute?.messages)?.content ?? null,
+    outcome: dispute?.dispute_outcome?.outcome_code ?? null,
+  };
 };
 
 export const provideEvidence: PaypalPort['provideEvidence'] = async (id, { notes }) => {

@@ -3,6 +3,7 @@ import type { RecordedCall } from '@/tests/helpers/fake-fetch';
 import { apiCalls, stubFetch } from '@/tests/helpers/paypal-fetch';
 import disputeFixture from '@/tests/fixtures/paypal/dispute.json';
 import disputeList from '@/tests/fixtures/paypal/dispute-list.json';
+import resolvedFixture from '@/tests/fixtures/paypal/dispute-resolved.json';
 import { PayPalApiError, resetPaypalTokenCacheForTests, setPaypalRetrySleepForTests } from '@/lib/paypal/http';
 import { getDispute, listDisputes, provideEvidence } from '@/lib/paypal/disputes';
 
@@ -16,6 +17,8 @@ const BUYER_NOTES = 'My agent bought a 12 oz bag of whole bean coffee on Novembe
 /** The JSON-only shape of a fixture dispute, so tests can replace any field. */
 type Dispute = Record<string, unknown>;
 const dispute: Dispute = disputeFixture;
+/** A dispute PayPal resolved in Behest's favour. */
+const resolvedDispute: Dispute = resolvedFixture;
 const [listed, resolved] = disputeList.items;
 
 const nextLink = (href: string) => ({ href, rel: 'next', method: 'GET' });
@@ -178,7 +181,31 @@ describe('getDispute', () => {
       captureId: CAPTURE_ID,
       createTime: '2026-11-04T16:22:41.000Z',
       buyerNotes: BUYER_NOTES,
+      outcome: null,
     });
+  });
+
+  it("maps a resolved dispute with PayPal's outcome code", async () => {
+    const path = `${DISPUTES}/PP-R-HBN-10070833`;
+    stubFetch([{ method: 'GET', path, body: resolvedDispute }]);
+
+    expect(await getDispute('PP-R-HBN-10070833')).toEqual({
+      id: 'PP-R-HBN-10070833',
+      status: 'RESOLVED',
+      reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
+      amountCents: 6400,
+      captureId: '9GT52816HX4471063',
+      createTime: '2026-11-02T09:05:13.000Z',
+      buyerNotes: 'The spice gift box was missing two of the jars the listing showed.',
+      outcome: 'RESOLVED_SELLER_FAVOUR',
+    });
+  });
+
+  it('reads a buyer-favoured outcome the same way', async () => {
+    const buyerWon = { ...dispute, status: 'RESOLVED', dispute_outcome: { outcome_code: 'RESOLVED_BUYER_FAVOUR', amount_refunded: { currency_code: 'USD', value: '18.75' } } };
+    stubFetch([{ method: 'GET', path: DISPUTE_PATH, body: buyerWon }]);
+
+    expect((await getDispute(DISPUTE_ID)).outcome).toBe('RESOLVED_BUYER_FAVOUR');
   });
 
   it("takes the buyer's earliest message by time posted, whatever the order PayPal lists them in", async () => {

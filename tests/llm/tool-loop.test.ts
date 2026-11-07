@@ -499,3 +499,40 @@ it('refuses a tool that does not set strict', async () => {
   await expect(loop({ tools: [loose] })).rejects.toThrow('Every tool must set strict: true; loose_lookup does not');
   expect(fake.requests).toHaveLength(0);
 });
+
+it('sends each tool schema without the keywords strict mode refuses, and still checks them before the tool runs', async () => {
+  const outOfBounds = { id: 'toolu_1', name: 'order_lines', input: { sku: 'TUR-100', lines: [{ quantity: 100 }] } };
+  const { fake, loop } = await setup([messageJson({ toolUses: [outOfBounds] }), messageJson({ text: 'Done.' })]);
+  const run = vi.fn(async () => 'ordered');
+  const bounded = betaZodTool({
+    name: 'order_lines',
+    description: 'Order lines of one SKU.',
+    inputSchema: z.object({
+      sku: z.string().min(1).max(64),
+      lines: z
+        .array(z.object({ quantity: z.number().int().min(1).max(99) }))
+        .min(1)
+        .max(20),
+    }),
+    strict: true,
+    run,
+  });
+
+  const result = await loop({ tools: [bounded] });
+
+  expect(result).toMatchObject({ ok: true, value: { stop_reason: 'end_turn' } });
+  for (const { body } of fake.requests) {
+    const [sent] = body.tools as { name: string; strict: boolean; input_schema: Record<string, unknown> }[];
+    expect(sent).toMatchObject({ name: 'order_lines', strict: true, input_schema: { type: 'object' } });
+    const keys = new Set<string>();
+    JSON.stringify(sent.input_schema, (key, value) => (keys.add(key), value));
+    for (const refused of ['$schema', 'minimum', 'maximum', 'exclusiveMinimum', 'minLength', 'maxLength', 'maxItems']) {
+      expect(keys).not.toContain(refused);
+    }
+    const text = JSON.stringify(sent.input_schema);
+    for (const limit of ['minLength: 1, maxLength: 64', 'maxItems: 20', 'minimum: 1, maximum: 99']) expect(text).toContain(limit);
+  }
+  expect(run).not.toHaveBeenCalled();
+  const [toolResult] = (fake.requests[1].body.messages as { content: { is_error?: boolean }[] }[])[2].content;
+  expect(toolResult).toMatchObject({ type: 'tool_result', tool_use_id: 'toolu_1', is_error: true });
+});

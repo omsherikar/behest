@@ -176,11 +176,11 @@ async function sendPayout({ db, paypal }: SettleDeps, payout: Payout): Promise<s
 }
 
 /**
- * What an operator needs to tell a payout PayPal refused (a 4xx, such as missing funds or a bad
+ * What an operator needs to tell a request PayPal refused (a 4xx, such as missing funds or a bad
  * receiver) from one whose answer was lost: the message, the error's class and, when PayPal
  * answered, its HTTP status.
  */
-function describeFailure(error: unknown): Record<string, unknown> {
+export function describeFailure(error: unknown): Record<string, unknown> {
   if (!(error instanceof Error)) return { error: String(error) };
   const answer = error instanceof PayPalApiError ? error : error.cause instanceof PayPalApiError ? error.cause : null;
   return { error: error.message, errorClass: error.name, ...(answer ? { httpStatus: answer.status } : {}) };

@@ -1,9 +1,12 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { asc, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import { buyers, products, purchases, sellers, wallets } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME, DEMO_SELLER_SLUG } from '@/lib/demo/personas';
-import { resetDemo, seedDemo } from '@/lib/demo/seed';
+import { RAVI_CATALOG_CSV, resetDemo, seedDemo } from '@/lib/demo/seed';
+import nextConfig from '@/next.config';
 import { addDemoActivity, rowCounts, seededRows } from '@/tests/helpers/demo-activity';
 import { createTestDb } from '@/tests/helpers/test-db';
 
@@ -77,6 +80,21 @@ beforeEach(async () => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('the demo catalog', () => {
+  it('ships with the app, outside the tests, as the same file the catalog tests read', async () => {
+    expect(RAVI_CATALOG_CSV).toBe(join('lib', 'demo', 'ravi-spices.csv'));
+    const [shipped, fixture] = await Promise.all([
+      readFile(join(process.cwd(), RAVI_CATALOG_CSV), 'utf8'),
+      readFile(join(import.meta.dirname, '../fixtures/catalog/ravi-spices.csv'), 'utf8'),
+    ]);
+    expect(shipped).toBe(fixture);
+  });
+
+  it('is traced into the build output with the reset route, which reads it at run time', () => {
+    expect(nextConfig.outputFileTracingIncludes?.['/api/demo/reset']).toEqual([`./${RAVI_CATALOG_CSV}`]);
+  });
 });
 
 describe('seedDemo', () => {

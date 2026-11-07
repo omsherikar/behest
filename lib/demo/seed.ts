@@ -30,8 +30,12 @@ import { DEMO_SELLER_SLUG } from './personas';
 // free and gives the same rows every time. There is no mandate, because the buyer signs one live.
 // Resetting removes what a run of the demo left behind and seeds again, so the demo can be rerun.
 
-/** Ravi's catalog, the same file the catalog tests read. */
-const RAVI_CSV = path.join('tests', 'fixtures', 'catalog', 'ravi-spices.csv');
+/**
+ * Ravi's catalog, relative to the project root, which is the working directory under `next start`, the
+ * standalone server and the scripts. It ships with the app: next.config.ts traces it into the build
+ * output for the reset route. The catalog tests read an identical copy under tests/fixtures.
+ */
+export const RAVI_CATALOG_CSV = path.join('lib', 'demo', 'ravi-spices.csv');
 
 const PAYEE_REQUIRED = 'PAYEE_EMAIL must be set to the email of the sandbox business account that receives seller payouts';
 const Email = z.email().max(254);
@@ -168,11 +172,11 @@ function checkedPayeeEmail(payeeEmail: string): string {
  * agents from buying it.
  */
 async function raviSpices(): Promise<DemoSeller> {
-  const { rows, rejected } = parseCatalogCsv(await readFile(path.join(process.cwd(), RAVI_CSV), 'utf8'));
-  if (rejected.length > 0) throw new Error(`${RAVI_CSV} line ${rejected[0].line}: ${rejected[0].reason}`);
+  const { rows, rejected } = parseCatalogCsv(await readFile(path.join(process.cwd(), RAVI_CATALOG_CSV), 'utf8'));
+  if (rejected.length > 0) throw new Error(`${RAVI_CATALOG_CSV} line ${rejected[0].line}: ${rejected[0].reason}`);
   const listings = rows.map((row): Listing => {
     if (row.category === null || !isCategory(row.category)) {
-      throw new Error(`${RAVI_CSV} line ${row.line}: ${JSON.stringify(row.category)} is not a category`);
+      throw new Error(`${RAVI_CATALOG_CSV} line ${row.line}: ${JSON.stringify(row.category)} is not a category`);
     }
     return {
       sku: row.sku,

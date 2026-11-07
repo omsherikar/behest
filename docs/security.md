@@ -84,9 +84,10 @@ The agent and intent check column needs paid model calls and is pending a live r
 
 `ATTACK_LIVE=1 npm run attack:replay` adds the agent and intent check column. It makes paid Claude calls, so it refuses to start unless `ATTACK_LIVE=1` and `ANTHROPIC_API_KEY` are both set, and it refuses `LLM_STUB=1`, whose recorded replies are not a live run.
 
-- **Calls.** Before any call it prints the most it may make: 120, which is eight attacks of up to 12 agent turns and 3 intent checks each. A proposal after the third in one attack is sent to the buyer without asking the model. A typical run makes 30 to 50 calls.
-- **Cost.** With the default model, `claude-opus-5-5` at $4 per million input tokens and $20 per million output tokens, a typical run costs about $1 to $2. No attack starts once the run's logged cost reaches `LLM_DAILY_CAP_USD` ($5 by default); the attacks it skips are listed in the results.
+- **Calls.** Before any call it prints the most it may make: 120, which is eight attacks of up to 12 agent turns and 3 intent checks each. A proposal after the third in one attack is sent to the buyer without asking the model. A typical run should make about 30 to 50 calls; that is an estimate, since the replay has not yet run live.
+- **Cost.** With the default model, `claude-opus-5-5` at $4 per million input tokens and $20 per million output tokens, a typical run should cost about $1 to $2, also an estimate. No attack starts once the run's logged cost reaches `LLM_DAILY_CAP_USD` ($5 by default), so a run can pass the cap only by what the attack under way spends; the attacks it skips are listed in the results.
 - **Spend.** The total is summed from the `llm_calls` rows each attack's database logs. Those databases are the replay's own, so this spend does not count toward the app's daily cap.
+- **Market prices.** The agent's market search is not connected, so it is told market prices are not available; the gate still reads the medians stored on listings.
 - **Money.** Proposals go through the real gate and intent check, but PayPal is replaced by a port that moves no money: an allowed purchase is left charging and a held one gets an approval link that leads nowhere. No receipt is issued and no order reaches a seller.
 
 Running the script again without `ATTACK_LIVE` keeps the live results already in the file and refreshes the rest.

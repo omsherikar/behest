@@ -186,6 +186,47 @@ describe('syncDisputes', () => {
     expect(await statusOf(db, purchaseId)).toBe('settled');
   });
 
+  it.each(['RESOLVED_SELLER_FAVOUR', 'CANCELED_BY_BUYER'])(
+    'moves a disputed purchase to resolved once PayPal closes the dispute with %s, once',
+    async (outcome) => {
+      const { db, paypal, purchaseId } = await setUpDisputed('settled');
+      await syncDisputes({ db, paypal });
+      paypal.disputes = [openDispute({ status: 'RESOLVED', outcome })];
+
+      await syncDisputes({ db, paypal });
+      await syncDisputes({ db, paypal });
+
+      expect(await statusOf(db, purchaseId)).toBe('resolved');
+      expect((await eventsOf(db, purchaseId)).slice(2)).toEqual([
+        { kind: 'dispute_resolved', data: { paypalDisputeId: 'PP-D-1001', outcome } },
+        { kind: 'status', data: { from: 'disputed', to: 'resolved' } },
+      ]);
+      expect(await disputeRows(db)).toEqual([expect.objectContaining({ purchaseId, status: 'RESOLVED' })]);
+    },
+  );
+
+  it('leaves a purchase disputed when the buyer wins, for the refund or reversal PayPal sends to move', async () => {
+    const { db, paypal, purchaseId } = await setUpDisputed('settled');
+    await syncDisputes({ db, paypal });
+    const logged = await eventsOf(db, purchaseId);
+    paypal.disputes = [openDispute({ status: 'RESOLVED', outcome: 'RESOLVED_BUYER_FAVOUR' })];
+
+    await syncDisputes({ db, paypal });
+    await syncDisputes({ db, paypal });
+
+    expect(await statusOf(db, purchaseId)).toBe('disputed');
+    expect(await eventsOf(db, purchaseId)).toEqual(logged);
+  });
+
+  it('leaves a settled purchase settled for a dispute PayPal resolved for Behest before it was synced', async () => {
+    const { db, paypal, purchaseId } = await setUpDisputed('settled', openDispute({ status: 'RESOLVED', outcome: 'RESOLVED_SELLER_FAVOUR' }));
+
+    await syncDisputes({ db, paypal });
+
+    expect(await statusOf(db, purchaseId)).toBe('settled');
+    expect((await eventsOf(db, purchaseId)).map((e) => e.kind)).toEqual(['dispute_opened']);
+  });
+
   it('links a dispute stored unlinked once a purchase holds its capture', async () => {
     const { db, paypal, purchaseId } = await setUpDisputed('settled', openDispute({ captureId: 'CAPTURE-2' }));
     await syncDisputes({ db, paypal });

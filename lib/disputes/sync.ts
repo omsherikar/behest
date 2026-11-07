@@ -7,15 +7,23 @@ import { canTransition } from '@/lib/purchases/transitions';
 
 // Bringing the disputes buyers open at PayPal into Behest (architecture section 5.5). Each dispute is
 // stored by PayPal's dispute id and matched to the purchase holding its capture. A matched purchase
-// the lifecycle lets into a dispute moves to `disputed`, once. The sync runs from a job, again and
-// again, so it is idempotent: a later run updates what PayPal reports and moves nothing a second
-// time. It writes only PayPal's side of a dispute and never the operator's: the evidence pack, the
+// the lifecycle lets into a dispute moves to `disputed`, once, and on to `resolved` once PayPal closes
+// the dispute leaving the money with Behest. A dispute the buyer wins moves no purchase here: PayPal
+// returns the money with a refund or a reversal of the capture, whose webhook moves the purchase to
+// `refunded`. The sync runs from a job, again and again, so it is idempotent: a later run updates what
+// PayPal reports and moves nothing a second time. It writes only PayPal's side of a dispute and never the operator's: the evidence pack, the
 // narrative and the submission time stay as they are. No database lock is held while PayPal is asked.
 
 type SyncDeps = { db: Db; paypal: PaypalPort };
 
 /** PayPal's status for a dispute it has closed. A closed dispute never opens one on its purchase. */
 const CLOSED = 'RESOLVED';
+
+/**
+ * PayPal's outcome codes for a closed dispute that leaves the money with Behest: decided in the
+ * seller's favour, or withdrawn by the buyer.
+ */
+const SELLER_KEEPS: ReadonlySet<string> = new Set(['RESOLVED_SELLER_FAVOUR', 'CANCELED_BY_BUYER']);
 
 /**
  * Reads every dispute PayPal lists, each in full (the list leaves out the capture and the buyer's
@@ -47,7 +55,10 @@ function withCapture(summary: DisputeSummary, detail: DisputeDetail): DisputeDet
  * one purchase holding its capture, if it is not linked yet, logging `dispute_opened` on that
  * purchase; and moves the linked purchase to `disputed` while PayPal still has the dispute open and
  * the lifecycle (ALLOWED) allows the move, which today means a `settled` purchase. An `accepted`
- * purchase whose payout is still out is moved by a later sync, once the payout settles it. The
+ * purchase whose payout is still out is moved by a later sync, once the payout settles it. Once
+ * PayPal has closed the dispute with an outcome that leaves the money with Behest, it logs
+ * `dispute_resolved` and moves the purchase to `resolved` where ALLOWED allows it, which means a
+ * `disputed` one; any other outcome moves nothing. The
  * dispute row stays locked from the upsert to the commit, so two syncs of one dispute take turns,
  * and the purchase row is locked while its status is read and moved.
  */
@@ -74,14 +85,21 @@ async function storeDispute(db: Db, dispute: DisputeDetail): Promise<void> {
       .returning({ id: disputes.id, purchaseId: disputes.purchaseId, captureId: disputes.captureId });
 
     const purchaseId = stored.purchaseId ?? (await link(tx, stored.id, stored.captureId, dispute));
-    if (!purchaseId || dispute.status === CLOSED) return;
+    if (!purchaseId) return;
 
     const [purchase] = await tx
       .select({ status: purchases.status })
       .from(purchases)
       .where(eq(purchases.id, purchaseId))
       .for('update');
-    if (canTransition(purchase.status, 'disputed')) await transition(tx, purchaseId, purchase.status, 'disputed');
+    if (dispute.status !== CLOSED) {
+      if (canTransition(purchase.status, 'disputed')) await transition(tx, purchaseId, purchase.status, 'disputed');
+      return;
+    }
+    if (dispute.outcome !== null && SELLER_KEEPS.has(dispute.outcome) && canTransition(purchase.status, 'resolved')) {
+      await appendEvent(tx, purchaseId, 'dispute_resolved', { paypalDisputeId: dispute.id, outcome: dispute.outcome });
+      await transition(tx, purchaseId, purchase.status, 'resolved');
+    }
   });
 }
 

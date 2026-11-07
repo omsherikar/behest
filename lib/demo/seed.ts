@@ -66,8 +66,9 @@ const GADGET_HUB: DemoSeller = {
 /**
  * Seeds the demo, or puts it back: the demo buyer, and each demo seller and its listings as listed
  * here, upserted by slug and by seller and SKU, so running it again leaves the same rows. Every
- * seller's payouts go to `payeeEmail`. Runs in one transaction. Throws, storing nothing, when the
- * payee email is missing or not an email, or when the demo catalog does not read cleanly.
+ * seller's payouts go to `payeeEmail`. A listing's market benchmark is not the seed's to set, so one
+ * a listing already has is kept. Runs in one transaction. Throws, storing nothing, when the payee
+ * email is missing or not an email, or when the demo catalog does not read cleanly.
  */
 export async function seedDemo(db: Db, deps: SeedDeps): Promise<SeedResult> {
   const payoutEmail = checkedPayeeEmail(deps.payeeEmail);

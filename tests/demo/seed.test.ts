@@ -125,6 +125,20 @@ describe('seedDemo', () => {
     ]);
   });
 
+  it('keeps a market benchmark a seeded listing already has', async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    const benchmark = { channel3Id: 'c3-turmeric', marketMedianCents: 520 };
+    await db.update(products).set(benchmark).where(eq(products.sku, 'TUR-100'));
+
+    await seedDemo(db, { payeeEmail: PAYEE });
+
+    const [turmeric] = await db
+      .select({ channel3Id: products.channel3Id, marketMedianCents: products.marketMedianCents })
+      .from(products)
+      .where(eq(products.sku, 'TUR-100'));
+    expect(turmeric).toEqual(benchmark);
+  });
+
   it('uses the demo buyer that is already there', async () => {
     const [priya] = await db.insert(buyers).values({ name: DEMO_BUYER_NAME }).returning();
 

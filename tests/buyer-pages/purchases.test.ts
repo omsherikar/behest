@@ -1,14 +1,15 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { pendingApprovals } from '@/lib/buyer-pages/purchases';
+import { ledgerRows, pendingApprovals } from '@/lib/buyer-pages/purchases';
 import type { Db } from '@/lib/db/client';
-import { buyers, purchases, type StoredIntentResult, type StoredRuleOutcome } from '@/lib/db/schema';
+import { buyers, purchases, receipts, type StoredIntentResult, type StoredRuleOutcome } from '@/lib/db/schema';
 import type { Cart } from '@/lib/domain/cart';
 import { purchaseOutcome } from '@/lib/purchases/charge';
 import { purchaseRow, SEEDED_SELLER, seedPurchase } from '@/tests/helpers/seed-purchase';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 const at = (minute: number) => new Date(Date.UTC(2026, 10, 7, 9, minute));
+const RECEIPT_ID = '0b6a3f5e-1d2c-4e8f-9a7b-3c5d6e7f8a90';
 const APPROVE_URL = 'https://www.sandbox.paypal.com/checkoutnow?token=5O190127TN364715T';
 
 /** Two grams of saffron: $32.00, over the buyer's $25.00 approval limit. */
@@ -84,6 +85,9 @@ beforeAll(async () => {
     ])
     .returning({ id: purchases.id });
   [ids.asked, ids.badLink, ids.noLink, ids.unknownSeller, ids.otherBuyer] = inserted.map((row) => row.id);
+  await db
+    .insert(receipts)
+    .values({ id: RECEIPT_ID, purchaseId: ids.paid, jws: 'receipt.jws.value', payloadHash: 'c'.repeat(64), keyId: 'key-1' });
 });
 
 describe('pendingApprovals', () => {
@@ -109,5 +113,55 @@ describe('pendingApprovals', () => {
   it('lists nothing for a buyer with nothing waiting', async () => {
     const [nobody] = await db.insert(buyers).values({ name: 'Meera' }).returning();
     expect(await pendingApprovals(db, nobody.id)).toEqual([]);
+  });
+});
+
+describe('ledgerRows', () => {
+  it("lists every purchase of the buyer's, newest first, with its verdict, status, reasons and receipt", async () => {
+    const asked = {
+      seller: SEEDED_SELLER.name,
+      totalCents: 3200,
+      verdict: 'ASK',
+      status: 'awaiting_approval',
+      reasons: ['Over $25.00, so you approve it.', 'You asked for one gram; the cart has two.'],
+      receiptId: null,
+    };
+    expect(await ledgerRows(db, buyerId)).toEqual([
+      {
+        id: ids.unknownSeller,
+        createdAt: at(5).toISOString(),
+        seller: 'mystery-mart',
+        totalCents: null,
+        verdict: 'BLOCK',
+        status: 'blocked',
+        reasons: ['No Behest seller is called mystery-mart.'],
+        receiptId: null,
+      },
+      { ...asked, id: ids.noLink, createdAt: at(4).toISOString() },
+      { ...asked, id: ids.badLink, createdAt: at(3).toISOString() },
+      { ...asked, id: ids.asked, createdAt: at(2).toISOString() },
+      {
+        id: ids.paid,
+        createdAt: at(1).toISOString(),
+        seller: SEEDED_SELLER.name,
+        totalCents: 1875,
+        verdict: 'ALLOW',
+        status: 'captured',
+        reasons: [],
+        receiptId: RECEIPT_ID,
+      },
+    ]);
+  });
+
+  it('gives each purchase the verdict, status, reasons and receipt the purchase flow reports', async () => {
+    for (const row of await ledgerRows(db, buyerId)) {
+      const { verdict, status, reasons, receiptId } = await purchaseOutcome(db, row.id);
+      expect(row).toMatchObject({ verdict, status, reasons, receiptId });
+    }
+  });
+
+  it('lists nothing for a buyer with no purchases', async () => {
+    const [nobody] = await db.insert(buyers).values({ name: 'Kabir' }).returning();
+    expect(await ledgerRows(db, nobody.id)).toEqual([]);
   });
 });

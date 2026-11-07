@@ -7,6 +7,7 @@ import type { LlmDeps, LlmResult } from '@/lib/llm/client';
 import { buildListings, type ListingDraft, type ListingPhoto } from './build';
 import { type CatalogRejection, oneLine, parseCatalogCsv } from './csv';
 import { enrichListing } from './enrich';
+import { lockSellerName, sellerNameRefusal } from './seller-name';
 
 // Onboarding a seller: their catalog read from a CSV and photos, drafted and screened by the catalog
 // builder, benchmarked against market prices, then stored with the seller in one transaction. The
@@ -30,6 +31,8 @@ export type OnboardErrorCode =
   | 'invalid_slug'
   | 'invalid_payout_email'
   | 'slug_taken'
+  | 'name_taken'
+  | 'name_screened'
   | 'no_listings'
   | 'build_failed';
 
@@ -40,6 +43,8 @@ const MESSAGES: Record<OnboardErrorCode, string> = {
     'The shop address must be lower-case letters, digits and hyphens, starting with a letter or digit, at most 63 characters.',
   invalid_payout_email: 'The payout email must be an email address.',
   slug_taken: 'Another seller already uses this shop address.',
+  name_taken: 'A seller with a name too close to this one already exists.',
+  name_screened: 'This shop name or address reads as instructions to AI agents. Choose another.',
   no_listings: 'The catalog has no row or photo that can be listed.',
   build_failed: 'Behest could not draft listings from this catalog.',
 };
@@ -84,8 +89,9 @@ type Benchmark = Awaited<ReturnType<typeof enrichListing>>;
  * that fails leaves that listing without one. CSV rows the reader rejected come back in `rejected`.
  *
  * Throws an OnboardError, storing nothing, for a blank name, a malformed slug or payout email, a
- * slug another seller has (checked before any model call and again on insert), a catalog with
- * nothing to list, or a failed build. Photos the builder cannot list throw its CatalogInputError.
+ * slug another seller has or a name that reads the same as another seller's (each checked before any
+ * model call and again on insert), a name or slug written as instructions to AI agents, a catalog
+ * with nothing to list, or a failed build. Photos the builder cannot list throw its CatalogInputError.
  */
 export async function onboardSeller(deps: OnboardDeps, i: OnboardInput): Promise<OnboardResult> {
   const name = oneLine(i.name, NAME_MAX);
@@ -95,6 +101,8 @@ export async function onboardSeller(deps: OnboardDeps, i: OnboardInput): Promise
   const payoutEmail = i.payoutEmail.trim();
   if (!Email.safeParse(payoutEmail).success) throw new OnboardError('invalid_payout_email');
   if (await slugTaken(deps, i.slug)) throw new OnboardError('slug_taken');
+  const nameRefusal = await sellerNameRefusal(deps.db, name, i.slug);
+  if (nameRefusal) throw new OnboardError(nameRefusal.code);
 
   const { rows, rejected } = i.csvText === undefined ? { rows: [], rejected: [] } : parseCatalogCsv(i.csvText);
   const images = i.images ?? [];
@@ -106,6 +114,9 @@ export async function onboardSeller(deps: OnboardDeps, i: OnboardInput): Promise
   const benchmarks = await benchmarksFor(drafts, deps.search ?? searchMarket);
 
   const sellerId = await deps.db.transaction(async (tx) => {
+    // Another onboarding may have taken a name that reads the same while this one was building.
+    await lockSellerName(tx, name);
+    if ((await sellerNameRefusal(tx, name, i.slug))?.code === 'name_taken') throw new OnboardError('name_taken');
     // Another onboarding may have taken the slug while this one was building.
     const [seller] = await tx
       .insert(sellers)

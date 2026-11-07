@@ -36,6 +36,8 @@ const FAILURES = new Map<number | null, string>([
   [429, 'Too many uploads in a short time. Wait a minute, then try again.'],
   [502, 'Behest could not build your catalog just now, so nothing was saved. Try again in a minute.'],
 ]);
+/** A 409 for a name too close to an existing seller's: nothing was saved, and no shop exists to reload. */
+const NAME_TAKEN = 'A seller with a name too close to this one already exists. Choose another name.';
 const SERVER_FAULT = "Something went wrong on Behest's side. Reload the page to see whether your shop was onboarded before you try again.";
 
 type Listed = { created: number; flagged: number; rejected: { line: number; reason: string }[] };
@@ -49,6 +51,7 @@ export function onboardOutcome(status: number | null, body: unknown): OnboardOut
     return isListed(body) ? listedOutcome(body) : { ok: false, message: UNREADABLE, refresh: true };
   }
   if (status === 400) return { ok: false, message: serverMessage(body) ?? BAD_REQUEST, refresh: false };
+  if (status === 409 && errorCode(body) === 'name_taken') return { ok: false, message: NAME_TAKEN, refresh: false };
   return { ok: false, message: FAILURES.get(status) ?? SERVER_FAULT, refresh: status === 409 };
 }
 
@@ -90,6 +93,12 @@ function isListed(body: unknown): body is Listed {
 function serverMessage(body: unknown): string | null {
   const message = (body as { error?: { message?: unknown } } | null)?.error?.message;
   return typeof message === 'string' && message.trim() !== '' ? sentence(message.trim()) : null;
+}
+
+/** The error code the route sent, or null. Only codes are read from a refusal other than a 400, never its text. */
+function errorCode(body: unknown): string | null {
+  const code = (body as { error?: { code?: unknown } } | null)?.error?.code;
+  return typeof code === 'string' ? code : null;
 }
 
 /** Text as a sentence: capitalized, with a full stop unless it already ends a sentence. */

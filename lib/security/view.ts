@@ -78,7 +78,7 @@ export const LIMITS: { title: string; detail: string }[] = [
   {
     title: 'Exfiltration has little to take, but is not screened.',
     detail:
-      "The screen does not flag a request for the buyer's email and address, and the gate does not read the agent's rationale. The agent is given the buyer's request and mandate readback, not an email or address, and its rationale goes to the intent check, the buyer and the purchase's decision record, never to the seller.",
+      "The screen does not flag a request for the buyer's email and address, and the gate does not read the agent's rationale. The agent is given the buyer's request and mandate readback, not an email or address, and its rationale goes to the intent check, the purchase's decision record and, in a dispute, the evidence Behest's operator sends PayPal, never to the seller.",
   },
   {
     title: 'One live run is evidence, not a guarantee.',

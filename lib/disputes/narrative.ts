@@ -41,6 +41,12 @@ const MAX_DISPUTE_CHARS = 8_000;
 const MAX_CART_CHARS = 20_000;
 const MAX_FINDINGS_CHARS = 8_000;
 const NO_SUCH_ITEM = 'No such evidence item.';
+/**
+ * The most characters the summary and claims may take together. PayPal takes 2,000 characters of
+ * notes (MAX_NOTES_CHARS in ./submit), and the notes add a heading, each claim's number and
+ * citations, and the receipt's id and verification link around what the model writes.
+ */
+export const NARRATIVE_CHAR_BUDGET = 1_400;
 
 // Fixed text with nothing that changes per dispute, so every request sends the same prompt and the
 // prompt cache can reuse it.
@@ -65,7 +71,7 @@ The evidence list in the request names the items this dispute has. Amounts named
 
 First you investigate. Read the evidence items you need with get_evidence_item, and PayPal's own records of the dispute, the order and the shipment with the PayPal tools. Then write your findings in plain text: what the buyer says happened, and what the records show about it.
 
-Then you are asked for the narrative: a summary of Behest's case in two or three sentences, and a list of claims. Each claim is one statement of fact, and its evidenceIds name the evidence items that show it. The summary only restates claims from the list. Cite only items in the evidence list, and claim only what those items show. PayPal's records help you understand the dispute, but they are not evidence items and cannot be cited. A citation of an item the pack does not have is deleted, and so is a claim left with no citation, before the operator sees the draft. Write for a PayPal dispute reviewer: plain sentences, amounts in dollars, times in UTC, and no guesses about anyone's motives.
+Then you are asked for the narrative: a summary of Behest's case in two or three sentences, and a list of claims. Each claim is one statement of fact, and its evidenceIds name the evidence items that show it. The summary only restates claims from the list. Cite only items in the evidence list, and claim only what those items show. PayPal's records help you understand the dispute, but they are not evidence items and cannot be cited. A citation of an item the pack does not have is deleted, and so is a claim left with no citation, before the operator sees the draft. Write for a PayPal dispute reviewer: plain sentences, amounts in dollars, times in UTC, and no guesses about anyone's motives. PayPal takes at most 2,000 characters for the whole answer, and Behest adds the citations and the receipt to what you write, so keep the summary and all the claims together under ${NARRATIVE_CHAR_BUDGET.toLocaleString('en-US')} characters: at most six claims, each one sentence, naming ids and hashes only by their first characters where you need them at all.
 
 ## Quoted text
 

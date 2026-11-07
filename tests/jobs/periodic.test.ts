@@ -477,6 +477,59 @@ describe('runPeriodicPass: payouts left unclaimed after a refund', () => {
   });
 });
 
+describe('runPeriodicPass: purchases left charging', () => {
+  it('logs charge_stale once for a purchase charging untouched for more than 30 minutes, and moves no money', async () => {
+    const s = await setUp('charging');
+    const t = startOf();
+    const lastChange = later(t, -31 * MINUTE);
+    await s.db
+      .update(purchases)
+      .set({ paypalOrderId: 'ORDER-1', paypalCaptureId: 'CAPTURE-1', updatedAt: lastChange })
+      .where(eq(purchases.id, s.purchaseId));
+
+    await passAt(s, t);
+    await passAt(s, later(t, MINUTE));
+
+    expect(await eventsOf(s.db, s.purchaseId)).toEqual([
+      {
+        kind: 'charge_stale',
+        data: { updatedAt: lastChange.toISOString(), paypalOrderId: 'ORDER-1', paypalCaptureId: 'CAPTURE-1' },
+      },
+    ]);
+    expect(await statusOf(s.db, s.purchaseId)).toBe('charging');
+    expect(s.paypal.calls).toEqual([]);
+  });
+
+  it('leaves a purchase charging for less than 30 minutes alone', async () => {
+    const s = await setUp('charging');
+    const t = startOf();
+    await s.db.update(purchases).set({ updatedAt: later(t, -29 * MINUTE) }).where(eq(purchases.id, s.purchaseId));
+
+    await passAt(s, t);
+
+    expect(await eventsOf(s.db, s.purchaseId)).toEqual([]);
+  });
+
+  it('flags at most 10 a pass, oldest first, leaving the rest for the next pass', async () => {
+    const s = await setUp('charging');
+    const t = startOf();
+    await s.db.update(purchases).set({ updatedAt: later(t, -60 * MINUTE) }).where(eq(purchases.id, s.purchaseId));
+    const added: string[] = [];
+    for (let i = 0; i < 10; i++) added.push(await addPurchase(s.db, s.purchaseId, 'charging', { updatedAt: later(t, -(50 - i) * MINUTE) }));
+    const newest = added.at(-1) as string;
+    const flagged = () => s.db.select({ id: purchaseEvents.purchaseId }).from(purchaseEvents).where(eq(purchaseEvents.kind, 'charge_stale'));
+
+    await passAt(s, t);
+
+    expect((await flagged()).map((row) => row.id)).not.toContain(newest);
+    expect(await flagged()).toHaveLength(10);
+
+    await passAt(s, later(t, MINUTE));
+
+    expect((await flagged()).map((row) => row.id)).toContain(newest);
+  });
+});
+
 describe('runPeriodicPass: one pass at a time', () => {
   it('skips a pass that starts while another is still running in this process', async () => {
     const t = startOf();

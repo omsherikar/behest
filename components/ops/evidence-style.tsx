@@ -11,6 +11,7 @@ const STYLES: Record<string, ItemStyle> = {
   cart: { dot: 'bg-[#7fd3ff]', chip: 'border-[#7fd3ff]/45 bg-[#7fd3ff]/10', text: 'text-[#7fd3ff]' },
   purchase_log: { dot: 'bg-[#d49cf0]', chip: 'border-[#d49cf0]/45 bg-[#d49cf0]/10', text: 'text-[#d49cf0]' },
   approval: { dot: 'bg-[#f2a7c9]', chip: 'border-[#f2a7c9]/45 bg-[#f2a7c9]/10', text: 'text-[#f2a7c9]' },
+  decision: { dot: 'bg-[#bfe08a]', chip: 'border-[#bfe08a]/45 bg-[#bfe08a]/10', text: 'text-[#bfe08a]' },
 };
 const OTHER: ItemStyle = { dot: 'bg-[#b8c4d9]', chip: 'border-[#b8c4d9]/45 bg-[#b8c4d9]/10', text: 'text-[#b8c4d9]' };
 

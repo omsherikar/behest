@@ -1,3 +1,4 @@
+import { transformJSONSchema } from '@anthropic-ai/sdk/lib/transform-json-schema';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   paypalAgentToolkit,
@@ -122,8 +123,20 @@ describe('paypalReadOnlyTools', () => {
         name: 'get_dispute',
         description: 'Read get_dispute from PayPal.',
         input_schema: getDisputeSchema,
+        strict: true,
       }),
     );
+  });
+
+  it('marks every official tool strict, with a schema the strict transform accepts', () => {
+    const tools = paypalReadOnlyTools({ toolkit: officialToolkit() });
+
+    expect(tools.map((tool) => tool.name)).toEqual([...READ_ONLY_TOOLS]);
+    for (const tool of tools) {
+      expect(tool).toHaveProperty('strict', true);
+      if (!('input_schema' in tool)) throw new Error(`${tool.name} has no input schema`);
+      expect(transformJSONSchema({ ...tool.input_schema })).toMatchObject({ type: 'object', additionalProperties: false });
+    }
   });
 
   it('skips a read-only tool the toolkit does not offer and warns which ones are missing', () => {

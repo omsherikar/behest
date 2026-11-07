@@ -219,6 +219,27 @@ it('calls while spending is under the cap', async () => {
   expect(await call()).toMatchObject({ ok: true });
 });
 
+it("still compiles mandates once the analyst's own daily cap is spent", async () => {
+  const { db, fake, call } = await setup([messageJson({ json: { answer: 'yes' } })]);
+  await recordCall(db, { route: 'studio_analyst', model: 'claude-opus-5-5', effort: 'low', ok: true, costUsd: 1, createdAt: NOW });
+
+  expect(await call('mandate_compile')).toMatchObject({ ok: true });
+  expect(fake.requests).toHaveLength(1);
+});
+
+it("refuses the catalog builder once its own daily cap is spent, under the overall cap", async () => {
+  const { db, fake, call } = await setup([messageJson({ json: { answer: 'yes' } })]);
+  await recordCall(db, { route: 'catalog_build', model: 'claude-opus-5-5', effort: 'medium', ok: true, costUsd: 1, createdAt: NOW });
+
+  expect(await call('catalog_build')).toEqual({
+    ok: false,
+    error: 'spend_cap',
+    callId: null,
+    detail: 'Spent $1 of the $1 daily model budget for catalog_build',
+  });
+  expect(fake.requests).toHaveLength(0);
+});
+
 it('maps an HTTP 500 after retries to api_error', async () => {
   const { db, fake, call } = await setup([SERVER_ERROR, SERVER_ERROR, SERVER_ERROR], { maxRetries: 2 });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { llmCalls } from '@/lib/db/schema';
-import { dailyCapUsd, recordCall, spentTodayUsd } from '@/lib/llm/client';
+import { dailyCapUsd, recordCall, spendCapFailure, spendCaps, spentTodayUsd } from '@/lib/llm/client';
 import { createTestDb } from '@/tests/helpers/test-db';
 
 const NOW = new Date('2026-11-06T12:00:00Z');
@@ -60,6 +60,73 @@ describe('spentTodayUsd', () => {
   it('is zero on a day without calls', async () => {
     const db = await createTestDb();
     expect(await spentTodayUsd(db, NOW)).toBe(0);
+  });
+
+  it("sums one route's calls when given the route", async () => {
+    const db = await createTestDb();
+    await recordCall(db, { ...call, route: 'studio_analyst', costUsd: 0.25, createdAt: NOW });
+    await recordCall(db, { ...call, route: 'studio_analyst', costUsd: 0.5, createdAt: NOW });
+    await recordCall(db, { ...call, route: 'mandate_compile', costUsd: 2, createdAt: NOW });
+    expect(await spentTodayUsd(db, NOW, 'studio_analyst')).toBe(0.75);
+    expect(await spentTodayUsd(db, NOW)).toBe(2.75);
+  });
+});
+
+describe('spendCaps', () => {
+  it('gives the analyst and the catalog builder a cap of their own, 1 dollar each by default', () => {
+    expect(spendCaps('studio_analyst', env())).toEqual({ route: 'studio_analyst', dailyUsd: 5, routeDailyUsd: 1 });
+    expect(spendCaps('catalog_build', env())).toEqual({ route: 'catalog_build', dailyUsd: 5, routeDailyUsd: 1 });
+  });
+
+  it('reads LLM_ANALYST_DAILY_CAP_USD and LLM_CATALOG_DAILY_CAP_USD', () => {
+    const vars = env({ LLM_ANALYST_DAILY_CAP_USD: '0.5', LLM_CATALOG_DAILY_CAP_USD: '2' });
+    expect(spendCaps('studio_analyst', vars).routeDailyUsd).toBe(0.5);
+    expect(spendCaps('catalog_build', vars).routeDailyUsd).toBe(2);
+  });
+
+  it.each(['mandate_compile', 'intent_check', 'shopping_agent', 'dispute_evidence'] as const)(
+    'leaves %s under the overall cap alone',
+    (route) => {
+      expect(spendCaps(route, env({ LLM_DAILY_CAP_USD: '3' }))).toEqual({ route, dailyUsd: 3, routeDailyUsd: null });
+    },
+  );
+
+  it('rejects a route cap that is not a non-negative amount', () => {
+    expect(() => spendCaps('studio_analyst', env({ LLM_ANALYST_DAILY_CAP_USD: '-1' }))).toThrow(
+      'LLM_ANALYST_DAILY_CAP_USD must be a non-negative amount in dollars, got "-1"',
+    );
+    expect(() => spendCaps('catalog_build', env({ LLM_CATALOG_DAILY_CAP_USD: 'one' }))).toThrow(
+      'LLM_CATALOG_DAILY_CAP_USD must be a non-negative amount in dollars, got "one"',
+    );
+  });
+});
+
+describe('spendCapFailure', () => {
+  it("stops the analyst once its own day's cap is spent, but not the mandate compiler", async () => {
+    const db = await createTestDb();
+    await recordCall(db, { ...call, route: 'studio_analyst', costUsd: 1, createdAt: NOW });
+
+    expect(await spendCapFailure(db, NOW, spendCaps('studio_analyst', env()))).toEqual({
+      ok: false,
+      error: 'spend_cap',
+      callId: null,
+      detail: 'Spent $1 of the $1 daily model budget for studio_analyst',
+    });
+    expect(await spendCapFailure(db, NOW, spendCaps('mandate_compile', env()))).toBeNull();
+    expect(await spendCapFailure(db, NOW, spendCaps('catalog_build', env()))).toBeNull();
+  });
+
+  it('counts what the analyst and the catalog builder spend against the overall cap too', async () => {
+    const db = await createTestDb();
+    await recordCall(db, { ...call, route: 'studio_analyst', costUsd: 0.75, createdAt: NOW });
+    await recordCall(db, { ...call, route: 'catalog_build', costUsd: 0.25, createdAt: NOW });
+
+    expect(await spendCapFailure(db, NOW, spendCaps('mandate_compile', env({ LLM_DAILY_CAP_USD: '1' })))).toEqual({
+      ok: false,
+      error: 'spend_cap',
+      callId: null,
+      detail: 'Spent $1 of the $1 daily model budget',
+    });
   });
 });
 

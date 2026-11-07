@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import { disputes } from '@/lib/db/schema';
+import { PayPalApiError } from '@/lib/paypal/http';
 import type { DisputeDetail, PaypalPort } from '@/lib/paypal/port';
 
 // Whether PayPal takes Behest's answer to a dispute right now. PayPal offers each answer only through
@@ -25,6 +26,14 @@ export const CLOSED_STATUS = 'RESOLVED';
 const ACTION: Record<Answer, string> = { evidence: 'provide_evidence', message: 'send_message' };
 
 const CHECK_FAILED = 'Could not check the dispute at PayPal. Try again.';
+
+/**
+ * Whether PayPal answered a request with a 4xx other than 429: it will not take it, and sending the
+ * same again would not change that. Any other failure (no answer, a 5xx or a 429) a later attempt
+ * may get past.
+ */
+export const isPaypalRefusal = (failure: unknown) =>
+  failure instanceof PayPalApiError && failure.status >= 400 && failure.status < 500 && failure.status !== 429;
 
 /**
  * Why PayPal would not take `answer` on the dispute as PayPal reported it, in words for the

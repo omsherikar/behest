@@ -1,9 +1,8 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import { disputes, receipts } from '@/lib/db/schema';
-import { PayPalApiError } from '@/lib/paypal/http';
 import type { PaypalPort } from '@/lib/paypal/port';
-import { type AnswerRefusalCode, checkAnswerAtPaypal } from './answerable';
+import { type AnswerRefusalCode, checkAnswerAtPaypal, isPaypalRefusal } from './answerable';
 import type { Narrative } from './narrative';
 
 // Submits the narrative an operator reviewed to PayPal as the dispute's evidence, exactly once
@@ -56,10 +55,11 @@ export class SubmitEvidenceError extends Error {
 const oneLine = (text: string) => text.replace(/[\s\u0085]+/g, ' ').trim();
 
 /**
- * The notes PayPal gets for the narrative, with the receipt lines when the purchase has a receipt.
- * The same text goes to the buyer when the answer is sent as a message.
+ * The notes PayPal gets for the narrative, with the receipt lines when the purchase has the receipt
+ * `receiptId`, verified on `appUrl`, Behest's public origin. The same text goes to the buyer when the
+ * answer is sent as a message.
  */
-export function renderNotes(narrative: Narrative, receipt: { id: string; verifyUrl: string } | null): string {
+export function renderNotes(narrative: Narrative, receiptId: string | null, appUrl: string): string {
   const lines = [
     oneLine(narrative.summary),
     '',
@@ -68,15 +68,30 @@ export function renderNotes(narrative: Narrative, receipt: { id: string; verifyU
       (claim, index) => `${index + 1}. ${oneLine(claim.text)} ${claim.evidenceIds.map((id) => `[${id}]`).join(' ')}`,
     ),
   ];
-  if (receipt) lines.push('', `Signed receipt: ${receipt.id}`, `Verify it at: ${receipt.verifyUrl}`);
+  if (receiptId) lines.push('', `Signed receipt: ${receiptId}`, `Verify it at: ${new URL('/api/receipts/verify', appUrl).href}`);
   return lines.join('\n');
 }
 
-const count = (n: number) => n.toLocaleString('en-US');
+/**
+ * What answering the dispute whose row id is `disputeId` needs from Behest's records: its PayPal id,
+ * its purchase, when its evidence was submitted and its purchase's receipt. Undefined when there is
+ * no such dispute.
+ */
+export async function disputeToAnswer(db: Db, disputeId: string) {
+  const [dispute] = await db
+    .select({
+      paypalDisputeId: disputes.paypalDisputeId,
+      purchaseId: disputes.purchaseId,
+      submittedAt: disputes.submittedAt,
+      receiptId: receipts.id,
+    })
+    .from(disputes)
+    .leftJoin(receipts, eq(receipts.purchaseId, disputes.purchaseId))
+    .where(eq(disputes.id, disputeId));
+  return dispute;
+}
 
-/** Whether PayPal answered that it will not take the request, rather than failing to answer it. */
-const isRefusal = (failure: unknown) =>
-  failure instanceof PayPalApiError && failure.status >= 400 && failure.status < 500 && failure.status !== 429;
+const count = (n: number) => n.toLocaleString('en-US');
 
 /**
  * Sends the narrative to PayPal as the evidence for the dispute whose row id is `disputeId`, and
@@ -98,22 +113,12 @@ export async function submitEvidence(
   const { db } = deps;
   const { disputeId, narrative } = i;
 
-  const [dispute] = await db
-    .select({
-      paypalDisputeId: disputes.paypalDisputeId,
-      purchaseId: disputes.purchaseId,
-      submittedAt: disputes.submittedAt,
-      receiptId: receipts.id,
-    })
-    .from(disputes)
-    .leftJoin(receipts, eq(receipts.purchaseId, disputes.purchaseId))
-    .where(eq(disputes.id, disputeId));
+  const dispute = await disputeToAnswer(db, disputeId);
   if (!dispute) throw new SubmitEvidenceError('unknown_dispute', 'there is no such dispute');
   if (!dispute.purchaseId) throw new SubmitEvidenceError('unmatched', 'the dispute is not matched to a purchase');
   if (dispute.submittedAt) throw new SubmitEvidenceError('already_submitted', 'already submitted');
 
-  const verifyUrl = new URL('/api/receipts/verify', deps.appUrl).href;
-  const notes = renderNotes(narrative, dispute.receiptId ? { id: dispute.receiptId, verifyUrl } : null);
+  const notes = renderNotes(narrative, dispute.receiptId, deps.appUrl);
   // Refused whole: cutting the notes short could drop a claim or the receipt without anyone seeing.
   if (notes.length > MAX_NOTES_CHARS) {
     throw new SubmitEvidenceError(
@@ -155,7 +160,7 @@ export async function submitEvidence(
         `PayPal did not take the evidence for dispute ${disputeId}, and its submission could not be released, so the dispute still reads as submitted`,
       );
     }
-    if (isRefusal(failure)) throw new SubmitEvidenceError('paypal_refused', 'PayPal refused the evidence', { cause: failure });
+    if (isPaypalRefusal(failure)) throw new SubmitEvidenceError('paypal_refused', 'PayPal refused the evidence', { cause: failure });
     throw new SubmitEvidenceError('paypal_failed', 'PayPal did not take the evidence', { cause: failure });
   }
 }

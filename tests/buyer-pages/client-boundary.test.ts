@@ -13,9 +13,13 @@ const BROWSER_PACKAGES = new Set([
   'react',
   'next/link',
   'next/navigation',
+  'next/image',
   'ag-grid-community',
   'ag-grid-react',
   '@simplewebauthn/browser',
+  // Class name joining (lib/utils.ts), pure string functions.
+  'clsx',
+  'tailwind-merge',
 ]);
 
 /** Every file under `dir`, recursively. */
@@ -65,9 +69,10 @@ const clientFiles = filesIn(path.join(ROOT, 'app', 'buyer')).filter(
 );
 
 describe("the buyer's client components", () => {
-  it('include the shop run, the ledger grid, the mandate form and its passkey signing', () => {
+  it('include the shop run, the approvals board, the ledger grid, the mandate form and its passkey signing', () => {
     const names = clientFiles.map((file) => path.relative(ROOT, file)).sort();
     expect(names).toEqual([
+      'app/buyer/approvals/approvals-board.tsx',
       'app/buyer/ledger/ledger-grid.tsx',
       'app/buyer/mandate-form.tsx',
       'app/buyer/passkey-sign.tsx',

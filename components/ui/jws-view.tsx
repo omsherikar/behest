@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { jsonTokens, splitJws, type JsonToken } from '@/lib/ui/jws';
+import { jsonLines, splitJws, type JsonToken } from '@/lib/ui/jws';
 import { CopyButton } from './copy-button';
 
 // A compact JWS, such as a signed receipt, laid open: the token in its three coloured segments
@@ -37,14 +37,23 @@ function Caption({ segment, children }: { segment: Segment; children?: ReactNode
   );
 }
 
+/**
+ * Indented JSON, one block per line. Each line is indented with padding and a hanging indent, and
+ * strings may break anywhere, so a long hash fills its line and wraps under its own key rather than
+ * at the left edge of the block.
+ */
 function Json({ value }: { value: unknown }) {
   if (value === undefined) return <p className={`${block} font-sans text-muted`}>This segment does not decode to JSON.</p>;
   return (
     <pre className={block}>
       <code>
-        {jsonTokens(value).map((token, index) => (
-          <span key={index} className={TOKEN_CLASS[token.kind]}>
-            {token.text}
+        {jsonLines(value).map((line, index) => (
+          <span key={index} className="block" style={{ paddingLeft: `${line.indent + 2}ch`, textIndent: '-2ch' }}>
+            {line.tokens.map((token, at) => (
+              <span key={at} className={`${TOKEN_CLASS[token.kind]} ${token.kind === 'string' || token.kind === 'key' ? 'break-all' : ''}`}>
+                {token.text}
+              </span>
+            ))}
           </span>
         ))}
       </code>

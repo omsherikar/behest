@@ -49,12 +49,8 @@ export type JsonToken = { text: string; kind: 'key' | 'string' | 'number' | 'lit
 
 const JSON_TOKEN = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b|([^"\d\w-]+|.)/g;
 
-/**
- * A value as indented JSON, cut into tokens so a view can tell keys from values. Joining the
- * tokens' text gives back JSON.stringify(value, null, 2).
- */
-export function jsonTokens(value: unknown): JsonToken[] {
-  const json = JSON.stringify(value, null, 2) ?? 'undefined';
+/** JSON text cut into tokens. */
+function tokenize(json: string): JsonToken[] {
   const tokens: JsonToken[] = [];
   for (const [, string, colon, number, literal, other] of json.matchAll(JSON_TOKEN)) {
     if (string !== undefined) {
@@ -65,4 +61,31 @@ export function jsonTokens(value: unknown): JsonToken[] {
     else if (other !== undefined) tokens.push({ text: other, kind: 'punctuation' });
   }
   return tokens;
+}
+
+/** A value as indented JSON. */
+const indented = (value: unknown) => JSON.stringify(value, null, 2) ?? 'undefined';
+
+/**
+ * A value as indented JSON, cut into tokens so a view can tell keys from values. Joining the
+ * tokens' text gives back JSON.stringify(value, null, 2).
+ */
+export function jsonTokens(value: unknown): JsonToken[] {
+  return tokenize(indented(value));
+}
+
+export type JsonLine = { indent: number; tokens: JsonToken[] };
+
+/**
+ * A value as indented JSON, one entry per line: how many spaces the line is indented and the
+ * tokens after them. A view can then indent each line with padding, so that a long value wrapping
+ * onto a second line keeps its line's indentation instead of starting at the left edge.
+ */
+export function jsonLines(value: unknown): JsonLine[] {
+  return indented(value)
+    .split('\n')
+    .map((line) => {
+      const indent = line.length - line.trimStart().length;
+      return { indent, tokens: tokenize(line.slice(indent)) };
+    });
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { base64UrlText, jsonTokens, splitJws } from '@/lib/ui/jws';
+import { base64UrlText, jsonLines, jsonTokens, splitJws } from '@/lib/ui/jws';
 
 const b64url = (value: unknown) => Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url');
 
@@ -68,5 +68,19 @@ describe('jsonTokens', () => {
   it('keeps escaped quotes inside one string', () => {
     const tokens = jsonTokens({ quote: 'say "hi"' });
     expect(tokens.find((token) => token.kind === 'string')?.text).toBe('"say \\"hi\\""');
+  });
+});
+
+describe('jsonLines', () => {
+  it('gives each line its indentation and its tokens', () => {
+    const lines = jsonLines({ mandate: { policyHash: 'f'.repeat(64) } });
+    expect(lines.map((line) => line.indent)).toEqual([0, 2, 4, 2, 0]);
+    expect(lines[2].tokens.map((token) => token.kind)).toEqual(['key', 'punctuation', 'punctuation', 'string']);
+  });
+
+  it('gives back the indented JSON when each line is indented and joined', () => {
+    const lines = jsonLines(payload);
+    const json = lines.map((line) => ' '.repeat(line.indent) + line.tokens.map((token) => token.text).join('')).join('\n');
+    expect(json).toBe(JSON.stringify(payload, null, 2));
   });
 });

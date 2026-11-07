@@ -2,6 +2,7 @@ import { connection, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { sellerDeps } from '@/lib/app-deps';
 import { Cart } from '@/lib/domain/cart';
+import { firstProblem } from '@/lib/http/problem';
 import { FORM_BODY_BYTES, readBody } from '@/lib/http/read-body';
 import { clientAddress, PUBLIC_READ_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { verifyForRoute } from '@/lib/sellers/intake';
@@ -27,12 +28,6 @@ const VerifyRequest = z.object(
 
 const error = (status: number, message: string) => Response.json({ error: { message } }, { status });
 
-/** The first problem with a request body, naming where it is, such as `cart.totalCents: ...`. */
-function problem(issues: z.ZodError['issues']): string {
-  const [issue] = issues;
-  return issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message;
-}
-
 /**
  * `POST { jws, cart, sellerSlug, mode? }`: 200 with `{ ok: true, payload }` for a receipt that
  * passes, or `{ ok: false, reason }` naming the check it failed. A failed check is an answer, not an
@@ -55,7 +50,7 @@ export async function POST(request: NextRequest) {
     return error(400, NOT_JSON);
   }
   const parsed = VerifyRequest.safeParse(body);
-  if (!parsed.success) return error(400, problem(parsed.error.issues));
+  if (!parsed.success) return error(400, firstProblem(parsed.error));
 
   return Response.json(await verifyForRoute(sellerDeps(), parsed.data));
 }

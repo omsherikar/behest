@@ -2,6 +2,7 @@ import { connection, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { sellerDeps } from '@/lib/app-deps';
 import { Cart } from '@/lib/domain/cart';
+import { firstProblem } from '@/lib/http/problem';
 import { FORM_BODY_BYTES, readBody } from '@/lib/http/read-body';
 import { clientAddress, PUBLIC_WRITE_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { acceptAgentOrder, UnknownSellerError } from '@/lib/sellers/intake';
@@ -20,12 +21,6 @@ const OrderRequest = z.object(
 );
 
 const error = (status: number, message: string) => Response.json({ error: { message } }, { status });
-
-/** The first problem with an order body, naming where it is, such as `cart.totalCents: ...`. */
-function problem(issues: z.ZodError['issues']): string {
-  const [issue] = issues;
-  return issue.path.length > 0 ? `${issue.path.join('.')}: ${issue.message}` : issue.message;
-}
 
 /**
  * `POST { cart, receiptJws }`: 201 `{ status: 'accepted' }` when the seller takes the order, or 422
@@ -48,7 +43,7 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/sellers
     return error(400, NOT_JSON);
   }
   const parsed = OrderRequest.safeParse(body);
-  if (!parsed.success) return error(400, problem(parsed.error.issues));
+  if (!parsed.success) return error(400, firstProblem(parsed.error));
 
   const { slug } = await ctx.params;
   try {

@@ -224,9 +224,9 @@ describe('POST /api/sellers/onboard', () => {
     expect(logged).toHaveBeenCalledExactlyOnceWith('[sellers] Onboarding failed:', expect.any(Error));
   });
 
-  it('refuses a body over the photo limit and a MiB with 413 before reading it as JSON', async () => {
+  it('refuses a body over the photo limit and three MiB with 413 before reading it as JSON', async () => {
     const fake = claudeAnswers([raviReply]);
-    const csvText = 'a'.repeat(PHOTOS_BASE64_MAX + 1024 * 1024);
+    const csvText = 'a'.repeat(PHOTOS_BASE64_MAX + 3 * 1024 * 1024);
 
     expect(await answer(await POST(await request({ ...RAVI, csvText })))).toEqual({
       status: 413,

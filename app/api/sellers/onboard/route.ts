@@ -15,8 +15,11 @@ import { personaRefusal } from '@/lib/session';
 
 const ROUTE = 'seller_onboard';
 
-/** The largest body read: all the photos the builder takes, with a MiB to spare for the CSV and the rest. */
-const MAX_BODY_BYTES = PHOTOS_BASE64_MAX + 1024 * 1024;
+/**
+ * The largest body read: all the photos the builder takes, the CSV's own MiB, and two more MiB because
+ * JSON escaping grows the quotes and line breaks a CSV is full of.
+ */
+const MAX_BODY_BYTES = PHOTOS_BASE64_MAX + 3 * 1024 * 1024;
 
 const NOT_JSON = 'Send the shop details and the catalog as JSON.';
 const PHOTO = 'Each photo needs its image type, its image data in base64 and a price in cents.';

@@ -6,6 +6,7 @@ import { buttonClass } from '@/components/ui/button';
 import { Console, type ConsoleRow } from '@/components/ui/console';
 import { textLink } from '@/components/ui/link';
 import { Notice } from '@/components/ui/notice';
+import { Prose } from '@/components/ui/prose';
 import { ProposalCard } from '@/components/purchase/proposal-card';
 import { type AgentEvent, readAgentEvents, type RunOutcome } from '@/lib/buyer-pages/agent-events';
 import type { PurchaseDetail } from '@/lib/buyer-pages/detail';
@@ -61,7 +62,7 @@ function consoleRow({ id, at, event }: Line): ConsoleRow {
   const key = String(id);
   switch (event.type) {
     case 'status':
-      return { id: key, at, kind: 'status', body: event.text };
+      return { id: key, at, kind: 'status', body: <Prose text={event.text} /> };
     case 'tool': {
       const args = toolArgs(event.input);
       return {
@@ -76,7 +77,7 @@ function consoleRow({ id, at, event }: Line): ConsoleRow {
     case 'proposal':
       return { id: key, at, kind: 'proposal', label: 'Proposal', wide: true, body: <ProposalCard outcome={event.outcome} view={event.view} /> };
     case 'done':
-      return { id: key, at, kind: 'summary', label: 'Summary', body: <p className="whitespace-pre-line">{event.summary}</p> };
+      return { id: key, at, kind: 'summary', label: 'Summary', body: <Prose text={event.summary} /> };
     case 'error':
       return {
         id: key,

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 // The top of every app page: its title, one line on what the page is for, and the page's primary
-// action, right-aligned on the same row from 1024 px and under the line below that.
+// action, right-aligned and level with the title from 1024 px, and under the line below that.
 
 export function PageHeader({
   title,
@@ -17,7 +17,7 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="mb-8 flex flex-col gap-5 lg:mb-10 lg:flex-row lg:items-end lg:justify-between lg:gap-10">
+    <header className="mb-8 flex flex-col gap-5 lg:mb-10 lg:flex-row lg:items-start lg:justify-between lg:gap-10">
       <div className="min-w-0 max-w-[68ch]">
         <h1 id={id} className="text-title font-medium text-balance text-text">
           {title}

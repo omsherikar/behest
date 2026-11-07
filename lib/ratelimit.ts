@@ -73,12 +73,37 @@ export function createRateLimiter(now: () => number = () => Date.now(), maxKeys:
 export const rateLimit = createRateLimiter();
 
 /**
- * The client's address. The hosting proxy appends the address it saw to x-forwarded-for, so the
- * right-most entry is the one a client cannot choose; anything before it may be the client's own
- * claim. x-real-ip is read only when there is no x-forwarded-for.
+ * How many proxies of the host's own append to x-forwarded-for, from TRUSTED_PROXY_HOPS: a whole
+ * number of at least 1, or 1 when it is unset or anything else.
+ */
+function trustedProxyHops(): number {
+  const raw = process.env.TRUSTED_PROXY_HOPS?.trim() ?? '';
+  const hops = /^\d+$/.test(raw) ? Number(raw) : 0;
+  return hops >= 1 ? hops : 1;
+}
+
+/** A header's value without the spaces around it, or null when it is missing or blank. */
+function headerValue(request: Request, name: string): string | null {
+  return request.headers.get(name)?.trim() || null;
+}
+
+/**
+ * The client's address, from the first of these that is set:
+ * - cf-connecting-ip, then true-client-ip, which Cloudflare (in front of hosts such as Render) sets
+ *   to the address that connected to it, replacing anything the client sent;
+ * - the x-forwarded-for entry TRUSTED_PROXY_HOPS from the right: each trusted proxy appends the
+ *   address it saw, so entries further left may be the client's own claim. With fewer entries than
+ *   that, the left-most one;
+ * - x-real-ip;
+ * - otherwise `unknown`.
  */
 export function clientAddress(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',').map((entry) => entry.trim()).filter(Boolean);
-  if (forwarded && forwarded.length > 0) return forwarded[forwarded.length - 1];
-  return request.headers.get('x-real-ip')?.trim() || 'unknown';
+  const direct = headerValue(request, 'cf-connecting-ip') ?? headerValue(request, 'true-client-ip');
+  if (direct) return direct;
+  const forwarded = (request.headers.get('x-forwarded-for') ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (forwarded.length > 0) return forwarded[Math.max(0, forwarded.length - trustedProxyHops())];
+  return headerValue(request, 'x-real-ip') ?? 'unknown';
 }

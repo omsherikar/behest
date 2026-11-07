@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clientAddress,
   createRateLimiter,
@@ -139,27 +139,74 @@ describe('rate limiter', () => {
 describe('client address', () => {
   const requestWith = (headers: Record<string, string>) => new Request('http://localhost/api', { headers });
 
-  it('takes the right-most x-forwarded-for entry, the one the hosting proxy appends', () => {
-    expect(clientAddress(requestWith({ 'x-forwarded-for': ' 10.0.0.1 , 203.0.113.7 ' }))).toBe('203.0.113.7');
-    expect(clientAddress(requestWith({ 'x-forwarded-for': '203.0.113.7' }))).toBe('203.0.113.7');
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
-  it('gives the same address whatever a client writes in the entries before it', () => {
+  /** Every header a client address can come from, each with its own address. */
+  const all = {
+    'cf-connecting-ip': '192.0.2.1',
+    'true-client-ip': '192.0.2.2',
+    'x-forwarded-for': '192.0.2.3, 192.0.2.4',
+    'x-real-ip': '192.0.2.5',
+  };
+
+  it('takes cf-connecting-ip before every other header', () => {
+    expect(clientAddress(requestWith(all))).toBe('192.0.2.1');
+  });
+
+  it('takes true-client-ip next', () => {
+    const { 'true-client-ip': trueClient, 'x-forwarded-for': forwarded, 'x-real-ip': realIp } = all;
+    expect(clientAddress(requestWith({ 'true-client-ip': trueClient, 'x-forwarded-for': forwarded, 'x-real-ip': realIp }))).toBe(
+      '192.0.2.2',
+    );
+  });
+
+  it('takes x-forwarded-for next, ignoring x-real-ip', () => {
+    expect(clientAddress(requestWith({ 'x-forwarded-for': all['x-forwarded-for'], 'x-real-ip': all['x-real-ip'] }))).toBe(
+      '192.0.2.4',
+    );
+  });
+
+  it('takes x-real-ip when no other header is set, and unknown when none is', () => {
+    expect(clientAddress(requestWith({ 'x-real-ip': ' 192.0.2.5 ' }))).toBe('192.0.2.5');
+    expect(clientAddress(requestWith({}))).toBe('unknown');
+  });
+
+  it('takes the right-most x-forwarded-for entry by default, one trusted proxy hop', () => {
+    expect(clientAddress(requestWith({ 'x-forwarded-for': ' 10.0.0.1 , 203.0.113.7 ' }))).toBe('203.0.113.7');
+    vi.stubEnv('TRUSTED_PROXY_HOPS', '1');
+    expect(clientAddress(requestWith({ 'x-forwarded-for': '10.0.0.1, 203.0.113.7' }))).toBe('203.0.113.7');
+  });
+
+  it('counts TRUSTED_PROXY_HOPS entries from the right of x-forwarded-for', () => {
+    vi.stubEnv('TRUSTED_PROXY_HOPS', '2');
+    expect(clientAddress(requestWith({ 'x-forwarded-for': '10.0.0.1, 203.0.113.7, 198.51.100.9' }))).toBe('203.0.113.7');
+  });
+
+  it('falls back to the left-most entry when there are fewer entries than hops', () => {
+    vi.stubEnv('TRUSTED_PROXY_HOPS', '2');
+    expect(clientAddress(requestWith({ 'x-forwarded-for': '203.0.113.7' }))).toBe('203.0.113.7');
+    vi.stubEnv('TRUSTED_PROXY_HOPS', '5');
+    expect(clientAddress(requestWith({ 'x-forwarded-for': ', 203.0.113.7, 198.51.100.9' }))).toBe('203.0.113.7');
+  });
+
+  it.each(['0', '-1', '1.5', 'two', '', ' '])('reads TRUSTED_PROXY_HOPS of %j as the default of 1', (hops) => {
+    vi.stubEnv('TRUSTED_PROXY_HOPS', hops);
+    expect(clientAddress(requestWith({ 'x-forwarded-for': '10.0.0.1, 203.0.113.7' }))).toBe('203.0.113.7');
+  });
+
+  it('gives the same address whatever a client writes in the entries before the trusted ones', () => {
     for (const claimed of ['198.51.100.4', '1.1.1.1, 2.2.2.2', 'unknown', '']) {
       const forwarded = claimed === '' ? '203.0.113.7' : `${claimed}, 203.0.113.7`;
       expect(clientAddress(requestWith({ 'x-forwarded-for': forwarded }))).toBe('203.0.113.7');
     }
   });
 
-  it('ignores x-real-ip when x-forwarded-for is set', () => {
-    expect(clientAddress(requestWith({ 'x-real-ip': '198.51.100.4', 'x-forwarded-for': '203.0.113.7' }))).toBe('203.0.113.7');
-  });
-
-  it('takes x-real-ip when there is no x-forwarded-for', () => {
-    expect(clientAddress(requestWith({ 'x-real-ip': ' 198.51.100.4 ' }))).toBe('198.51.100.4');
-  });
-
-  it('reads unknown when neither header is set', () => {
-    expect(clientAddress(requestWith({}))).toBe('unknown');
+  it('skips a header that is set but empty', () => {
+    expect(
+      clientAddress(requestWith({ 'cf-connecting-ip': ' ', 'true-client-ip': '', 'x-forwarded-for': ' , ', 'x-real-ip': '192.0.2.5' })),
+    ).toBe('192.0.2.5');
+    expect(clientAddress(requestWith({ 'cf-connecting-ip': '', 'x-forwarded-for': ',', 'x-real-ip': ' ' }))).toBe('unknown');
   });
 });

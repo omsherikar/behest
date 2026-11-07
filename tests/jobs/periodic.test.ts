@@ -45,10 +45,11 @@ async function queuedJobs(db: Db, kind: string) {
 /** Another purchase of the seeded buyer from the seeded seller, in `status`, holding no PayPal ids. */
 async function addPurchase(db: Db, seededId: string, status: PurchaseStatus, changes: Partial<typeof purchases.$inferInsert> = {}) {
   const [row] = await db.select().from(purchases).where(eq(purchases.id, seededId));
-  const { id: _id, createdAt: _created, updatedAt: _updated, ...copy } = row;
+  const { buyerId, mandateId, sellerId, request, proposal, cart, cartHash, totalCents, gateVerdict, rulesetVersion, finalVerdict, approver } = row;
+  const copy = { buyerId, mandateId, sellerId, request, proposal, cart, cartHash, totalCents, gateVerdict, rulesetVersion, finalVerdict, approver };
   const [added] = await db
     .insert(purchases)
-    .values({ ...copy, status, paypalOrderId: null, paypalCaptureId: null, capturedAt: null, ...changes })
+    .values({ ...copy, status, ...changes })
     .returning({ id: purchases.id });
   return added.id;
 }

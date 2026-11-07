@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { GATE_RULES } from '@/lib/gate/rules';
 import type { AttackId } from '@/lib/security/attacks';
 import type { LiveProposal, LiveResult, ReplayResult, ResultsFile } from '@/lib/security/results';
-import { attackRows, LAYERS, liveNote, readResults, resultsTable } from '@/lib/security/view';
+import { attackRows, LAYERS, liveNote, readResults, replaceResultsBlock, RESULTS_END, RESULTS_START, resultsBlock, resultsTable } from '@/lib/security/view';
 
 type RuleOutcome = ReplayResult['gate']['rules'][number];
 
@@ -186,6 +186,22 @@ describe('resultsTable', () => {
       `| Ranking whisper | ${rows[0].cells.map((c) => `${c.state}. ${c.detail}`).join(' | ')} |`,
       `| Lookalike seller | Passed through. A \\| B | ${rows[1].cells.slice(1).map((c) => `${c.state}. ${c.detail}`).join(' | ')} |`,
     ]);
+  });
+});
+
+describe('the results block in docs/security.md', () => {
+  it('is the table, then the note on the live run', () => {
+    const results = file([replayed('ranking-whisper')]);
+
+    expect(resultsBlock(results)).toBe(`${resultsTable(attackRows(results))}\n\n${liveNote(results)}`);
+  });
+
+  it('replaces only what lies between its markers, and refuses a document without them', () => {
+    const doc = `# Security\n\n${RESULTS_START}\nold table\n${RESULTS_END}\n\n## Limits\n`;
+
+    expect(replaceResultsBlock(doc, 'new table')).toBe(`# Security\n\n${RESULTS_START}\nnew table\n${RESULTS_END}\n\n## Limits\n`);
+    expect(() => replaceResultsBlock('# Security\n', 'new table')).toThrow(/markers/);
+    expect(() => replaceResultsBlock(`${RESULTS_END}\n${RESULTS_START}\n`, 'new table')).toThrow(/markers/);
   });
 });
 

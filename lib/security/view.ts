@@ -231,6 +231,23 @@ export function resultsTable(rows: AttackRow[]): string {
   return [header, rule, ...body].join('\n');
 }
 
+/** The markers around the results in docs/security.md, which the replay script rewrites. */
+export const RESULTS_START = '<!-- attack-replay results: written by npm run attack:replay -->';
+export const RESULTS_END = '<!-- end of attack-replay results -->';
+
+/** The results as docs/security.md shows them: the table, then the note on the live run. */
+export function resultsBlock(file: ResultsFile): string {
+  return `${resultsTable(attackRows(file))}\n\n${liveNote(file)}`;
+}
+
+/** `doc` with what lies between its results markers replaced by `block`. Throws when the markers are missing or out of order. */
+export function replaceResultsBlock(doc: string, block: string): string {
+  const start = doc.indexOf(RESULTS_START);
+  const end = doc.indexOf(RESULTS_END);
+  if (start === -1 || end < start) throw new Error('the document has no results markers to write between');
+  return `${doc.slice(0, start + RESULTS_START.length)}\n${block}\n${doc.slice(end)}`;
+}
+
 /** The results file, checked, since a script writes it and anyone can edit it. */
 export function readResults(json: unknown): ResultsFile {
   return ResultsFile.parse(json);

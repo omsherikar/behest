@@ -30,7 +30,9 @@ export default async function SellerOrdersPage() {
   return (
     <main className="flex h-dvh flex-col overflow-y-auto bg-pp-canvas px-4 py-6 font-paypal text-pp-ink sm:px-8">
       <SellerNav current="/seller/orders" />
-      <h1 className="mt-4 text-[28px] font-semibold text-pp-navy">Your orders</h1>
+      <h1 id="orders-heading" className="mt-4 text-[28px] font-semibold text-pp-navy">
+        Your orders
+      </h1>
       {seller ? (
         <>
           <p className="mt-2 max-w-3xl text-sm text-pp-muted">
@@ -41,7 +43,7 @@ export default async function SellerOrdersPage() {
           </p>
           {rows.length > 0 ? (
             <div className="mt-4 flex min-h-0 flex-1 flex-col">
-              <OrdersGrid rows={rows} />
+              <OrdersGrid rows={rows} labelledBy="orders-heading" />
             </div>
           ) : (
             <p className="mt-6 text-pp-muted">No agent has placed an order with you yet.</p>

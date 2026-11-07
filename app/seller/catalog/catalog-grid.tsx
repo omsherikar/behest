@@ -69,6 +69,7 @@ const columns: ColDef<CatalogRow>[] = [
   },
 ];
 
-export function CatalogGrid({ rows }: { rows: CatalogRow[] }) {
-  return <SellerGrid rows={rows} columns={columns} label="listings" />;
+/** `labelledBy` is the id of the element that names the grid, such as the page heading. */
+export function CatalogGrid({ rows, labelledBy }: { rows: CatalogRow[]; labelledBy: string }) {
+  return <SellerGrid rows={rows} columns={columns} label="listings" labelledBy={labelledBy} />;
 }

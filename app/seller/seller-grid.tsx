@@ -4,7 +4,7 @@
 // (app/(endpoints)/data-grid.tsx). Each page defines its columns in its own client component, so
 // they can format values and render cells; the rows come from the server.
 
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   CellStyleModule,
   ClientSideRowModelModule,
@@ -56,13 +56,22 @@ export function SellerGrid<Row extends { id: string }>({
   rows,
   columns,
   label,
+  labelledBy,
 }: {
   rows: Row[];
   columns: ColDef<Row>[];
   /** What the rows are, for the search box's label, such as "listings". */
   label: string;
+  /** The id of the element that names the grid, such as the page heading. */
+  labelledBy: string;
 }) {
   const [search, setSearch] = useState('');
+  const box = useRef<HTMLDivElement>(null);
+  // AG Grid has no option for the grid's accessible name. It puts role="grid" on its .ag-root
+  // element itself, so the name goes on that element once the grid is ready.
+  const nameGrid = useCallback(() => {
+    box.current?.querySelector('.ag-root')?.setAttribute('aria-labelledby', labelledBy);
+  }, [labelledBy]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -74,7 +83,7 @@ export function SellerGrid<Row extends { id: string }>({
         aria-label={`Search ${label}`}
         className="h-10 w-full rounded border border-pp-border bg-pp-surface px-3 text-sm outline-none focus:border-pp-blue sm:w-72"
       />
-      <div className="min-h-72 flex-1">
+      <div ref={box} className="min-h-72 flex-1">
         <AgGridProvider modules={modules}>
           <AgGridReact<Row>
             theme={theme}
@@ -85,6 +94,7 @@ export function SellerGrid<Row extends { id: string }>({
             quickFilterText={search}
             autoSizeStrategy={autoSizeStrategy}
             enableCellTextSelection
+            onGridReady={nameGrid}
           />
         </AgGridProvider>
       </div>

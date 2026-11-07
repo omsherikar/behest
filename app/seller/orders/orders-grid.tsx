@@ -66,6 +66,7 @@ const columns: ColDef<SellerOrderRow>[] = [
   },
 ];
 
-export function OrdersGrid({ rows }: { rows: SellerOrderRow[] }) {
-  return <SellerGrid rows={rows} columns={columns} label="orders" />;
+/** `labelledBy` is the id of the element that names the grid, such as the page heading. */
+export function OrdersGrid({ rows, labelledBy }: { rows: SellerOrderRow[]; labelledBy: string }) {
+  return <SellerGrid rows={rows} columns={columns} label="orders" labelledBy={labelledBy} />;
 }

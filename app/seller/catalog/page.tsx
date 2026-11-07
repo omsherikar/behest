@@ -27,7 +27,9 @@ export default async function SellerCatalogPage() {
   return (
     <main className="flex h-dvh flex-col overflow-y-auto bg-pp-canvas px-4 py-6 font-paypal text-pp-ink sm:px-8">
       <SellerNav current="/seller/catalog" />
-      <h1 className="mt-4 text-[28px] font-semibold text-pp-navy">Your catalog</h1>
+      <h1 id="catalog-heading" className="mt-4 text-[28px] font-semibold text-pp-navy">
+        Your catalog
+      </h1>
       {seller ? (
         <>
           <p className="mt-2 max-w-3xl text-sm text-pp-muted">
@@ -37,7 +39,7 @@ export default async function SellerCatalogPage() {
           </p>
           {rows.length > 0 ? (
             <div className="mt-4 flex min-h-0 flex-1 flex-col">
-              <CatalogGrid rows={rows} />
+              <CatalogGrid rows={rows} labelledBy="catalog-heading" />
             </div>
           ) : (
             <p className="mt-6 text-pp-muted">Your catalog has no listings.</p>

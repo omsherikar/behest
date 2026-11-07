@@ -1,7 +1,6 @@
 // Pure helpers over AG Studio's report state (ReportState). The shell uses these to check for
 // unsaved changes and to edit pages; none of them touch the Studio API.
 
-import type { AgStudioMode } from 'ag-studio';
 import type { ReportState } from './studio/widgets';
 
 // Whether `state` differs from `saved` in anything worth saving. The selected page, cross-filters,
@@ -14,12 +13,13 @@ const durable = (state: ReportState) =>
     pages: state.pages.map(({ id, widgets, widgetLayout, layout, filter }) => ({ id, widgets, widgetLayout, layout, filter })),
   });
 
-// The filters panel starts expanded in view mode, where it's the only panel, and collapsed in
-// edit mode, where Compose and Data need the room, and on narrow screens, where the report does.
+// The filters panel starts collapsed whenever a report opens or the mode changes: the report has
+// no filters a viewer sets there (its verdict buttons sit on the page), so an open panel would
+// only take the report's width to say "No filters available". The viewer can still open it.
 // Panel state isn't something Save compares.
-export const withFiltersPanelFor = (mode: AgStudioMode, state: ReportState, narrow = false): ReportState => ({
+export const withFiltersPanelCollapsed = (state: ReportState): ReportState => ({
   ...state,
-  panels: { ...state.panels, filters: { ...state.panels?.filters, collapsed: mode === 'edit' || narrow } },
+  panels: { ...state.panels, filters: { ...state.panels?.filters, collapsed: true } },
 });
 
 // Studio leaves page navigation to the host: these add, remove and select pages in state.

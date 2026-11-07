@@ -60,11 +60,11 @@ const modules = [ClientSideRowModelModule, RowAutoHeightModule, RowStyleModule, 
 
 // Narrowest a mapped column may get, so a date or an amount never truncates.
 const MIN_WIDTH: Record<AgWidgetField['dataType'], number> = {
-  string: 110,
-  number: 88,
+  string: 100,
+  number: 84,
   boolean: 80,
   date: 112,
-  datetime: 148,
+  datetime: 140,
 };
 const CELL_CLASS = 'leading-5 !py-2.5';
 
@@ -216,13 +216,14 @@ export function LedgerWidget(params: AgWidgetParams<LedgerDef>) {
         field: 'verdict',
         cellRenderer: VerdictCell,
         cellClass: '!py-2',
-        width: 108,
-        minWidth: 108,
-        maxWidth: 108,
+        // Wide enough for the longest badge, "Needs approval", with its glyph and the cell's padding.
+        width: 170,
+        minWidth: 170,
       },
       ...mapped,
       ...(showReasons
-        ? [{ colId: 'reasons', headerName: 'Why', cellRenderer: ReasonsCell, flex: 4, minWidth: 260, autoHeight: true, sortable: false }]
+        ? // The reasons wrap inside whatever width the other columns leave, so they never run off the widget.
+          [{ colId: 'reasons', headerName: 'Why', cellRenderer: ReasonsCell, flex: 4, minWidth: 200, autoHeight: true, wrapText: true, sortable: false }]
         : []),
     ];
   }, [ledger, showReasons, widgetApi]);

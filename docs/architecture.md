@@ -42,7 +42,7 @@ flowchart LR
   buyer([Buyer]) -- mandate, approvals --> app
   seller([Seller]) -- catalog, shipping --> app
   ops([Behest operator]) -- disputes --> app
-  extagent([Outside AI agents]) -- browse via MCP --> app
+  extagent([Outside AI agents]) -- catalog and orders over REST --> app
 
   subgraph app[Behest: one Next.js service]
     ui[Web UI and AG Studio dashboard]
@@ -192,14 +192,14 @@ Mandates and receipts are JSON Web Signatures in compact form, signed with Ed255
 ### 5.4 Seller service (`lib/sellers`, `lib/catalog`)
 
 - **Onboarding.** A CSV or photos go through the catalog builder (section 7.4), which writes listings in the shared category list. Each listing is screened for text aimed at agents, and enriched from Channel3 with a canonical match and market price where one exists.
-- **Agent-facing surface.** A REST catalog and order endpoint per seller, and an MCP server so outside agents can browse a seller's catalog. The order endpoint, on any surface, accepts only orders with a valid receipt.
+- **Agent-facing surface.** A REST catalog and order endpoint per seller, which outside agents can use to browse a seller's catalog and place orders. The order endpoint accepts only orders with a valid receipt.
 - **Independence.** Seller-side verification never reads Behest's purchase tables. It behaves exactly as an outside seller with only the public key would.
 
 ### 5.5 Dispute service (`lib/disputes`)
 
 1. A webhook or a scheduled pull finds a new dispute and matches it to a purchase by capture id.
-2. The evidence agent (section 7.5) gathers the dispute details, tracking and Behest's records with read-only tools, and drafts a narrative in which every claim cites an evidence item.
-3. Deterministic code assembles the pack: signed mandate, its readback, the receipt, the cart, the purchase event log, approval proof for ASK purchases, and tracking.
+2. The evidence agent (section 7.5) gathers the dispute details and Behest's records with read-only tools, including shipment tracking where PayPal holds it, and drafts a narrative in which every claim cites an evidence item.
+3. Deterministic code assembles the pack: signed mandate, its readback, the receipt, the cart, the purchase event log, and approval proof for ASK purchases. Behest records no shipment tracking itself, so the pack has no tracking item.
 4. An operator reviews it and submits it through PayPal's provide-evidence endpoint. Submission is never automatic.
 
 ### 5.6 Jobs (`lib/jobs`)
@@ -317,7 +317,7 @@ CSV rows are sent in batches; photos go as images. The output per item is a titl
 
 ### 7.5 The dispute evidence agent
 
-Read-only tools only: PayPal Agent Toolkit `get_dispute`, `list_disputes`, `get_order` and `get_shipment_tracking`, bridged into Claude tool definitions, plus Behest's `get_receipt`, `get_mandate` and `get_purchase_log`. Its output is a structured narrative in which every claim cites the id of an evidence item. Claims without a citation are dropped before the operator sees the draft.
+Read-only tools only: PayPal Agent Toolkit `get_dispute`, `list_disputes`, `get_order` and `get_shipment_tracking`, bridged into Claude tool definitions, plus Behest's `get_evidence_item`, which returns one item of the evidence pack. Its output is a structured narrative in which every claim cites the id of an evidence item. Claims without a citation are dropped before the operator sees the draft.
 
 ### 7.6 Untrusted text
 
@@ -395,7 +395,6 @@ Money is integer cents with an ISO currency code. Timestamps are UTC. Budget per
 | `GET /api/sellers/[slug]/catalog` | Agent-facing catalog |
 | `POST /api/sellers/[slug]/orders` | Order intake; requires a valid receipt |
 | `POST /api/sellers/onboard` | CSV or photos to listings |
-| `/api/mcp` | MCP server for outside agents to browse catalogs |
 | `POST /api/receipts/verify` | Convenience verifier for sellers without a JOSE library |
 | `GET /.well-known/jwks.json` | Public signing keys |
 | `POST /api/disputes/[id]/draft` | Operator drafts a cited narrative from the evidence pack |
@@ -423,7 +422,8 @@ AG Studio renders the buyer, seller and operator views from Behest's tables:
 
 ## 13. Deployment
 
-- One Render web service running Node 22, and Render Postgres. Migrations run on deploy.
+- Docker Compose on one small VM (Google Cloud Compute Engine or AWS): the Next.js app, which also runs the job worker, Postgres on a private volume, and Caddy for automatic HTTPS. Migrations run when the app container starts. See docs/deploy.md.
+- A VM rather than a serverless platform, because the in-process job worker needs CPU between requests.
 - Long agent runs stream over HTTP from a long-lived Node server, so there is no serverless time limit to work around.
 - PayPal webhooks point at the deployed URL. Locally, return-URL handlers cover the same transitions.
 
@@ -433,7 +433,7 @@ AG Studio renders the buyer, seller and operator views from Behest's tables:
 
 | Decision | Alternatives | Why |
 |---|---|---|
-| One Next.js service on Render with Postgres | Separate services; serverless functions | One operator; long agent streams; one deploy |
+| One Next.js service with Postgres, in Docker on a VM | Separate services; serverless functions | One operator; long agent streams; a job worker that needs CPU between requests |
 | Behest is merchant of record, sellers paid by Payouts | Pay sellers directly | A saved wallet only pays the business that saved it (verified) |
 | Wallet saved without a purchase at mandate signing | Save during a first purchase | No fake first purchase; matches the mandate moment (verified) |
 | Deterministic gate decides; models can only tighten | Model decides with guardrails | Money decisions must be explainable and testable |

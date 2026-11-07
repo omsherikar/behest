@@ -28,7 +28,10 @@ export type SignTicket = z.infer<typeof SignTicket>;
 type Ticket = RegisterTicket | SignTicket;
 type TicketKind = Ticket['kind'];
 
-const SCHEMAS = { passkey_register: RegisterTicket, mandate_sign: SignTicket } as const;
+const SCHEMAS: { [K in TicketKind]: z.ZodType<Extract<Ticket, { kind: K }>> } = {
+  passkey_register: RegisterTicket,
+  mandate_sign: SignTicket,
+};
 
 function secret(): string {
   const value = process.env.SESSION_SECRET;
@@ -36,7 +39,7 @@ function secret(): string {
   return value;
 }
 
-/** The MAC of a ticket's body, under a key of its own so that no other HMAC of the secret can pass for one. */
+/** The MAC of a ticket's body, prefixed with what it is, so that no other HMAC of the secret, such as a confirm token, can pass for one. */
 function macOf(body: string): Buffer {
   return createHmac('sha256', secret()).update(`behest-passkey-ticket.${body}`).digest();
 }
@@ -68,7 +71,7 @@ export function readTicket<K extends TicketKind>(ticket: unknown, kind: K, now: 
   } catch {
     return null;
   }
-  const parsed = (SCHEMAS[kind] as z.ZodType<Extract<Ticket, { kind: K }>>).safeParse(claims);
+  const parsed = SCHEMAS[kind].safeParse(claims);
   if (!parsed.success) return null;
   return now.getTime() < parsed.data.exp * 1000 ? parsed.data : null;
 }

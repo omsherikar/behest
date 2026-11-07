@@ -34,6 +34,8 @@ const currency = () => text('currency').$type<'USD'>().notNull().default('USD');
 // Buyers, wallets and mandates
 
 export const mandateStatus = pgEnum('mandate_status', ['active', 'revoked', 'expired']);
+/** How the buyer confirmed a mandate: by a signed-in session alone, or by also signing its hashes with a passkey. */
+export const mandateConfirmation = pgEnum('mandate_confirmation', ['session', 'passkey']);
 export type MandateStatus = (typeof mandateStatus.enumValues)[number];
 export const walletStatus = pgEnum('wallet_status', ['pending', 'linked', 'revoked']);
 export type WalletStatus = (typeof walletStatus.enumValues)[number];
@@ -43,6 +45,30 @@ export const buyers = pgTable('buyers', {
   name: text('name').notNull(),
   createdAt: createdAt(),
 });
+
+/**
+ * A buyer's passkey (a WebAuthn credential). The buyer's device holds the private key; Behest keeps
+ * the public key so anyone can check that the buyer, not Behest, signed a mandate.
+ */
+export const buyerPasskeys = pgTable(
+  'buyer_passkeys',
+  {
+    id: id(),
+    buyerId: uuid('buyer_id')
+      .notNull()
+      .references(() => buyers.id),
+    /** The credential id, base64url, as the authenticator reports it. */
+    credentialId: text('credential_id').notNull().unique(),
+    /** The COSE public key, base64url. */
+    publicKey: text('public_key').notNull(),
+    /** The signature counter last seen; a counter that goes backwards suggests a cloned authenticator. */
+    counter: bigint('counter', { mode: 'number' }).notNull().default(0),
+    transports: jsonb('transports').$type<string[]>().notNull().default([]),
+    createdAt: createdAt(),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  },
+  (t) => [index('buyer_passkeys_buyer_idx').on(t.buyerId)],
+);
 
 /** A buyer's saved PayPal wallet. A buyer has at most one; linking again replaces it. */
 export const wallets = pgTable('wallets', {
@@ -81,6 +107,18 @@ export const mandates = pgTable(
     readbackHash: text('readback_hash').notNull(),
     /** The signed mandate, a compact JWS. */
     jws: text('jws').notNull(),
+    confirmation: mandateConfirmation('confirmation').notNull().default('session'),
+    /**
+     * The buyer's passkey assertion over the mandate's hashes (base64url fields, as WebAuthn returns
+     * them). Null when the buyer confirmed by session alone.
+     */
+    buyerAssertion: jsonb('buyer_assertion').$type<{
+      credentialId: string;
+      authenticatorData: string;
+      clientDataJSON: string;
+      signature: string;
+      challenge: string;
+    }>(),
     status: mandateStatus('status').notNull().default('active'),
     /** When the buyer confirmed; the start of a `once` budget period. */
     confirmedAt: timestamp('confirmed_at', { withTimezone: true }).notNull(),
@@ -175,6 +213,11 @@ export const purchases = pgTable(
     request: text('request').notNull(),
     /** The agent's proposal exactly as received: seller slug, SKUs, quantities and its unverified rationale. */
     proposal: jsonb('proposal').$type<PurchaseProposal>().notNull(),
+    /**
+     * What the agent looked at before proposing: its searches, the options each returned and the
+     * option it chose. Its hash goes into the signed receipt. Null for purchases made outside an agent run.
+     */
+    decisionRecord: jsonb('decision_record').$type<Record<string, unknown>>(),
     /** The canonical cart rebuilt from the catalog. Null when the gate could not build a valid cart. */
     cart: jsonb('cart').$type<Cart>(),
     cartHash: text('cart_hash'),

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { issueTicket, readTicket, TICKET_SECONDS } from '@/lib/passkeys/ticket';
+import { issueTicket, readTicket, TICKET_SECONDS, ticketExpiry } from '@/lib/passkeys/ticket';
 
 const NOW = new Date('2026-11-06T10:00:00.000Z');
 const NOW_SECONDS = NOW.getTime() / 1000;
@@ -11,7 +11,10 @@ const registering = { kind: 'passkey_register' as const, buyer: BUYER, challenge
 beforeEach(() => vi.stubEnv('SESSION_SECRET', 'test-session-secret-at-least-32-characters'));
 afterEach(() => vi.unstubAllEnvs());
 
-it('lasts five minutes', () => expect(TICKET_SECONDS).toBe(300));
+it('lasts five minutes from the whole second it was issued in', () => {
+  expect(TICKET_SECONDS).toBe(300);
+  expect(ticketExpiry(new Date('2026-11-06T10:00:00.900Z'))).toBe(NOW_SECONDS + 300);
+});
 
 it('reads back the claims of a ticket it issued, of the kind asked for', () => {
   expect(readTicket(issueTicket(signing), 'mandate_sign', NOW)).toEqual(signing);

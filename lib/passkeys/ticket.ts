@@ -10,6 +10,11 @@ import { canonicalJson } from '@/lib/receipts/canonical';
 /** How long a ticket lasts: five minutes. */
 export const TICKET_SECONDS = 5 * 60;
 
+/** When a ticket issued at `now` expires, in whole seconds since the epoch. */
+export function ticketExpiry(now: Date): number {
+  return Math.floor(now.getTime() / 1000) + TICKET_SECONDS;
+}
+
 const base64url = z.string().regex(/^[A-Za-z0-9_-]+$/);
 /** A hash of the buyer id, as a signed mandate names the buyer. */
 const buyerRef = z.string().regex(/^[0-9a-f]{64}$/);

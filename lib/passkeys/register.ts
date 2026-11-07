@@ -8,31 +8,18 @@ import {
 } from '@simplewebauthn/server';
 import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import { eq } from 'drizzle-orm';
-import type { Db } from '@/lib/db/client';
 import { buyerPasskeys, buyers } from '@/lib/db/schema';
 import { sha256Hex } from '@/lib/receipts/canonical';
-import { issueTicket, readTicket, TICKET_SECONDS } from './ticket';
+import { type PasskeyDeps, relyingParty } from './relying-party';
+import { issueTicket, readTicket, TICKET_SECONDS, ticketExpiry } from './ticket';
 
 // Registering a buyer's passkey (a WebAuthn credential), so that their own device can sign the
 // mandates they confirm. Behest asks for no attestation: what matters is that the same key signs
 // later, not which device holds it. Behest keeps the public key; the private key never leaves the
 // buyer's device.
 
-/** What passkey registration needs: the database, Behest's public origin and the clock. */
-export type PasskeyDeps = { db: Db; origin: string; now: () => Date };
-
 /** The transports WebAuthn defines. A registration's list comes from the browser, so others are dropped. */
 const TRANSPORTS = new Set(['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb']);
-
-/** Behest as the relying party at `origin`, the origin it is served from: its id is that hostname, `localhost` included. */
-export function relyingParty(origin: string): { rpName: 'Behest'; rpID: string; origin: string } {
-  return { rpName: 'Behest', rpID: new URL(origin).hostname, origin };
-}
-
-/** When a ticket issued at `now` expires, in whole seconds since the epoch. */
-export function ticketExpiry(now: Date): number {
-  return Math.floor(now.getTime() / 1000) + TICKET_SECONDS;
-}
 
 /**
  * The options for registering a new passkey for the buyer, and the ticket that carries their

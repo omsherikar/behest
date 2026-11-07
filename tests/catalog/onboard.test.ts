@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { CatalogInputError } from '@/lib/catalog/build';
 import { BENCHMARK_FAILURE_LOG, OnboardError, onboardSeller } from '@/lib/catalog/onboard';
@@ -218,6 +218,17 @@ describe('what onboarding refuses', () => {
     expect(await productsOf(db)).toEqual([]);
   });
 
+  it('rolls the seller back when its products cannot be stored', async () => {
+    const db = await createTestDb();
+    // A check the saffron fails, so the products insert fails after the seller row is in.
+    await db.execute(sql`alter table products add constraint no_saffron check (sku <> 'SAF-1G')`);
+
+    await expect(onboardSeller(depsFor(db, [raviReply]).deps, RAVI)).rejects.toMatchObject({ cause: { code: '23514' } });
+
+    expect(await db.select().from(sellers)).toEqual([]);
+    expect(await productsOf(db)).toEqual([]);
+  });
+
   it('returns a failed build as build_failed with the model failure, and writes nothing', async () => {
     const db = await createTestDb();
     const search = searchMarketFake();
@@ -254,7 +265,7 @@ describe('what onboarding refuses', () => {
       const error = await onboardingError(onboardSeller(depsFor(db, []).deps, { ...RAVI, slug }));
       expect([slug, error.code]).toEqual([slug, 'invalid_slug']);
     }
-    const error = await onboardingError(onboardSeller(depsFor(db, []).deps, { ...RAVI, name: ' ​ ' }));
+    const error = await onboardingError(onboardSeller(depsFor(db, []).deps, { ...RAVI, name: ' \u200b ' }));
     expect(error.code).toBe('invalid_name');
     expect(await db.select().from(sellers)).toEqual([]);
   });

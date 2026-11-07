@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { searchMarket } from '@/lib/channel3/client';
 import { products, sellers } from '@/lib/db/schema';
+import { merchantSlug } from '@/lib/domain/policy';
 import type { LlmDeps, LlmResult } from '@/lib/llm/client';
 import { buildListings, type ListingDraft, type ListingPhoto } from './build';
 import { type CatalogRejection, oneLine, parseCatalogCsv } from './csv';
@@ -22,8 +23,6 @@ export const BENCHMARK_FAILURE_LOG = 'Seller onboarding: market search failed';
 const SEARCH_CONCURRENCY = 4;
 const NAME_MAX = 120;
 const EMAIL_MAX = 254;
-/** The same shape a mandate's merchant list accepts: lower-case letters, digits and hyphens, at most 63. */
-const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const Email = z.email().max(EMAIL_MAX);
 
 export type OnboardErrorCode =
@@ -34,13 +33,15 @@ export type OnboardErrorCode =
   | 'no_listings'
   | 'build_failed';
 
+/** What each refusal tells the seller. */
 const MESSAGES: Record<OnboardErrorCode, string> = {
-  invalid_name: 'the seller needs a name',
-  invalid_slug: 'the slug must be lower-case letters, digits and hyphens, starting with a letter or digit, at most 63',
-  invalid_payout_email: 'the payout email is not an email address',
-  slug_taken: 'another seller already has this slug',
-  no_listings: 'the catalog has no row or photo that can be listed',
-  build_failed: 'the catalog builder could not draft the listings',
+  invalid_name: 'Give your shop a name.',
+  invalid_slug:
+    'The shop address must be lower-case letters, digits and hyphens, starting with a letter or digit, at most 63 characters.',
+  invalid_payout_email: 'The payout email must be an email address.',
+  slug_taken: 'Another seller already uses this shop address.',
+  no_listings: 'The catalog has no row or photo that can be listed.',
+  build_failed: 'Behest could not draft listings from this catalog.',
 };
 
 type BuildFailure = Extract<LlmResult<never>, { ok: false }>;
@@ -89,7 +90,8 @@ type Benchmark = Awaited<ReturnType<typeof enrichListing>>;
 export async function onboardSeller(deps: OnboardDeps, i: OnboardInput): Promise<OnboardResult> {
   const name = oneLine(i.name, NAME_MAX);
   if (name === '') throw new OnboardError('invalid_name');
-  if (!SLUG.test(i.slug)) throw new OnboardError('invalid_slug');
+  // The shape a mandate's merchant list takes, so a buyer can allow or deny any seller by name.
+  if (!merchantSlug.safeParse(i.slug).success) throw new OnboardError('invalid_slug');
   const payoutEmail = i.payoutEmail.trim();
   if (!Email.safeParse(payoutEmail).success) throw new OnboardError('invalid_payout_email');
   if (await slugTaken(deps, i.slug)) throw new OnboardError('slug_taken');

@@ -1,0 +1,69 @@
+# Behest on one Docker host: the app, Postgres and Caddy. Only Caddy is reachable from outside: it
+# answers on 80 and 443, gets the HTTPS certificate for DOMAIN on its own, and passes requests to
+# the app. The app and the database talk over the private network Compose creates.
+#
+# The app reads its settings from .env.production. Compose fills in ${DOMAIN} and
+# ${POSTGRES_PASSWORD} below from .env, which docs/deploy.md links to that same file.
+
+services:
+  app:
+    build: .
+    image: behest
+    restart: unless-stopped
+    # A small init process as PID 1 passes stop signals on and reaps child processes.
+    init: true
+    env_file: .env.production
+    environment:
+      # The bundled database below. This takes precedence over any DATABASE_URL in .env.production.
+      DATABASE_URL: postgres://behest:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}@db:5432/behest
+      # This single app instance also runs the background jobs.
+      WORKER: "1"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Migrations run before the server starts listening.
+      start_period: 60s
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: behest
+      POSTGRES_DB: behest
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U behest -d behest"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # No ports: only the app reaches the database.
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.production}
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3. Browsers fall back to TCP when the host's firewall does not open UDP 443.
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and Caddy's state, kept across restarts so it does not ask for new ones.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:

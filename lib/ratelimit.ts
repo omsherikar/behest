@@ -89,8 +89,17 @@ function headerValue(request: Request, name: string): string | null {
 }
 
 /**
+ * Whether Cloudflare's client address headers are trusted, from TRUST_CLOUDFLARE_HEADERS: only
+ * when it is 1, set by a host that sits behind Cloudflare. Without Cloudflare in front, a client
+ * can send these headers itself and pick any address it likes.
+ */
+function trustsCloudflareHeaders(): boolean {
+  return process.env.TRUST_CLOUDFLARE_HEADERS?.trim() === '1';
+}
+
+/**
  * The client's address, from the first of these that is set:
- * - cf-connecting-ip, then true-client-ip, which Cloudflare (in front of hosts such as Render) sets
+ * - when TRUST_CLOUDFLARE_HEADERS is 1, cf-connecting-ip, then true-client-ip, which Cloudflare sets
  *   to the address that connected to it, replacing anything the client sent;
  * - the x-forwarded-for entry TRUSTED_PROXY_HOPS from the right: each trusted proxy appends the
  *   address it saw, so entries further left may be the client's own claim. With fewer entries than
@@ -99,8 +108,10 @@ function headerValue(request: Request, name: string): string | null {
  * - otherwise `unknown`.
  */
 export function clientAddress(request: Request): string {
-  const direct = headerValue(request, 'cf-connecting-ip') ?? headerValue(request, 'true-client-ip');
-  if (direct) return direct;
+  if (trustsCloudflareHeaders()) {
+    const direct = headerValue(request, 'cf-connecting-ip') ?? headerValue(request, 'true-client-ip');
+    if (direct) return direct;
+  }
   const forwarded = (request.headers.get('x-forwarded-for') ?? '')
     .split(',')
     .map((entry) => entry.trim())

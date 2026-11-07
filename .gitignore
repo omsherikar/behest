@@ -42,6 +42,7 @@ next-env.d.ts
 
 # local secrets and proof state
 !.env.example
+!.env.production.example
 .vault-proof/
 
 # local database files

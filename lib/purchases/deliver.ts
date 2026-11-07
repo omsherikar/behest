@@ -1,4 +1,5 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
+import type { Db } from '@/lib/db/client';
 import { payouts, purchases, receipts, refunds, sellers } from '@/lib/db/schema';
 import type { PaypalPort } from '@/lib/paypal/port';
 import type { PurchaseDeps } from './deps';
@@ -19,6 +20,8 @@ import { describeFailure, payoutSeller } from './settle';
 type DeliverDeps = Pick<PurchaseDeps, 'db' | 'paypal' | 'sellers' | 'now'>;
 type SellerAnswer = Awaited<ReturnType<DeliverDeps['sellers']['acceptAgentOrder']>>;
 type RefundAnswer = Awaited<ReturnType<PaypalPort['refundCapture']>>;
+/** A refunds row written before PayPal was asked, and the capture it refunds. */
+type HeldRefund = { id: string; amountCents: number; captureId: string };
 
 /**
  * Rejections a seller also gives when an order it has already accepted is delivered again: the
@@ -91,7 +94,7 @@ export async function deliverToSeller(deps: DeliverDeps, purchaseId: string): Pr
  * `refund_unknown`; either way the purchase stays `captured`, still counted against the budget.
  */
 async function refundRejectedOrder({ db, paypal }: DeliverDeps, purchaseId: string, reason: string | null): Promise<void> {
-  const note = `The seller did not accept Behest order ${purchaseId}.`;
+  const note = refundNote(purchaseId);
   const refund = await db.transaction(async (tx) => {
     const [purchase] = await tx
       .select({ status: purchases.status, captureId: purchases.paypalCaptureId, totalCents: purchases.totalCents })
@@ -123,8 +126,57 @@ async function refundRejectedOrder({ db, paypal }: DeliverDeps, purchaseId: stri
     return { ...row, captureId };
   });
   if (!refund) return;
+  await sendHeldRefund({ db, paypal }, purchaseId, refund);
+}
 
-  const request = { captureId: refund.captureId, amountCents: refund.amountCents, note, requestId: `${purchaseId}:refund` };
+/**
+ * Asks PayPal again for the refund of a rejected order whose answer was lost twice, logged as
+ * `refund_unknown`: the periodic pass's retry. It sends exactly what the first attempt sent, the
+ * same request id, note and amount, so PayPal either reports the refund it already made or makes
+ * it now, and never refunds twice; the answer is then recorded as for the first attempt. With the
+ * purchase row locked, it checks that the purchase is still `captured`, the seller has no payout and
+ * the refunds row still has no PayPal refund id, and releases the lock before PayPal is asked.
+ * Returns whether PayPal was asked.
+ */
+export async function retryLostRefund({ db, paypal }: Pick<DeliverDeps, 'db' | 'paypal'>, purchaseId: string): Promise<boolean> {
+  const refund = await db.transaction(async (tx): Promise<HeldRefund | null> => {
+    const [purchase] = await tx
+      .select({ status: purchases.status, captureId: purchases.paypalCaptureId })
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId))
+      .for('update');
+    if (purchase?.status !== 'captured' || !purchase.captureId) return null;
+    const [payout] = await tx.select({ id: payouts.id }).from(payouts).where(eq(payouts.purchaseId, purchaseId));
+    if (payout) return null;
+    const [row] = await tx
+      .select({ id: refunds.id, amountCents: refunds.amountCents })
+      .from(refunds)
+      .where(and(eq(refunds.purchaseId, purchaseId), isNull(refunds.paypalRefundId)));
+    return row ? { ...row, captureId: purchase.captureId } : null;
+  });
+  if (!refund) return false;
+  await sendHeldRefund({ db, paypal }, purchaseId, refund);
+  return true;
+}
+
+/** What Behest tells the buyer when it refunds an order its seller rejected. */
+function refundNote(purchaseId: string): string {
+  return `The seller did not accept Behest order ${purchaseId}.`;
+}
+
+/**
+ * Sends the refund a refunds row already holds, under the purchase's one refund request id, and
+ * records PayPal's answer. A refund PayPal is returning moves the purchase to `refunded`. A refund
+ * PayPal answers in another status is logged as `refund_failed`, and one whose answer is lost twice
+ * as `refund_unknown`; either way the purchase stays `captured`, still counted against the budget.
+ */
+async function sendHeldRefund({ db, paypal }: { db: Db; paypal: PaypalPort }, purchaseId: string, refund: HeldRefund): Promise<void> {
+  const request = {
+    captureId: refund.captureId,
+    amountCents: refund.amountCents,
+    note: refundNote(purchaseId),
+    requestId: `${purchaseId}:refund`,
+  };
   let answer: RefundAnswer;
   try {
     answer = await sendRefund(paypal, request);

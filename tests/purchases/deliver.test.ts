@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { jobs, payouts, purchases, refunds } from '@/lib/db/schema';
-import { deliverToSeller } from '@/lib/purchases/deliver';
+import { deliverToSeller, retryLostRefund } from '@/lib/purchases/deliver';
 import type { PurchaseDeps } from '@/lib/purchases/deps';
 import { issueReceipt } from '@/lib/purchases/receipt';
 import { setUpCaptured } from '@/tests/helpers/purchase-deps';
@@ -209,5 +209,80 @@ describe('deliverToSeller', () => {
     expect(seller.orders).toEqual([]);
     expect(paypal.payouts).toEqual([]);
     expect(await eventsAfterReceipt(db, purchaseId)).toEqual([]);
+  });
+});
+
+describe('retryLostRefund', () => {
+  /** A rejected order whose refund PayPal carried out but whose answer was lost twice. */
+  async function setUpLostRefund({ refunded = true }: { refunded?: boolean } = {}) {
+    const s = await setUpReceipted();
+    s.seller.mode = 'reject';
+    const failure = refunded ? 'lost_response' : 'network';
+    s.paypal.failNext('refundCapture', failure);
+    s.paypal.failNext('refundCapture', failure);
+    await deliverToSeller(s.deps, s.purchaseId);
+    return s;
+  }
+
+  it('asks PayPal again under the first request id and note, recording the one refund it made', async () => {
+    const { db, deps, paypal, purchaseId } = await setUpLostRefund();
+
+    expect(await retryLostRefund(deps, purchaseId)).toBe(true);
+
+    const calls = paypal.callsTo('refundCapture').map(([call]) => call);
+    expect(new Set(calls.map((call) => JSON.stringify(call))).size).toBe(1);
+    expect(calls[0]).toMatchObject({ requestId: `${purchaseId}:refund`, note: `The seller did not accept Behest order ${purchaseId}.` });
+    expect(paypal.refunds).toHaveLength(1);
+    expect(await statusOf(db, purchaseId)).toBe('refunded');
+    expect(await db.select({ paypalRefundId: refunds.paypalRefundId, status: refunds.status }).from(refunds)).toEqual([
+      { paypalRefundId: paypal.refunds[0].refundId, status: 'COMPLETED' },
+    ]);
+    expect((await eventsAfterReceipt(db, purchaseId)).map((e) => e.kind)).toEqual([
+      'seller_rejected',
+      'refund_unknown',
+      'refund',
+      'status',
+    ]);
+  });
+
+  it('refunds now when PayPal never received the first request', async () => {
+    const { db, deps, paypal, purchaseId } = await setUpLostRefund({ refunded: false });
+    expect(paypal.refunds).toEqual([]);
+
+    await retryLostRefund(deps, purchaseId);
+
+    expect(paypal.refunds).toHaveLength(1);
+    expect(await statusOf(db, purchaseId)).toBe('refunded');
+  });
+
+  it('logs refund_unknown again when the answer is lost again, keeping the purchase captured', async () => {
+    const { db, deps, paypal, purchaseId } = await setUpLostRefund();
+    paypal.failNext('refundCapture', 'network');
+    paypal.failNext('refundCapture', 'network');
+
+    await retryLostRefund(deps, purchaseId);
+
+    expect(await statusOf(db, purchaseId)).toBe('captured');
+    expect((await eventsAfterReceipt(db, purchaseId)).map((e) => e.kind)).toEqual(['seller_rejected', 'refund_unknown', 'refund_unknown']);
+  });
+
+  it.each([
+    ['the purchase is no longer captured', async (db: PurchaseDeps['db'], purchaseId: string) => {
+      await db.update(purchases).set({ status: 'accepted' }).where(eq(purchases.id, purchaseId));
+    }],
+    ['the seller has a payout on record', async (db: PurchaseDeps['db'], purchaseId: string, sellerId: string) => {
+      await db.insert(payouts).values({ purchaseId, sellerId, amountCents: seededCart.totalCents, senderBatchId: `${purchaseId}:payout` });
+    }],
+    ['its refund has been recorded since', async (db: PurchaseDeps['db']) => {
+      await db.update(refunds).set({ paypalRefundId: 'REFUND-1', status: 'COMPLETED' });
+    }],
+  ])('asks PayPal nothing when %s', async (_, change) => {
+    const { db, deps, paypal, purchaseId, sellerId } = await setUpLostRefund();
+    await change(db, purchaseId, sellerId);
+    const asked = paypal.calls.length;
+
+    expect(await retryLostRefund(deps, purchaseId)).toBe(false);
+
+    expect(paypal.calls).toHaveLength(asked);
   });
 });

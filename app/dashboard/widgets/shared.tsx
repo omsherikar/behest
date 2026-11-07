@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Verdict } from '@/lib/domain/verdict';
 
 // Pieces the Behest widgets share: loading a widget's data, looking up the Studio fields a
-// widget reads by id, reading values from query rows, the verdict chip and widget messages.
+// widget reads by id, reading values from query rows, and widget messages.
 
 /** A widget's data: still loading, loaded, or failed to load. */
 export type WidgetLoad<T> = { status: 'loading' } | { status: 'loaded'; value: T } | { status: 'failed' };
@@ -75,44 +75,6 @@ export function asDate(value: unknown): Date | null {
 export const toCents = (value: unknown) => (typeof value === 'number' ? Math.round(value * 100) : 0);
 
 export const isVerdict = (value: unknown): value is Verdict => value === 'ALLOW' || value === 'ASK' || value === 'BLOCK';
-
-const VERDICT_STYLE: Record<Verdict, { chip: string; icon: string; path: string; label: string }> = {
-  ALLOW: {
-    chip: 'border-pp-success/30 bg-pp-success/10',
-    icon: 'text-pp-success',
-    path: 'm5 12.5 4.5 4.5L19 7.5',
-    label: 'Paid within the mandate',
-  },
-  ASK: {
-    chip: 'border-pp-warning/30 bg-pp-warning/10',
-    icon: 'text-pp-warning',
-    path: 'M9.2 9.3a2.9 2.9 0 1 1 4.1 2.6c-.8.4-1.3 1.1-1.3 2v.6M12 18h.01',
-    label: 'Needed the buyer to approve',
-  },
-  BLOCK: {
-    chip: 'border-pp-danger/30 bg-pp-danger/10',
-    icon: 'text-pp-danger',
-    path: 'M7 7l10 10M17 7 7 17',
-    label: 'Blocked, nothing was paid',
-  },
-};
-
-/** ALLOW green, ASK amber, BLOCK red: always an icon and the word, never color alone. */
-export function VerdictChip({ verdict, count }: { verdict: Verdict; count?: number }) {
-  const style = VERDICT_STYLE[verdict];
-  return (
-    <span
-      title={style.label}
-      className={`inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-xs font-semibold tracking-wide text-pp-ink ${style.chip}`}
-    >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden className={`size-3.5 ${style.icon}`}>
-        <path d={style.path} />
-      </svg>
-      {verdict}
-      {count !== undefined && <span className="font-normal text-pp-muted tabular-nums">{count}</span>}
-    </span>
-  );
-}
 
 /** Shown in place of a widget's content: why there is nothing to see. */
 export function WidgetMessage({ title, children }: { title: string; children?: ReactNode }) {

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { type AgentEvent, type RunOutcome, readAgentEvents } from '@/lib/buyer-pages/agent-events';
 import { aboutMandate, runRefusal, statusWords, toolStep } from '@/lib/buyer-pages/words';
-import { VerdictChip } from '../verdict-chip';
+import { VerdictBadge } from '@/components/ui/verdict-badge';
 
 // The buyer asks the shopping agent for something and follows its run as a timeline: what it is
 // doing, each purchase it proposed with Behest's verdict, the purchase's status and the reasons,
@@ -166,7 +166,7 @@ function Proposal({ outcome }: { outcome: RunOutcome }) {
   return (
     <li className="rounded-xl border border-pp-border bg-pp-surface p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <VerdictChip verdict={outcome.verdict} />
+        <VerdictBadge verdict={outcome.verdict} />
         <span className="font-semibold text-pp-navy">{statusWords(outcome.status)}</span>
       </div>
       {outcome.reasons.length > 0 && (

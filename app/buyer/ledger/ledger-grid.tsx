@@ -6,7 +6,7 @@ import type { LedgerRow } from '@/lib/buyer-pages/purchases';
 import { statusWords } from '@/lib/buyer-pages/words';
 import { formatUsd } from '@/lib/domain/money';
 import { SellerGrid } from '@/app/seller/seller-grid';
-import { VerdictChip } from '../verdict-chip';
+import { VerdictBadge } from '@/components/ui/verdict-badge';
 
 // Every purchase the buyer's agent proposed, newest first: Behest's verdict, where the purchase
 // stands in plain words, why it was not simply allowed and the id of its signed receipt. Seller
@@ -24,7 +24,7 @@ const dateTime = new Intl.DateTimeFormat('en-GB', {
 });
 
 function VerdictCell({ data }: CustomCellRendererProps<LedgerRow>) {
-  return data ? <VerdictChip verdict={data.verdict} /> : null;
+  return data ? <VerdictBadge verdict={data.verdict} /> : null;
 }
 
 function ReasonsCell({ data }: CustomCellRendererProps<LedgerRow>) {

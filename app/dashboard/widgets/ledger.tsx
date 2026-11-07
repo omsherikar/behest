@@ -1,6 +1,6 @@
 'use client';
 
-// The decision ledger: every purchase the agent proposed, newest first, with its verdict chip and
+// The decision ledger: every purchase the agent proposed, newest first, with its verdict badge and
 // the gate rules that asked or blocked it. It is an AG Grid inside a Studio widget, so it follows
 // the report's filters, and clicking a row cross-filters the rest of the page (the receipt card
 // shows that purchase's receipt). Cross-filters only highlight rows here, so every purchase stays
@@ -23,9 +23,11 @@ import {
   type RowClickedEvent,
 } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact, type CustomCellRendererProps } from 'ag-grid-react';
+import { VerdictBadge } from '@/components/ui/verdict-badge';
 import type { Verdict } from '@/lib/domain/verdict';
+import { verdictWords } from '@/lib/ui/verdict';
 import { WIDGET_FIELDS } from '../studio/fields';
-import { findFields, isVerdict, LoadFailed, MissingFields, useWidgetLoad, VerdictChip } from './shared';
+import { findFields, isVerdict, LoadFailed, MissingFields, useWidgetLoad } from './shared';
 
 export type LedgerStyle = {
   /** Show the rules that asked or blocked each purchase. */
@@ -125,7 +127,7 @@ async function loadLedger(params: AgWidgetParams<LedgerDef>): Promise<Ledger | n
 const noPurchases = (ledger: Ledger | null) => ledger !== null && ledger.rows.length === 0;
 
 function VerdictCell({ data }: CustomCellRendererProps<LedgerRow>) {
-  return data ? <VerdictChip verdict={data.verdict} /> : null;
+  return data ? <VerdictBadge verdict={data.verdict} personal={false} /> : null;
 }
 
 const RESULT_TAG: Record<Reason['result'], string> = {
@@ -146,7 +148,7 @@ function ReasonsCell({ data }: CustomCellRendererProps<LedgerRow>) {
     <ul className="flex flex-col gap-1.5 py-2.5 leading-5 whitespace-normal">
       {data.reasons.map((reason) => (
         <li key={reason.rule} className="flex items-baseline gap-2">
-          <span className={`shrink-0 rounded px-1.5 text-[11px] font-semibold uppercase tracking-wide ring-1 ring-inset ${RESULT_TAG[reason.result]}`}>
+          <span className={`shrink-0 rounded px-1.5 text-[11px] font-semibold ring-1 ring-inset ${RESULT_TAG[reason.result]}`}>
             {reason.result}
           </span>
           <span>
@@ -160,12 +162,12 @@ function ReasonsCell({ data }: CustomCellRendererProps<LedgerRow>) {
 
 function VerdictMix({ rows }: { rows: LedgerRow[] }) {
   const counts = VERDICTS.map((verdict) => ({ verdict, count: rows.filter((r) => r.verdict === verdict).length }));
-  const label = counts.map(({ verdict, count }) => `${count} ${verdict}`).join(', ');
+  const label = counts.map(({ verdict, count }) => `${verdictWords(verdict, false)} ${count}`).join(', ');
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1 pb-3">
       <div className="flex items-center gap-2">
         {counts.map(({ verdict, count }) => (
-          <VerdictChip key={verdict} verdict={verdict} count={count} />
+          <VerdictBadge key={verdict} verdict={verdict} count={count} personal={false} />
         ))}
       </div>
       <div role="img" aria-label={`Verdicts: ${label}`} className="flex h-2 min-w-24 flex-1 gap-0.5 overflow-hidden rounded-full">

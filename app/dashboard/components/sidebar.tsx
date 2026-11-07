@@ -54,7 +54,7 @@ export function ReportsSidebar({
 
   return (
     <>
-      <p className="px-6 pb-2 pt-6 text-xs font-semibold uppercase tracking-wider text-pp-muted">Reports</p>
+      <p className="px-6 pb-2 pt-6 text-xs font-semibold text-pp-muted">Reports</p>
       <ul className="flex-1 space-y-1 overflow-y-auto px-3 pb-4">
         {reports.map((report) => {
           const active = report.id === activeId;

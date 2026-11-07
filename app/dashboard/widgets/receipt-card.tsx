@@ -134,7 +134,7 @@ function ClaimMark({ verified }: { verified: boolean }) {
 function ClaimList({ title, claims, verified }: { title: string; claims: ReceiptClaim[]; verified: boolean }) {
   return (
     <section>
-      <h3 className="pb-1.5 text-xs font-semibold uppercase tracking-wider text-pp-muted">{title}</h3>
+      <h3 className="pb-1.5 text-xs font-semibold text-pp-muted">{title}</h3>
       <ul className="flex flex-col gap-2">
         {claims.map((claim) => (
           <li key={claim.label} className="flex items-start gap-2.5">

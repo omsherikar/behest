@@ -36,8 +36,11 @@ export function TopBar({
       <div className="container-page">
         <div className="glass flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-[22px] p-2 pl-4 lg:grid lg:h-16 lg:grid-cols-[1fr_auto_1fr] lg:py-0 lg:pr-2.5 lg:pl-5">
           <Wordmark className="lg:justify-self-start" />
-          {nav && (
+          {nav ? (
             <div className={cn('order-last w-full min-w-0 justify-center lg:order-none lg:flex lg:w-auto', wideNavOnly ? 'hidden' : 'flex')}>{nav}</div>
+          ) : (
+            // Holds the middle column, so the actions stay at the right end of a bar with no nav.
+            <span aria-hidden className="hidden lg:block" />
           )}
           {end && <div className="flex min-w-0 items-center justify-end gap-2 lg:justify-self-end">{end}</div>}
         </div>

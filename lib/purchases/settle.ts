@@ -32,7 +32,7 @@ const FAILED_BATCH_STATUSES: ReadonlySet<string> = new Set(['DENIED', 'CANCELED'
 /** Statuses, of the item or of a batch with no item, that leave the seller unpaid. Settling then needs an operator. */
 const FAILED_STATUSES: ReadonlySet<string> = new Set([...FAILED_ITEM_STATUSES, ...FAILED_BATCH_STATUSES]);
 /** Statuses that end a payout, paid or not. Once stored, a payout's status never changes again. */
-const FINAL_STATUSES: ReadonlySet<string> = new Set(['SUCCESS', ...FAILED_STATUSES]);
+export const FINAL_STATUSES: ReadonlySet<string> = new Set(['SUCCESS', ...FAILED_STATUSES]);
 
 /** The oldest payout the poll resends: a day inside the 30 days PayPal remembers a sender batch id. */
 const RESEND_WINDOW_MS = 29 * 24 * 60 * 60 * 1000;

@@ -31,7 +31,8 @@ export function focusStep(detail: PurchaseDetail): TraceStep {
   return order.find((step) => detail.trace[step] === 'stopped') ?? (detail.trace.paypal === 'held' ? 'paypal' : 'receipt');
 }
 
-function proofOf(detail: PurchaseDetail): TraceProof {
+/** The proof behind every step the purchase reached, for an AuthorityTrace. */
+export function purchaseProof(detail: PurchaseDetail): TraceProof {
   const { trace, mandate, outcomes, intent, paypal, receipt, approveUrl, cart, sellerSlug } = detail;
   const proof: TraceProof = {
     mandate: (
@@ -118,5 +119,5 @@ export function PurchaseTrace({
   defaultOpen?: TraceStep;
   className?: string;
 }) {
-  return <AuthorityTrace states={detail.trace} proof={proofOf(detail)} label={label} defaultOpen={defaultOpen} className={className} />;
+  return <AuthorityTrace states={detail.trace} proof={purchaseProof(detail)} label={label} defaultOpen={defaultOpen} className={className} />;
 }

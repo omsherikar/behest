@@ -52,26 +52,30 @@ function ShopSummary({ summary }: { summary: SellerSummary }) {
       <h2 id="shop-heading" className="text-lg font-semibold text-pp-navy">
         {summary.name}
       </h2>
-      <p className="mt-1 text-sm break-all text-pp-muted">
-        Slug <span className="font-mono text-pp-ink">{summary.slug}</span>, paid out to {summary.payoutEmail}
+      <p className="mt-1 text-sm text-pp-muted">
+        Slug <span className="font-mono text-pp-ink">{summary.slug}</span>
       </p>
+      <p className="text-sm break-words text-pp-muted">Payouts go to {summary.payoutEmail}</p>
 
+      {/* Labels at the top and values at the bottom, so the values line up when a label wraps. */}
       <dl className="mt-5 grid grid-cols-3 gap-3">
-        <div>
+        <div className="flex flex-col justify-between">
           <dt className="text-sm text-pp-muted">Listings</dt>
           <dd className="text-2xl font-semibold text-pp-navy">{summary.listings}</dd>
         </div>
-        <div>
+        <div className="flex flex-col justify-between">
           <dt className="text-sm text-pp-muted">Hidden from agents</dt>
           <dd className={`text-2xl font-semibold ${hidden.length > 0 ? 'text-pp-danger' : 'text-pp-navy'}`}>{hidden.length}</dd>
         </div>
-        <div>
+        <div className="flex flex-col justify-between">
           <dt className="text-sm text-pp-muted">Orders</dt>
           <dd className="text-2xl font-semibold text-pp-navy">{orders.accepted + orders.rejected}</dd>
         </div>
       </dl>
       <p className="mt-2 text-sm text-pp-muted">
-        {plural(orders.accepted, 'order')} accepted, {orders.rejected} rejected because the receipt did not check out.
+        {orders.accepted + orders.rejected === 0
+          ? 'No agent has placed an order with you yet.'
+          : `${plural(orders.accepted, 'order')} accepted, ${orders.rejected} rejected because the receipt did not check out.`}
       </p>
 
       {hidden.length > 0 && (

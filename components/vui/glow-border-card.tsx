@@ -30,8 +30,8 @@ export function GlowBorderCard({
   return (
     <div className={cn('relative isolate rounded-frame', className)} style={style}>
       {/* A soft halo outside the edge, then the crisp 1 px ring on it. */}
-      <div aria-hidden className="glow-conic pointer-events-none absolute -inset-1 -z-10 rounded-[inherit] border-[6px] opacity-30 blur-md" />
-      <div aria-hidden className="glow-conic pointer-events-none absolute -inset-px -z-10 rounded-[inherit] border opacity-80" />
+      <div aria-hidden className="glow-conic pointer-events-none absolute -inset-1 -z-10 rounded-[inherit] border-[6px] opacity-45 blur-md" />
+      <div aria-hidden className="glow-conic pointer-events-none absolute -inset-px -z-10 rounded-[inherit] border opacity-100" />
       <div className="relative h-full rounded-[inherit] bg-surface">{children}</div>
     </div>
   );

@@ -15,6 +15,7 @@ export function FeatureCard({
   meta,
   children,
   className,
+  visualClassName,
   as: Tag = 'article',
 }: {
   title: string;
@@ -28,11 +29,20 @@ export function FeatureCard({
   /** The live mini interface. Without one, the card is the header and the sentence. */
   children?: ReactNode;
   className?: string;
+  /** Classes for the mini interface's area, such as a smaller minimum height. */
+  visualClassName?: string;
   as?: 'article' | 'li' | 'div';
 }) {
   return (
-    <Tag className={cn('flex min-w-0 flex-col overflow-hidden rounded-frame border border-line bg-surface shadow-[var(--highlight)]', className)}>
-      <div className="border-b border-line bg-linear-to-br from-white/[0.06] to-transparent px-6 pt-6 pb-5">
+    <Tag
+      className={cn(
+        'flex min-w-0 flex-col overflow-hidden rounded-frame border border-line bg-surface shadow-[var(--highlight)]',
+        // Without a mini interface the light falls across the whole card, as there is no band to end it.
+        !children && 'bg-linear-to-br from-white/[0.05] via-transparent to-transparent',
+        className,
+      )}
+    >
+      <div className={cn('px-6 pt-6 pb-5', children && 'border-b border-line bg-linear-to-br from-white/[0.06] to-transparent')}>
         {index !== undefined && (
           <span className="inline-flex h-7 min-w-7 items-center justify-center rounded-lg border border-white/20 px-1.5 font-mono text-[0.6875rem] text-text tabular-nums">
             {String(index).padStart(2, '0')}
@@ -44,8 +54,9 @@ export function FeatureCard({
         </h3>
         {meta && <p className="mt-1.5 font-mono text-meta break-all text-muted">{meta}</p>}
       </div>
-      {children && <div className="flex min-h-48 flex-1 items-center justify-center px-5 py-6">{children}</div>}
-      <p className={cn('px-6 pb-6 text-body text-muted', children ? 'pt-0' : 'pt-5')}>{description}</p>
+      {children && <div className={cn('flex min-h-48 flex-1 items-center justify-center px-5 py-6', visualClassName)}>{children}</div>}
+      {/* Without a mini interface the sentence sits at the foot, so cards stretched to a row's height line up. */}
+      <p className={cn('px-6 pb-6 text-body text-muted', children ? 'pt-0' : 'mt-auto pt-2')}>{description}</p>
     </Tag>
   );
 }

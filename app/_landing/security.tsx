@@ -44,7 +44,7 @@ export function Security() {
           </Stat>
           {stats.live && (
             <>
-              <Stat label={`Stopped in the live run against Claude, of ${stats.live.ran}`}>
+              <Stat label={`Stopped in the live run, out of ${stats.live.ran}`}>
                 <StatsCounter value={stats.live.stopped} />
               </Stat>
               <Stat label="Model calls in the live run">

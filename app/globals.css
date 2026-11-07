@@ -101,9 +101,16 @@
   --radius-control: 4px;
   --radius-panel: 8px;
 
-  /* A trace node arriving at a new state, and a node still in progress. */
+  /*
+   * The trace's motion: a node arriving at a new state, a node still in progress, and the
+   * demonstration that plays the nodes and the rail in order once. Each is used through
+   * motion-safe, so under reduced motion the trace is drawn still.
+   */
   --animate-trace-arrive: trace-arrive 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
   --animate-trace-pulse: trace-pulse 1.6s ease-in-out infinite;
+  --animate-trace-play: trace-play 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-trace-rail-x: trace-rail-x 300ms ease-out both;
+  --animate-trace-rail-y: trace-rail-y 300ms ease-out both;
 
   /* The PayPal tokens as Tailwind colours, for the pages not yet restyled. */
   --color-pp-navy: var(--pp-navy);
@@ -136,6 +143,35 @@
 @keyframes trace-pulse {
   50% {
     opacity: 0.45;
+  }
+}
+
+@keyframes trace-play {
+  from {
+    opacity: 0.12;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes trace-rail-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes trace-rail-y {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
   }
 }
 

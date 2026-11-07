@@ -77,8 +77,9 @@ export async function acceptAgentOrder(
 /**
  * Verifies a receipt for the verify route, writing nothing. `intake` runs every check an order
  * would, reading seller_orders for replay; a seller Behest does not host has no orders there, so
- * its receipts are never replays. `audit` checks the signature, seller, cart and amount only, for
- * receipts shown long after they were issued and presented, and reads nothing.
+ * its receipts are never replays. `audit` is for receipts shown long after they were issued and
+ * presented: it checks the signature, seller, cart and amount, and that the receipt was not issued
+ * in the future, but not its age or replay, and reads nothing.
  */
 export async function verifyForRoute(
   deps: IntakeDeps,
@@ -90,9 +91,7 @@ export async function verifyForRoute(
     cart: i.cart,
     sellerSlug: i.sellerSlug,
     jwks: await deps.jwks(),
-    // An audit checks the receipt as of the time it claims to be issued, so its age never fails it.
-    // Only an authentic receipt gets past the signature check, so the claim is the signed one.
-    now: audit ? (claimedIssueTime(i.jws) ?? deps.now()) : deps.now(),
+    now: audit ? auditTime(i.jws, deps.now()) : deps.now(),
     seen: audit
       ? async () => false
       : async (receiptId) => {
@@ -133,8 +132,13 @@ function presentedReceiptId(jws: string): string | null {
   return parsed.success ? parsed.data.id : null;
 }
 
-/** The issue time a receipt claims, signed or not, or null when it claims none. */
-function claimedIssueTime(jws: string): Date | null {
+/**
+ * The clock an audit checks a receipt against: the time it claims to be issued, so a past receipt is
+ * never too old, but never later than `now`, so one claiming to be issued in the future still fails
+ * beyond the allowed clock skew. Only an authentic receipt gets past the signature check, so the
+ * claim that counts is the signed one.
+ */
+function auditTime(jws: string, now: Date): Date {
   const iat = unverifiedPayload(jws)?.iat;
-  return typeof iat === 'number' ? new Date(iat * 1000) : null;
+  return typeof iat === 'number' ? new Date(Math.min(now.getTime(), iat * 1000)) : now;
 }

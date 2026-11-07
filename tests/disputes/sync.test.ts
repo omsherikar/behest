@@ -31,6 +31,8 @@ function openDispute(changes: Partial<DisputeDetail> = {}): DisputeDetail {
     createTime: '2026-11-04T16:22:41.000Z',
     buyerNotes: 'My agent bought turmeric and cumin and nothing has arrived.',
     outcome: null,
+    stage: 'INQUIRY',
+    actions: ['accept_claim', 'send_message', 'escalate', 'make_offer'],
     ...changes,
   };
 }

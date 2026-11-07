@@ -182,6 +182,8 @@ describe('getDispute', () => {
       createTime: '2026-11-04T16:22:41.000Z',
       buyerNotes: BUYER_NOTES,
       outcome: null,
+      stage: 'INQUIRY',
+      actions: ['provide_evidence', 'send_message'],
     });
   });
 
@@ -198,7 +200,37 @@ describe('getDispute', () => {
       createTime: '2026-11-02T09:05:13.000Z',
       buyerNotes: 'The spice gift box was missing two of the jars the listing showed.',
       outcome: 'RESOLVED_SELLER_FAVOUR',
+      stage: 'CHARGEBACK',
+      actions: [],
     });
+  });
+
+  it('reads the stage and what PayPal allows the seller now from its links, leaving out self', async () => {
+    // As the sandbox read an inquiry waiting for Behest: no provide_evidence link until it is a claim.
+    const links = ['self', 'accept_claim', 'send_message', 'escalate', 'make_offer'].map((rel) => ({
+      href: `https://api-m.sandbox.paypal.com/v1/customer/disputes/${DISPUTE_ID}/${rel}`,
+      rel,
+      method: rel === 'self' ? 'GET' : 'POST',
+    }));
+    stubFetch([{ method: 'GET', path: DISPUTE_PATH, body: disputeWith({ dispute_life_cycle_stage: 'INQUIRY', links }) }]);
+
+    expect(await getDispute(DISPUTE_ID)).toMatchObject({
+      stage: 'INQUIRY',
+      actions: ['accept_claim', 'send_message', 'escalate', 'make_offer'],
+    });
+  });
+
+  it('names each action once and skips links with no rel', async () => {
+    const links = [{ rel: 'provide_evidence' }, { href: 'https://api-m.sandbox.paypal.com/x' }, { rel: '' }, { rel: 'provide_evidence' }];
+    stubFetch([{ method: 'GET', path: DISPUTE_PATH, body: disputeWith({ links }) }]);
+
+    expect((await getDispute(DISPUTE_ID)).actions).toEqual(['provide_evidence']);
+  });
+
+  it('reports no stage and no actions when PayPal sends neither', async () => {
+    stubFetch([{ method: 'GET', path: DISPUTE_PATH, body: disputeWith({ dispute_life_cycle_stage: undefined, links: undefined }) }]);
+
+    expect(await getDispute(DISPUTE_ID)).toMatchObject({ stage: null, actions: [] });
   });
 
   it('reads a buyer-favoured outcome the same way', async () => {

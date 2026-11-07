@@ -25,6 +25,9 @@ type Dispute = {
   messages?: Message[];
   /** Present once PayPal has decided the dispute. */
   dispute_outcome?: { outcome_code?: string };
+  dispute_life_cycle_stage?: string;
+  /** One link for each thing the caller may do with the dispute now, besides `self`. */
+  links?: Link[];
 };
 type DisputePage = { items?: Dispute[]; links?: Link[] };
 
@@ -90,6 +93,15 @@ function firstBuyerMessage(messages: Message[] | undefined): Message | undefined
   return written.reduce<Message | undefined>((first, message) => (first && postedAt(first) <= postedAt(message) ? first : message), undefined);
 }
 
+/**
+ * What PayPal lets the seller do with the dispute now, each once, in the order PayPal lists them.
+ * PayPal offers an action only through its link: no provide_evidence link means it takes no evidence.
+ */
+function actionsOf(links: Link[] | undefined): string[] {
+  const rels = (links ?? []).flatMap((link) => (link.rel && link.rel !== 'self' ? [link.rel] : []));
+  return [...new Set(rels)];
+}
+
 export const getDispute: PaypalPort['getDispute'] = async (id) => {
   const dispute = await paypalRequest<Dispute | undefined>('GET', `${DISPUTES}/${encodeURIComponent(id)}`);
   // PayPal keeps what each side wrote in `messages`. The buyer's earliest written message is taken
@@ -98,6 +110,8 @@ export const getDispute: PaypalPort['getDispute'] = async (id) => {
     ...toSummary(dispute ?? {}),
     buyerNotes: firstBuyerMessage(dispute?.messages)?.content ?? null,
     outcome: dispute?.dispute_outcome?.outcome_code ?? null,
+    stage: dispute?.dispute_life_cycle_stage ?? null,
+    actions: actionsOf(dispute?.links),
   };
 };
 

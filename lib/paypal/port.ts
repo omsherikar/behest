@@ -21,4 +21,11 @@ export type DisputeDetail = DisputeSummary & {
   buyerNotes: string | null;
   /** PayPal's outcome code once it has decided the dispute, such as RESOLVED_SELLER_FAVOUR; null before. */
   outcome: string | null;
+  /** PayPal's stage for the case, such as INQUIRY or CHARGEBACK; null when PayPal gives none. */
+  stage: string | null;
+  /**
+   * What PayPal lets the seller do with the case now, such as provide_evidence or send_message: the
+   * rels of the dispute's links, without `self`.
+   */
+  actions: string[];
 };

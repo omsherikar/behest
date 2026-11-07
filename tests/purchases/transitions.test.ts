@@ -20,6 +20,7 @@ const LEGAL = new Set([
   'awaiting_approval -> cancelled',
   'charging -> captured',
   'charging -> failed',
+  'charging -> awaiting_approval',
   'captured -> accepted',
   'captured -> refunded',
   'accepted -> settled',

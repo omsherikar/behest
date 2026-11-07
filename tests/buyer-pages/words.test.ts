@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { purchaseStatus } from '@/lib/db/schema';
-import { aboutMandate, runRefusal, statusWords, toolArgs, toolStep } from '@/lib/buyer-pages/words';
+import { aboutMandate, reasonsHeading, runRefusal, statusWords, toolArgs, toolStep } from '@/lib/buyer-pages/words';
+
+describe('reasonsHeading', () => {
+  it('heads the reasons of an allowed purchase as why it was allowed, never as why it was not', () => {
+    expect(reasonsHeading('ALLOW')).toBe('Why it was allowed');
+    expect(reasonsHeading('ASK')).toBe('Why Behest asked you');
+    expect(reasonsHeading('BLOCK')).toBe('Why it was blocked');
+  });
+});
 
 describe('statusWords', () => {
   it('says paid for a captured purchase and every status after it that kept the money', () => {

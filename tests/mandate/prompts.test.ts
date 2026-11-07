@@ -13,6 +13,11 @@ it('describes every policy field', () => {
 it('holds no calendar date, so every request sends the same prompt', () =>
   expect(MANDATE_SYSTEM_PROMPT).not.toMatch(/\d{4}-\d{2}-\d{2}/));
 
+it('keeps each amount with the limit the buyer gave it and asks when the amounts contradict', () => {
+  expect(MANDATE_SYSTEM_PROMPT).toContain('never move an amount from one limit to another');
+  expect(MANDATE_SYSTEM_PROMPT).toContain('the mandate contradicts itself. Ask which they meant');
+});
+
 it('says how a limit the policy cannot hold is listed', () =>
   expect(MANDATE_SYSTEM_PROMPT).toContain('"not enforced: '));
 

@@ -303,6 +303,15 @@
   min-height: 0;
 }
 
+/*
+ * A focused cell is framed only when the focus came from the keyboard (arrows, Tab), the way
+ * :focus-visible decides it. A mouse click still focuses the cell, so Enter and the arrows carry on
+ * from there, but draws no frame. Beats AG Grid's own `.ag-ltr .ag-cell-focus:...:focus-within` rule.
+ */
+.ag-root-wrapper .ag-cell.ag-cell-focus:not(.ag-cell-range-selected):not(:focus-visible):not(:has(:focus-visible)) {
+  border-color: transparent;
+}
+
 @layer base {
   /* In-page links glide; the reduced-motion rule below turns this off. */
   html {

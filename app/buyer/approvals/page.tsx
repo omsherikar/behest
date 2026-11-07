@@ -3,6 +3,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { connection } from 'next/server';
 import { appDb, demoBuyerId } from '@/lib/app-deps';
+import { returnNotices, type ReturnNotice } from '@/lib/buyer-pages/notices';
 import { pendingApprovals, type PendingApproval } from '@/lib/buyer-pages/purchases';
 import { qrDataUrl } from '@/lib/buyer-pages/qr';
 import { formatUsd } from '@/lib/domain/money';
@@ -16,10 +17,16 @@ export const metadata: Metadata = {
 // The purchases waiting for the buyer, each one over what the mandate lets the agent pay alone or
 // held back by the intent check. The buyer approves each at PayPal, by its link or by scanning its
 // QR code on a phone. PayPal sends the buyer back here with `?approved=` or `?cancelled=` set to the
-// purchase id. Seller names, item titles and reasons are shown as text, as they may be a seller's.
+// purchase id, or `?pending=` or `?error=` from the return route; each shows Behest's own notice.
+// Seller names, item titles and reasons are shown as text, as they may be a seller's.
 
 const primaryLink =
   'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-white transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
+const NOTICE_STYLES: Record<ReturnNotice['tone'], string> = {
+  success: 'border-pp-success text-pp-success',
+  warning: 'border-pp-warning text-pp-warning',
+  danger: 'border-pp-danger text-pp-danger',
+};
 const textLink =
   'font-semibold text-pp-blue underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
 
@@ -53,7 +60,7 @@ export default async function ApprovalsPage({ searchParams }: PageProps<'/buyer/
   const db = appDb();
   const approvals = await pendingApprovals(db, await demoBuyerId(db));
   const codes = await Promise.all(approvals.map(qrFor));
-  const { approved, cancelled } = await searchParams;
+  const notices = returnNotices(await searchParams);
 
   return (
     <main className="mx-auto w-full max-w-2xl px-4 py-10 font-paypal text-pp-ink sm:py-16">
@@ -64,20 +71,23 @@ export default async function ApprovalsPage({ searchParams }: PageProps<'/buyer/
         purchase at PayPal.
       </p>
 
-      {approved !== undefined && (
-        <p role="status" className="mt-6 rounded-xl border border-pp-success bg-pp-surface p-4 text-sm text-pp-success">
-          You approved the purchase at PayPal.{' '}
-          <Link href="/buyer/ledger" className={textLink}>
-            Your ledger
-          </Link>{' '}
-          shows whether the payment went through.
+      {notices.map((notice) => (
+        <p
+          key={notice.text}
+          role={notice.tone === 'danger' ? 'alert' : 'status'}
+          className={`mt-6 rounded-xl border bg-pp-surface p-4 text-sm ${NOTICE_STYLES[notice.tone]}`}
+        >
+          {notice.text}
+          {notice.ledger && (
+            <>
+              {' '}
+              <Link href="/buyer/ledger" className={textLink}>
+                Open your ledger
+              </Link>
+            </>
+          )}
         </p>
-      )}
-      {cancelled !== undefined && (
-        <p role="status" className="mt-6 rounded-xl border border-pp-warning bg-pp-surface p-4 text-sm text-pp-warning">
-          You left PayPal without approving the purchase, so nothing was paid.
-        </p>
-      )}
+      ))}
 
       {approvals.length === 0 ? (
         <p className="mt-8 text-pp-muted">

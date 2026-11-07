@@ -140,6 +140,9 @@ function ValueCell({ valueFormatted, value, colDef }: CustomCellRendererProps<Le
   return <span className={`${CELL_TEXT} ${wraps ? 'whitespace-normal' : 'whitespace-nowrap tabular-nums'}`}>{valueFormatted ?? value}</span>;
 }
 
+// What a rule did, in words: the rule's own name can read as the opposite ("Listing clean" next
+// to a block), so the cell gives the outcome and the rule's reason sentence.
+const RESULT_WORDS: Record<Reason['result'], string> = { Ask: 'Asks the buyer', Block: 'Blocked' };
 const RESULT_TAG: Record<Reason['result'], string> = {
   Ask: 'bg-pp-warning/10 text-pp-ink ring-pp-warning/40',
   Block: 'bg-pp-danger/10 text-pp-ink ring-pp-danger/40',
@@ -154,13 +157,13 @@ function ReasonsCell({ data }: CustomCellRendererProps<LedgerRow>) {
   }
   return (
     <ul className="flex flex-col gap-1.5 py-2.5 leading-[1.4] whitespace-normal">
-      {data.reasons.map((reason) => (
-        <li key={reason.rule} className="flex items-baseline gap-2">
+      {data.reasons.map((reason, index) => (
+        <li key={`${reason.rule}-${index}`} className="flex items-baseline gap-2">
           <span className={`shrink-0 rounded px-1.5 text-[11px] font-semibold ring-1 ring-inset ${RESULT_TAG[reason.result]}`}>
-            {reason.result}
+            {RESULT_WORDS[reason.result]}
           </span>
-          <span>
-            <span className="font-semibold text-pp-navy">{reason.rule}.</span> <span className="text-pp-ink">{reason.detail}</span>
+          <span className="text-pp-ink" title={`Rule: ${reason.rule}`}>
+            {reason.detail || `${reason.rule}.`}
           </span>
         </li>
       ))}

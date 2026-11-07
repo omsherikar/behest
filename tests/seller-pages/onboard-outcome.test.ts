@@ -106,7 +106,7 @@ describe('a shop that was not onboarded', () => {
       [403, 'Only the seller persona can onboard a shop. Pick it on the home page.'],
       [
         413,
-        'That upload is too large. Photos can be about 3.75 MB each and 15 MB together, so use fewer photos or a smaller CSV file.',
+        'That upload is too large. A catalog CSV can be 1 MB, and photos about 3.75 MB each and 15 MB together, so use fewer photos or a smaller CSV file.',
       ],
       [429, 'Too many uploads in a short time. Wait a minute, then try again.'],
       [502, 'Behest could not build your catalog just now, so nothing was saved. Try again in a minute.'],

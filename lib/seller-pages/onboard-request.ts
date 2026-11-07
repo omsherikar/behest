@@ -8,6 +8,18 @@ import { dollarsToCents, formatUsd } from '@/lib/domain/money';
 
 /** CSV data rows one onboarding reads; later rows are rejected. */
 export const CSV_ROW_LIMIT = 200;
+/**
+ * The largest CSV file the page reads: 1 MiB, far more than 200 rows need, and checked before the
+ * file is read so a wrong file choice never loads into the page.
+ */
+export const CSV_MAX_BYTES = 1024 * 1024;
+/** The CSV limit in MB, as sellers are told it. */
+export const CSV_MB = CSV_MAX_BYTES / (1024 * 1024);
+
+/** Why a chosen CSV file of `bytes` is refused, naming it, or null when its size is fine. */
+export function csvSizeProblem(fileName: string, bytes: number): string | null {
+  return bytes > CSV_MAX_BYTES ? `${fileName} is larger than ${CSV_MB} MB, the most a catalog CSV can be.` : null;
+}
 
 /** Photos one onboarding can list. */
 export const MAX_PHOTOS = 8;

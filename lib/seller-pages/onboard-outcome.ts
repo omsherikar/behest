@@ -1,5 +1,5 @@
 import { plural } from '@/lib/domain/words';
-import { PHOTO_MB, PHOTOS_MB } from './onboard-request';
+import { CSV_MB, PHOTO_MB, PHOTOS_MB } from './onboard-request';
 
 // What the seller onboarding page tells the seller after POST /api/sellers/onboard answers. Each
 // status the route can return gets its own plain words. Only a 400 carries a message meant for the
@@ -31,7 +31,7 @@ const FAILURES = new Map<number | null, string>([
   [409, 'A shop with this slug is already onboarded, so nothing new was saved.'],
   [
     413,
-    `That upload is too large. Photos can be about ${PHOTO_MB} MB each and ${PHOTOS_MB} MB together, so use fewer photos or a smaller CSV file.`,
+    `That upload is too large. A catalog CSV can be ${CSV_MB} MB, and photos about ${PHOTO_MB} MB each and ${PHOTOS_MB} MB together, so use fewer photos or a smaller CSV file.`,
   ],
   [429, 'Too many uploads in a short time. Wait a minute, then try again.'],
   [502, 'Behest could not build your catalog just now, so nothing was saved. Try again in a minute.'],

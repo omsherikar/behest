@@ -6,7 +6,9 @@ import { type ChangeEvent, type FormEvent, type ReactNode, useRef, useState } fr
 import { plural } from '@/lib/domain/words';
 import { onboardOutcome, type OnboardOutcome } from '@/lib/seller-pages/onboard-outcome';
 import {
+  CSV_MB,
   CSV_ROW_LIMIT,
+  csvSizeProblem,
   imageMb,
   MAX_PHOTOS,
   onboardRequest,
@@ -64,6 +66,12 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
     setError(null);
     if (!file) {
       setCsv(null);
+      return;
+    }
+    const tooLarge = csvSizeProblem(file.name, file.size);
+    if (tooLarge) {
+      removeCsv();
+      setError(tooLarge);
       return;
     }
     try {
@@ -210,8 +218,8 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
       <fieldset className="flex flex-col gap-2" disabled={disabled}>
         <legend className="text-lg font-semibold text-pp-navy">Catalog CSV</legend>
         <p id="csv-hint" className="text-sm text-pp-muted">
-          One product per row, up to {CSV_ROW_LIMIT} rows. Name and price columns are needed; sku, description, stock and
-          category are read when present.
+          One product per row, up to {CSV_ROW_LIMIT} rows and {CSV_MB} MB. Name and price columns are needed; sku,
+          description, stock and category are read when present.
         </p>
         <input
           ref={csvInput}

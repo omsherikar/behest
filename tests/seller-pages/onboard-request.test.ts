@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import * as builder from '@/lib/catalog/build';
 import * as csv from '@/lib/catalog/csv';
 import {
+  CSV_MAX_BYTES,
+  CSV_MB,
   CSV_ROW_LIMIT,
+  csvSizeProblem,
   MAX_PHOTOS,
   onboardRequest,
   PHOTO_BASE64_MAX,
@@ -128,6 +131,19 @@ describe('onboardRequest', () => {
   });
 });
 
+describe('csvSizeProblem', () => {
+  it('accepts a CSV file up to 1 MiB', () => {
+    expect(csvSizeProblem('ravi-spices.csv', 0)).toBeNull();
+    expect(csvSizeProblem('ravi-spices.csv', CSV_MAX_BYTES)).toBeNull();
+  });
+
+  it('refuses a larger one by name, giving the limit', () => {
+    expect(csvSizeProblem('everything.csv', CSV_MAX_BYTES + 1)).toBe(
+      'everything.csv is larger than 1 MB, the most a catalog CSV can be.',
+    );
+  });
+});
+
 describe('limits', () => {
   it("match the catalog builder's, so the form refuses what the server would", () => {
     expect(MAX_PHOTOS).toBe(builder.MAX_PHOTOS);
@@ -136,8 +152,10 @@ describe('limits', () => {
     expect(CSV_ROW_LIMIT).toBe(csv.ROW_LIMIT);
   });
 
-  it('are given to sellers in MB of image', () => {
+  it('are given to sellers in MB', () => {
     expect(PHOTO_MB).toBe(3.75);
     expect(PHOTOS_MB).toBe(15);
+    expect(CSV_MAX_BYTES).toBe(1024 * 1024);
+    expect(CSV_MB).toBe(1);
   });
 });

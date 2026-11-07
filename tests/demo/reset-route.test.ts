@@ -84,6 +84,7 @@ describe('POST /api/demo/reset', () => {
         jobs: 1,
         mandates: 1,
         wallets: 0,
+        passkeys: 0,
       },
       seeded: { buyers: 1, sellers: 2, products: 7, flagged: 1 },
     });

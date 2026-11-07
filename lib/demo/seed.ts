@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { and, eq, gte, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { demoBuyerId } from '@/lib/app-deps';
 import { screenRow } from '@/lib/catalog/build';
@@ -8,6 +8,8 @@ import { parseCatalogCsv } from '@/lib/catalog/csv';
 import { AGENT_INSTRUCTIONS_FLAG } from '@/lib/catalog/onboard';
 import type { Db } from '@/lib/db/client';
 import {
+  buyerPasskeys,
+  buyers,
   disputes,
   jobs,
   mandates,
@@ -22,7 +24,7 @@ import {
   wallets,
 } from '@/lib/db/schema';
 import { type Category, isCategory } from '@/lib/domain/categories';
-import { DEMO_SELLER_SLUG } from './personas';
+import { DEMO_BUYER_NAME, DEMO_SELLER_SLUG } from './personas';
 
 // The demo's starting point: the buyer Priya, Ravi's Spice Co. with the listings in its catalog CSV,
 // and Gadget Hub with one pair of earbuds. Nothing here calls a model or the market: listings are
@@ -121,6 +123,8 @@ export type Removed = {
   jobs: number;
   mandates: number;
   wallets: number;
+  /** The demo buyer's passkeys. Every visitor shares that buyer, so each device must be able to register its own. */
+  passkeys: number;
 };
 
 export type ResetResult = { removed: Removed; seeded: SeedResult };
@@ -142,8 +146,8 @@ export class DemoBusy extends Error {
 
 /**
  * Puts the demo back to where the seed leaves it: removes every purchase with its events, receipt,
- * payouts, refunds and disputes, every seller order, job and mandate, and every wallet that is not
- * linked, then seeds again, all in one transaction. A linked wallet is kept, because linking again
+ * payouts, refunds and disputes, every seller order, job and mandate, every wallet that is not
+ * linked and the demo buyer's passkeys, then seeds again, all in one transaction. A linked wallet is kept, because linking again
  * needs the buyer to approve at PayPal in a browser; `full` removes it too. Buyers, sellers and
  * products stay, and so do the model call log, which the daily spend cap sums, and the webhook
  * events, which keep each PayPal event from being processed twice. Throws, removing nothing, when
@@ -178,6 +182,12 @@ export async function resetDemo(db: Db, options: ResetOptions): Promise<ResetRes
           .delete(wallets)
           .where(options.full ? undefined : ne(wallets.status, 'linked'))
           .returning({ id: wallets.id })
+      ).length,
+      passkeys: (
+        await tx
+          .delete(buyerPasskeys)
+          .where(inArray(buyerPasskeys.buyerId, tx.select({ id: buyers.id }).from(buyers).where(eq(buyers.name, DEMO_BUYER_NAME))))
+          .returning({ id: buyerPasskeys.id })
       ).length,
     };
     return { removed, seeded: await seedDemo(tx, { payeeEmail }) };

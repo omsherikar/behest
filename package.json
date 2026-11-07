@@ -21,6 +21,8 @@
     "@anthropic-ai/sdk": "1.6.0",
     "@electric-sql/pglite": "^0.5.15",
     "@paypal/agent-toolkit": "1.11.0",
+    "@simplewebauthn/browser": "14.0.0",
+    "@simplewebauthn/server": "14.0.3",
     "ag-grid-community": "36.2.0",
     "ag-grid-react": "36.2.0",
     "ag-studio": "3.0.0",

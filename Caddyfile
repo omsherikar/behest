@@ -1,0 +1,8 @@
+# Serves Behest on the domain in DOMAIN. Caddy gets and renews its HTTPS certificate on its own,
+# redirects http to https, and passes every request to the app. It records the address that
+# connected to it as the right-most X-Forwarded-For entry, which is where the app's rate limits look
+# with TRUSTED_PROXY_HOPS=1. Streamed responses, such as a shopping run's progress, pass straight through.
+
+{$DOMAIN} {
+	reverse_proxy app:3000
+}

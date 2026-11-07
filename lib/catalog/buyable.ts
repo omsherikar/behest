@@ -3,8 +3,8 @@ import type { Db } from '@/lib/db/client';
 import { products } from '@/lib/db/schema';
 
 // What an agent can buy: no listing flagged as text aimed at AI agents, and nothing sold out. The
-// public seller catalog route lists products by this rule. The shopping agent's tools do not use it
-// yet; once they do, both offer agents the same products.
+// public seller catalog route and the shopping agent's tools both list products by this rule, so
+// they offer agents the same products.
 
 /**
  * A product that can be bought: its listing carries no flag, and it is in stock or its seller does

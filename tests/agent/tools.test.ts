@@ -384,6 +384,23 @@ describe('get_product', () => {
     expect(await call('get_product', { sellerSlug: 'ravi-spices', sku: 'NOPE-1' })).toBe(notFound);
     expect(await call('get_product', { sellerSlug: 'green-pantry', sku: 'TUR-100' })).toBe(notFound);
   });
+
+  it('does not find a sold-out listing, and finds one whose stock is not tracked', async () => {
+    const { call } = await setup({
+      extra: [
+        { sku: 'GP-CLOVE-0', title: 'Cloves 50g', priceCents: 300, stock: 0 },
+        { sku: 'GP-CLOVE', title: 'Cloves 100g', priceCents: 500, stock: null },
+      ],
+    });
+
+    expect(await call('get_product', { sellerSlug: 'green-pantry', sku: 'GP-CLOVE-0' })).toBe(
+      'No listing with that SKU at that seller. Use search_sellers to find one.',
+    );
+    expect(json(await call('get_product', { sellerSlug: 'green-pantry', sku: 'GP-CLOVE' }))).toMatchObject({
+      sku: 'GP-CLOVE',
+      stock: null,
+    });
+  });
 });
 
 describe('search_market', () => {

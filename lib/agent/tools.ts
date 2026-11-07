@@ -1,7 +1,8 @@
 import { betaZodTool } from '@anthropic-ai/sdk/helpers/beta/zod';
 import type { BetaRunnableTool } from '@anthropic-ai/sdk/lib/tools/BetaRunnableTool';
-import { and, arrayContains, asc, eq, gt, ilike, isNull, lte, not, or } from 'drizzle-orm';
+import { and, asc, eq, ilike, lte, or } from 'drizzle-orm';
 import { z } from 'zod';
+import { buyable } from '@/lib/catalog/buyable';
 import type { Db } from '@/lib/db/client';
 import { products, sellers } from '@/lib/db/schema';
 import { CATEGORIES } from '@/lib/domain/categories';
@@ -12,7 +13,8 @@ import { quoteUntrusted } from './quote';
 // The shopping agent's four tools. The agent finds products at Behest sellers, compares market prices
 // and proposes purchases, but it never sets a price: a proposal names a seller, SKUs and quantities,
 // and the purchase flow prices the cart from the catalog. Every string a seller or the market wrote
-// reaches the model quoted as untrusted data. Prices, stock, SKUs and slugs are plain fields.
+// reaches the model quoted as untrusted data. Prices, stock, SKUs and slugs are plain fields. The
+// agent sees only products that can be bought, by the rule the public seller catalogs list them by.
 
 /** Market prices for a search, from Channel3. */
 export type MarketSearch = (
@@ -42,8 +44,6 @@ const MARKET_RESULTS = 5;
 const DESCRIPTION_MAX = 2000;
 /** The largest value of a Postgres integer, the column type of price. */
 const INT_MAX = 2_147_483_647;
-/** The screening flag on listings that speak to AI agents. Agents never see them. */
-const AGENT_INSTRUCTIONS = 'agent_instructions';
 
 export const MARKET_NOTE = 'For price comparison only. These cannot be purchased.';
 const MARKET_UNAVAILABLE = 'Market prices are not available right now.';
@@ -106,9 +106,6 @@ function containsPattern(query: string): string {
   return `%${query.replaceAll(/[\\%_]/g, (char) => `\\${char}`)}%`;
 }
 
-/** Listings that screening did not flag as speaking to AI agents. */
-const unflagged = () => not(arrayContains(products.flags, [AGENT_INSTRUCTIONS]));
-
 /** The shopping agent's tools: search_sellers, search_market, get_product and propose_purchase. */
 export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<any>[] { // eslint-disable-line @typescript-eslint/no-explicit-any -- each tool has its own input type
   // The tool loop sends each schema in the form strict mode accepts; parse still checks all of it.
@@ -138,8 +135,7 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<
             or(ilike(products.title, pattern), ilike(products.description, pattern)),
             category === undefined ? undefined : eq(products.category, category),
             maxPriceCents === undefined ? undefined : lte(products.priceCents, maxPriceCents),
-            or(isNull(products.stock), gt(products.stock, 0)),
-            unflagged(),
+            buyable,
           ),
         )
         .orderBy(asc(products.priceCents), asc(sellers.slug), asc(products.sku))
@@ -202,7 +198,7 @@ export function buildShoppingTools(ctx: ShoppingToolsContext): BetaRunnableTool<
         })
         .from(products)
         .innerJoin(sellers, eq(products.sellerId, sellers.id))
-        .where(and(eq(sellers.slug, sellerSlug), eq(products.sku, sku), unflagged()));
+        .where(and(eq(sellers.slug, sellerSlug), eq(products.sku, sku), buyable));
       if (!row) return PRODUCT_NOT_FOUND;
       return JSON.stringify({
         ...row,

@@ -4,29 +4,39 @@ import { useSwitchPersona } from '@/components/shell/use-switch-persona';
 import { Notice } from '@/components/ui/notice';
 import { PERSONA_INFO } from '@/lib/ui/personas';
 
-// The three personas of the demo, each with what a visitor can do as it and the pages it opens.
-// Choosing one starts its session and opens its home page.
+// The three personas of the demo, as three cards: what a visitor can do as each and the pages it
+// opens. Choosing one starts its session and opens its home page.
 
 export function PersonaPicker() {
   const { switchTo, pending, failed } = useSwitchPersona();
 
   return (
     <div>
-      <ul aria-label="Personas" className="divide-y divide-line overflow-hidden rounded-panel border border-line bg-panel">
+      <ul aria-label="Personas" className="grid gap-4 md:grid-cols-3">
         {PERSONA_INFO.map(({ persona, name, does, home, nav }) => (
-          <li key={persona}>
+          <li key={persona} className="min-w-0">
             <button
               type="button"
               onClick={() => switchTo(persona, home)}
               disabled={pending !== null}
-              className="flex w-full flex-col gap-1 px-4 py-4 text-left transition-colors hover:bg-raised focus-visible:outline-offset-[-2px] disabled:cursor-wait sm:px-5"
+              className="group flex h-full w-full flex-col items-start rounded-frame border border-line bg-surface p-6 text-left shadow-[var(--highlight)] transition-colors hover:border-line-strong hover:bg-raised disabled:cursor-wait"
             >
-              <span className="flex items-baseline gap-2">
-                <span className="text-lead font-medium text-text">{name}</span>
+              <span className="flex w-full items-baseline justify-between gap-3">
+                <span className="text-heading font-medium text-text">{name}</span>
                 {pending === persona && <span className="text-meta text-muted">Opening...</span>}
               </span>
-              <span className="text-body text-muted">{does}</span>
-              <span className="mt-1 text-meta text-muted">{nav.map((item) => item.label).join(', ')}</span>
+              <span className="mt-2 text-body text-muted">{does}</span>
+              <span className="mt-6 mb-6 flex flex-wrap gap-1.5">
+                {nav.map((item) => (
+                  <span key={item.href} className="rounded-full border border-line px-2.5 py-0.5 text-meta text-muted">
+                    {item.label}
+                  </span>
+                ))}
+              </span>
+              {/* The card is the button; this pill only shows it. */}
+              <span aria-hidden className="mt-auto inline-flex h-9 items-center rounded-full border border-line-strong px-4 text-meta font-medium text-text transition-colors group-hover:border-transparent group-hover:bg-text group-hover:text-on-fill">
+                Open as {name.toLowerCase()}
+              </span>
             </button>
           </li>
         ))}

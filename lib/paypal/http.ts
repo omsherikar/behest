@@ -5,6 +5,11 @@
 const BASE_URL = 'https://api-m.sandbox.paypal.com';
 const TOKEN_PATH = '/v1/oauth2/token';
 const MAX_ATTEMPTS = 4;
+/**
+ * How long PayPal has to answer one request, body included. A request still waiting then is
+ * abandoned and throws, as a lost connection does, so nothing waits on PayPal for long.
+ */
+const REQUEST_TIMEOUT_MS = 20_000;
 
 export class PayPalApiError extends Error {
   constructor(
@@ -45,6 +50,7 @@ async function accessToken(): Promise<string> {
     },
     body: 'grant_type=client_credentials',
     cache: 'no-store',
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new PayPalApiError(res.status, TOKEN_PATH, await res.text());
 
@@ -54,8 +60,8 @@ async function accessToken(): Promise<string> {
   return access_token;
 }
 
-// Network errors are not retried here: they propagate so the caller, which knows whether money may
-// have moved, decides whether to repeat the call with the same request id.
+// Network errors and timeouts are not retried here: they propagate so the caller, which knows whether
+// money may have moved, decides whether to repeat the call with the same request id.
 export async function paypalRequest<T>(
   method: 'GET' | 'POST' | 'PATCH',
   path: string,
@@ -74,7 +80,13 @@ export async function paypalRequest<T>(
     headers.set('Authorization', `Bearer ${await accessToken()}`);
     if (opts.requestId !== undefined) headers.set('PayPal-Request-Id', opts.requestId);
 
-    const res = await fetch(`${BASE_URL}${path}`, { method, headers, body, cache: 'no-store' });
+    const res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     const text = await res.text();
     if (res.ok) return (text ? JSON.parse(text) : undefined) as T;
 

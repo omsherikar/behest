@@ -8,7 +8,9 @@ export type { PurchaseStatus };
  * change. Staying in the same status is not a transition, so no status lists itself.
  */
 export const ALLOWED: Readonly<Record<PurchaseStatus, readonly PurchaseStatus[]>> = {
-  proposed: ['blocked', 'charging', 'awaiting_approval'],
+  // To `failed` only when a proposal is abandoned before it reached a charge or an approval: no money
+  // moved, so its budget is released.
+  proposed: ['blocked', 'charging', 'awaiting_approval', 'failed'],
   awaiting_approval: ['charging', 'cancelled'],
   // Back to `awaiting_approval` only when PayPal refuses to capture an approval order with
   // ORDER_NOT_APPROVED: no money moved, and the buyer can still approve the order.

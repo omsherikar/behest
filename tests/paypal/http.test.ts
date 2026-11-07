@@ -50,6 +50,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('access token', () => {
@@ -254,5 +255,47 @@ describe('requests', () => {
     const result = await paypalRequest('PATCH', '/v2/checkout/orders/O1', { body: [{ op: 'replace' }] });
 
     expect(result).toBeUndefined();
+  });
+});
+
+describe('timeout', () => {
+  it('gives every request, the token request included, its own 20 second timeout', async () => {
+    const timeouts = vi.spyOn(AbortSignal, 'timeout');
+    const f = fakeFetch([token('T1'), { method: 'POST', path: '/v2/things', body: { id: 'X1' } }]);
+    const signals: (AbortSignal | null | undefined)[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      signals.push(init?.signal);
+      return f.fetch(input, init);
+    });
+
+    await paypalRequest('POST', '/v2/things', { body: {}, requestId: 'r1' });
+
+    expect(timeouts.mock.calls).toEqual([[20_000], [20_000]]);
+    expect(signals).toHaveLength(2);
+    expect(signals.every((signal) => signal instanceof AbortSignal)).toBe(true);
+    expect(signals[0]).not.toBe(signals[1]);
+  });
+
+  it('throws when PayPal does not answer in time, without retrying, so the caller treats the request as unknown', async () => {
+    const timedOut = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timedOut.signal);
+    const f = fakeFetch([token('T1')]);
+    const apiRequests: string[] = [];
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === TOKEN_PATH) return f.fetch(input, init);
+      apiRequests.push(String(input));
+      // PayPal never answers: fetch rejects with the signal's reason once it fires, as real fetch does.
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+      });
+    });
+
+    const request = paypalRequest('POST', '/v2/checkout/orders', { body: {}, requestId: 'p1:charge' });
+    await vi.waitFor(() => expect(apiRequests).toHaveLength(1));
+    timedOut.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+
+    await expect(request).rejects.toMatchObject({ name: 'TimeoutError' });
+    expect(apiRequests).toHaveLength(1);
+    expect(sleeps).toEqual([]);
   });
 });

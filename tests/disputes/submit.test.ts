@@ -1,9 +1,10 @@
 import { eq } from 'drizzle-orm';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Db } from '@/lib/db/client';
 import { disputes, receipts } from '@/lib/db/schema';
 import type { Narrative } from '@/lib/disputes/narrative';
 import { MAX_NOTES_CHARS, SubmitEvidenceError, submitEvidence } from '@/lib/disputes/submit';
+import { PayPalApiError } from '@/lib/paypal/http';
 import type { FakePaypal } from '@/tests/helpers/fake-paypal';
 import { setUpCaptured } from '@/tests/helpers/purchase-deps';
 import { chargedDispute, openDispute, PAYPAL_DISPUTE_ID } from '@/tests/helpers/seed-dispute';
@@ -15,8 +16,14 @@ beforeAll(async () => {
   await createTestDb();
 }, 60_000);
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 const APP_URL = 'https://behest.example.com';
 const SUBMITTED_AT = new Date('2026-11-07T15:30:00.250Z');
+const LOGGED = '[disputes] PayPal did not take the evidence:';
+const EVIDENCE_PATH = `/v1/customer/disputes/${PAYPAL_DISPUTE_ID}/provide-evidence`;
 
 const NARRATIVE: Narrative = {
   summary: 'The buyer authorized this purchase in a signed mandate, and Behest charged exactly the cart its signed receipt covers.',
@@ -156,13 +163,15 @@ describe('submitEvidence', () => {
     expect(sent).toBe(1);
   });
 
-  it('releases the submission when PayPal fails, so the operator can submit again', async () => {
+  it('logs the failure and releases the submission when PayPal fails, so the operator can submit again', async () => {
     const { db, paypal, disputeId } = await chargedDispute();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     paypal.failNext('provideEvidence', 'network');
 
     const failed = submitEvidence(depsFor(db, paypal), { disputeId, narrative: NARRATIVE });
 
     await expect(failed).rejects.toMatchObject({ code: 'paypal_failed', cause: expect.any(TypeError) });
+    expect(logged).toHaveBeenCalledWith(LOGGED, expect.any(TypeError));
     expect((await disputeRow(db, disputeId)).submittedAt).toBeNull();
 
     const retriedAt = new Date('2026-11-07T15:31:00Z');
@@ -172,8 +181,52 @@ describe('submitEvidence', () => {
     expect((await disputeRow(db, disputeId)).submittedAt).toEqual(retriedAt);
   });
 
+  it.each([
+    [400, 'paypal_refused'],
+    [422, 'paypal_refused'],
+    [429, 'paypal_failed'],
+    [500, 'paypal_failed'],
+    [503, 'paypal_failed'],
+  ] as const)('reads a PayPal %i as %s, releasing the submission', async (status, code) => {
+    const { db, paypal, disputeId } = await chargedDispute();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const answer = new PayPalApiError(status, EVIDENCE_PATH, '{"name":"PAYPAL_SAYS_NO"}');
+    vi.spyOn(paypal, 'provideEvidence').mockRejectedValueOnce(answer);
+
+    await expect(submitEvidence(depsFor(db, paypal), { disputeId, narrative: NARRATIVE })).rejects.toMatchObject({ code, cause: answer });
+    expect((await disputeRow(db, disputeId)).submittedAt).toBeNull();
+  });
+
+  it("logs PayPal's failure before the release, and throws both errors when the release fails too", async () => {
+    const { db, paypal, disputeId } = await chargedDispute();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const paypalFailure = new TypeError('fetch failed');
+    const releaseFailure = new Error('the database connection was lost');
+    let loggedBeforeRelease = false;
+    vi.spyOn(paypal, 'provideEvidence').mockImplementation(async () => {
+      vi.spyOn(db, 'update').mockImplementation(() => {
+        loggedBeforeRelease = logged.mock.calls.length > 0;
+        throw releaseFailure;
+      });
+      throw paypalFailure;
+    });
+
+    const failed = submitEvidence(depsFor(db, paypal), { disputeId, narrative: NARRATIVE });
+
+    await expect(failed).rejects.toThrow(AggregateError);
+    await expect(failed).rejects.toMatchObject({
+      errors: [paypalFailure, releaseFailure],
+      message: expect.stringContaining('PayPal did not take the evidence'),
+    });
+    expect(logged).toHaveBeenCalledWith(LOGGED, paypalFailure);
+    expect(loggedBeforeRelease).toBe(true);
+    vi.mocked(db.update).mockRestore();
+    expect((await disputeRow(db, disputeId)).submittedAt).toEqual(SUBMITTED_AT);
+  });
+
   it('releases only its own submission when PayPal fails', async () => {
     const { db, paypal, disputeId } = await chargedDispute();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
     const otherAt = new Date('2026-11-07T15:30:05Z');
     vi.spyOn(paypal, 'provideEvidence').mockImplementation(async () => {
       await db.update(disputes).set({ submittedAt: otherAt }).where(eq(disputes.id, disputeId));

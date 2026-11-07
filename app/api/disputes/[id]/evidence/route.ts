@@ -41,6 +41,7 @@ const REFUSALS: Record<Exclude<SubmitEvidenceErrorCode, 'notes_too_long'>, [stat
   unknown_dispute: [404, 'There is no such dispute.'],
   unmatched: [409, 'This dispute is not matched to a purchase, so Behest has no evidence for it.'],
   already_submitted: [409, 'Evidence for this dispute was already submitted.'],
+  paypal_refused: [502, 'PayPal refused the evidence. Check the dispute at PayPal before trying again.'],
   paypal_failed: [502, 'PayPal did not take the evidence. Submit it again to retry.'],
 };
 
@@ -90,9 +91,8 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/dispute
     await submitEvidence({ db, paypal, now: () => new Date(), appUrl: base }, { disputeId: id, narrative });
   } catch (failure) {
     if (!(failure instanceof SubmitEvidenceError)) throw failure;
-    if (failure.code === 'notes_too_long') return error(400, failure.message);
-    if (failure.code === 'paypal_failed') console.error('[disputes] PayPal did not take the evidence:', failure.cause);
-    return refuse(failure.code);
+    // submitEvidence has logged PayPal's own error, which never reaches the client.
+    return failure.code === 'notes_too_long' ? error(400, failure.message) : refuse(failure.code);
   }
   return Response.json({ narrative });
 }

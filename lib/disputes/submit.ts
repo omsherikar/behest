@@ -1,6 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Db } from '@/lib/db/client';
 import { disputes, receipts } from '@/lib/db/schema';
+import { PayPalApiError } from '@/lib/paypal/http';
 import type { PaypalPort } from '@/lib/paypal/port';
 import type { Narrative } from './narrative';
 
@@ -11,15 +12,27 @@ import type { Narrative } from './narrative';
 // A submission is claimed in the database first: a conditional update records the time and the
 // narrative only while none is recorded, and commits before PayPal is asked, so no lock is held
 // while PayPal answers and a second submission, even one made at the same moment, is refused. When
-// PayPal fails, the claim is released so the operator can submit again. The client sends a fixed
-// PayPal-Request-Id per dispute, so a retry after an answer that was lost is not applied twice.
+// PayPal fails or refuses, its error is logged and the claim is released so the operator can submit
+// again. The client sends a fixed PayPal-Request-Id per dispute, so a retry after an answer that was
+// lost is not applied twice.
 
 /** The most characters PayPal takes in an evidence's notes. */
 export const MAX_NOTES_CHARS = 2_000;
 
-export type SubmitEvidenceErrorCode = 'unknown_dispute' | 'unmatched' | 'already_submitted' | 'notes_too_long' | 'paypal_failed';
+export type SubmitEvidenceErrorCode =
+  | 'unknown_dispute'
+  | 'unmatched'
+  | 'already_submitted'
+  | 'notes_too_long'
+  | 'paypal_refused'
+  | 'paypal_failed';
 
-/** Why evidence was not submitted. For `paypal_failed` the cause is the error PayPal's call threw. */
+/**
+ * Why evidence was not submitted. `paypal_refused` is PayPal answering with a 4xx other than 429,
+ * which sending the same evidence again would not change. `paypal_failed` is any other failure of
+ * PayPal's call: no answer, a 5xx or a 429, which a later attempt may get past. For both, the
+ * cause is the error PayPal's call threw.
+ */
 export class SubmitEvidenceError extends Error {
   readonly code: SubmitEvidenceErrorCode;
   constructor(code: SubmitEvidenceErrorCode, message: string, options?: { cause?: unknown }) {
@@ -51,14 +64,20 @@ function renderNotes(narrative: Narrative, receipt: { id: string; verifyUrl: str
 
 const count = (n: number) => n.toLocaleString('en-US');
 
+/** Whether PayPal answered that it will not take the request, rather than failing to answer it. */
+const isRefusal = (failure: unknown) =>
+  failure instanceof PayPalApiError && failure.status >= 400 && failure.status < 500 && failure.status !== 429;
+
 /**
  * Sends the narrative to PayPal as the evidence for the dispute whose row id is `disputeId`, and
  * stores it with the time from `deps.now`. The receipt's verification URL is built on
  * `deps.appUrl`, Behest's public origin. The caller has already kept only the citations of items
  * the dispute's evidence pack holds. Throws a SubmitEvidenceError, sending and storing nothing, for
  * a dispute that does not exist, is not matched to a purchase or was already submitted, and for
- * notes longer than PayPal takes. When PayPal fails it throws one with code `paypal_failed`, after
- * releasing the submission.
+ * notes longer than PayPal takes. When PayPal's call throws, it logs PayPal's error, releases the
+ * submission and throws one with code `paypal_refused` or `paypal_failed`. If the release fails too,
+ * it throws an AggregateError of PayPal's error and the release's, and the dispute still reads as
+ * submitted.
  */
 export async function submitEvidence(
   deps: { db: Db; paypal: PaypalPort; now: () => Date; appUrl: string },
@@ -104,11 +123,22 @@ export async function submitEvidence(
   try {
     await deps.paypal.provideEvidence(dispute.paypalDisputeId, { notes });
   } catch (failure) {
-    // Only this submission's claim is released, never one recorded since.
-    await db
-      .update(disputes)
-      .set({ submittedAt: null })
-      .where(and(eq(disputes.id, disputeId), eq(disputes.submittedAt, submittedAt)));
+    // Logged before the release, so it is on record that PayPal never took the evidence even when
+    // the release fails and the dispute goes on reading as submitted.
+    console.error('[disputes] PayPal did not take the evidence:', failure);
+    try {
+      // Only this submission's claim is released, never one recorded since.
+      await db
+        .update(disputes)
+        .set({ submittedAt: null })
+        .where(and(eq(disputes.id, disputeId), eq(disputes.submittedAt, submittedAt)));
+    } catch (releaseFailure) {
+      throw new AggregateError(
+        [failure, releaseFailure],
+        `PayPal did not take the evidence for dispute ${disputeId}, and its submission could not be released, so the dispute still reads as submitted`,
+      );
+    }
+    if (isRefusal(failure)) throw new SubmitEvidenceError('paypal_refused', 'PayPal refused the evidence', { cause: failure });
     throw new SubmitEvidenceError('paypal_failed', 'PayPal did not take the evidence', { cause: failure });
   }
 }

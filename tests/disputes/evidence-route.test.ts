@@ -6,6 +6,7 @@ import { appDb, appPaypal } from '@/lib/app-deps';
 import type { Db } from '@/lib/db/client';
 import { disputes, receipts } from '@/lib/db/schema';
 import type { Narrative } from '@/lib/disputes/narrative';
+import { PayPalApiError } from '@/lib/paypal/http';
 import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
 import type { FakePaypal } from '@/tests/helpers/fake-paypal';
 import { chargedDispute, openDispute, PAYPAL_DISPUTE_ID } from '@/tests/helpers/seed-dispute';
@@ -206,6 +207,29 @@ describe('POST /api/disputes/[id]/evidence', () => {
 
     expect((await submit(NARRATIVE)).status).toBe(200);
     expect(paypal.callsTo('provideEvidence')).toHaveLength(2);
+  });
+
+  it.each([
+    [422, 'PayPal refused the evidence. Check the dispute at PayPal before trying again.'],
+    [400, 'PayPal refused the evidence. Check the dispute at PayPal before trying again.'],
+    [503, 'PayPal did not take the evidence. Submit it again to retry.'],
+  ])('answers 502 to a PayPal %i with a fixed message and none of what PayPal sent', async (status, message) => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const answer = new PayPalApiError(
+      status,
+      `/v1/customer/disputes/${PAYPAL_DISPUTE_ID}/provide-evidence`,
+      '{"name":"UNPROCESSABLE_ENTITY","details":[{"issue":"CANNOT_PROVIDE_EVIDENCE"}],"debug_id":"f00dfeed"}',
+    );
+    vi.spyOn(paypal, 'provideEvidence').mockRejectedValueOnce(answer);
+
+    const response = await POST(await request(disputeId, NARRATIVE), { params: Promise.resolve({ id: disputeId }) });
+    const text = await response.text();
+
+    expect(response.status).toBe(502);
+    expect(JSON.parse(text)).toEqual(error(message));
+    expect(text).not.toMatch(/UNPROCESSABLE|CANNOT_PROVIDE|f00dfeed|provide-evidence/);
+    expect(logged).toHaveBeenCalledWith('[disputes] PayPal did not take the evidence:', answer);
+    expect((await disputeRow()).submittedAt).toBeNull();
   });
 
   it.each([

@@ -31,6 +31,8 @@ export function TopBar({
 }) {
   return (
     <header className={cn('inset-x-0 top-0 z-40 pt-3', fixed ? 'fixed' : 'sticky')}>
+      {/* A fade from black behind the bar, so nothing scrolls into view in the gap above it. */}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-24 bg-linear-to-b from-black from-40% to-transparent" />
       <div className="container-page">
         <div className="glass flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-[22px] p-2 pl-4 lg:grid lg:h-16 lg:grid-cols-[1fr_auto_1fr] lg:py-0 lg:pr-2.5 lg:pl-5">
           <Wordmark className="lg:justify-self-start" />

@@ -7,6 +7,7 @@ import { isWordedRefusal, NarrativeRequest, NOT_JSON, uncitedClaims, WORDED_REFU
 import { assembleEvidencePack } from '@/lib/disputes/pack';
 import { SubmitEvidenceError, type SubmitEvidenceErrorCode, submitEvidence } from '@/lib/disputes/submit';
 import { FORM_BODY_BYTES, readBody } from '@/lib/http/read-body';
+import { clientAddress, EVIDENCE_SUBMIT_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { personaRefusal } from '@/lib/session';
 
 // Submits the narrative the operator reviewed to PayPal as the dispute's evidence, exactly as the
@@ -24,6 +25,7 @@ const REFUSALS: Record<Exclude<SubmitEvidenceErrorCode, keyof typeof WORDED_REFU
   paypal_failed: [502, 'PayPal did not take the evidence. Submit it again to retry.'],
 };
 
+const ROUTE = 'dispute_evidence';
 const error = (status: number, message: string) => Response.json({ error: { message } }, { status });
 const refuse = (code: keyof typeof REFUSALS) => error(...REFUSALS[code]);
 
@@ -34,6 +36,9 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/dispute
 
   const refusal = await personaRefusal(request, 'operator');
   if (refusal) return refusal;
+  if (!rateLimit(`${ROUTE}:${clientAddress(request)}:operator`, EVIDENCE_SUBMIT_LIMIT)) {
+    return error(429, 'Too many submissions at once. Try again in a minute.');
+  }
 
   const { id } = await ctx.params;
   // Dispute ids are UUIDs; Postgres would refuse anything else as an error rather than find nothing.

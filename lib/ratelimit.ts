@@ -26,6 +26,12 @@ export const PUBLIC_WRITE_LIMIT: Readonly<RateLimitOptions> = { capacity: 20, re
 export const BUYER_MESSAGE_LIMIT: Readonly<RateLimitOptions> = { capacity: 5, refillPerMinute: 5 };
 
 /**
+ * The limit for an operator's evidence submissions: bursts of 5, then 5 a minute. Each one reads the
+ * dispute at PayPal before anything is sent, and any visitor can pick the operator persona.
+ */
+export const EVIDENCE_SUBMIT_LIMIT: Readonly<RateLimitOptions> = { capacity: 5, refillPerMinute: 5 };
+
+/**
  * The most keys a limiter ever tracks. Keys seen least recently are forgotten a generation at a time,
  * so some go before this bound is reached; forgetting a key only hands it a full bucket again, which
  * an idle key would have refilled to anyway.

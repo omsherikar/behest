@@ -7,6 +7,7 @@ import type { Db } from '@/lib/db/client';
 import { disputes, receipts } from '@/lib/db/schema';
 import type { Narrative } from '@/lib/disputes/narrative';
 import { PayPalApiError } from '@/lib/paypal/http';
+import { EVIDENCE_SUBMIT_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
 import type { FakePaypal } from '@/tests/helpers/fake-paypal';
 import { jwks } from '@/tests/helpers/purchase-deps';
@@ -17,6 +18,10 @@ import { createTestDb } from '@/tests/helpers/test-db';
 vi.mock('next/server', async (importOriginal) => ({
   ...(await importOriginal<typeof import('next/server')>()),
   connection: vi.fn(async () => {}),
+}));
+vi.mock('@/lib/ratelimit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ratelimit')>()),
+  rateLimit: vi.fn(() => true),
 }));
 vi.mock('@/lib/app-deps', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/app-deps')>()),
@@ -171,6 +176,16 @@ describe('POST /api/disputes/[id]/evidence', () => {
   ])('answers 404 to %s', async (_, id) => {
     expect(await submit(NARRATIVE, { id: id() })).toEqual({ status: 404, body: error('There is no such dispute.') });
     expect(paypal.callsTo('provideEvidence')).toEqual([]);
+  });
+
+  it('answers 429 once the operator has submitted too often, without reading or sending anything at PayPal', async () => {
+    vi.mocked(rateLimit).mockReturnValueOnce(false);
+
+    expect(await submit(NARRATIVE)).toEqual({ status: 429, body: error('Too many submissions at once. Try again in a minute.') });
+    expect(rateLimit).toHaveBeenCalledWith(expect.stringMatching(/^dispute_evidence:.*:operator$/), EVIDENCE_SUBMIT_LIMIT);
+    expect(paypal.callsTo('getDispute')).toEqual([]);
+    expect(paypal.callsTo('provideEvidence')).toEqual([]);
+    expect(await disputeRow()).toMatchObject({ narrative: null, submittedAt: null });
   });
 
   it('answers 409 to a dispute not matched to a purchase, submitting nothing', async () => {

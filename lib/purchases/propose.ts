@@ -8,6 +8,7 @@ import type { Verdict } from '@/lib/domain/verdict';
 import { evaluateGateSafely, type CatalogEntry, type GateInput } from '@/lib/gate/evaluate';
 import { periodStart } from '@/lib/gate/period';
 import { quoteAgentText } from '@/lib/gate/rules/check';
+import { mandateActive } from '@/lib/gate/rules/mandate';
 import { applyIntent } from '@/lib/intent/apply';
 import { hashOf } from '@/lib/receipts/canonical';
 import { startApproval } from './approval';
@@ -20,8 +21,9 @@ import { COUNTS_AGAINST_BUDGET } from './transitions';
 // 5.2 and 6.2 to 6.4). The gate decides inside one transaction that holds the buyer's mandate row,
 // and the purchase is inserted before that transaction commits, so its total is reserved against the
 // budget at once and two proposals can never both fit into the same remaining budget. The intent
-// check then runs with no lock held and can only tighten the gate's verdict. The final verdict is
-// routed: BLOCK ends the purchase, ALLOW charges the saved wallet, ASK sends the buyer to PayPal.
+// check then runs with no lock held and can only tighten the gate's verdict, and the mandate is
+// checked again before the final verdict is stored. The final verdict is routed: BLOCK ends the
+// purchase, ALLOW charges the saved wallet, ASK sends the buyer to PayPal.
 
 /** A purchase the shopping agent proposes for a buyer. */
 export type ProposalRequest = {
@@ -34,13 +36,22 @@ export type ProposalRequest = {
   proposal: PurchaseProposal;
 };
 
-/** A reserved purchase: its id, the gate's verdict, and what the intent check reads, or null when the gate blocked it. */
-type Reserved = { purchaseId: string; gateVerdict: Verdict; check: IntentInput | null };
+/**
+ * A reserved purchase: its id, the mandate it was checked against, the gate's verdict, and what the
+ * intent check reads, or null when the gate blocked it.
+ */
+type Reserved = { purchaseId: string; mandateId: string; gateVerdict: Verdict; check: IntentInput | null };
+
+/** The final verdict as stored, and why the purchase's mandate no longer authorizes it, if it does not. */
+type Recorded = { verdict: Verdict; mandateEnded: string | null };
 
 const HOUR_MS = 60 * 60 * 1000;
 
 /** The reason recorded when the intent check throws, or answers with something that is not a result. */
 const CHECK_FAILED = 'internal_error';
+
+/** What blocks a purchase whose mandate cannot be read back with a valid policy. */
+const MANDATE_UNREADABLE = 'The mandate could not be checked again, so nothing was bought.';
 
 /** An intent check result as the purchase stores it. Anything else the check answers with counts as a failed check. */
 const IntentAnswer = z.object({
@@ -65,25 +76,29 @@ type LockedMandate = Pick<typeof mandates.$inferSelect, keyof typeof MANDATE_FIE
  * call to PayPal. Otherwise the intent check reads the buyer's own request and mandate beside the
  * cart, and its result can only tighten the gate's verdict: a check that throws, or answers with
  * something that is not a result, counts as unavailable, which sends the purchase to its buyer. The
- * result and the final verdict are stored, and the final verdict routed: BLOCK leaves the purchase
- * `blocked`, ALLOW charges the buyer's saved wallet with chargeAllowed, and ASK asks the buyer to
- * approve at PayPal with startApproval. Returns where the purchase then stands. Throws, recording
- * nothing, for a buyer who never had a mandate.
+ * result and the final verdict are stored by recordIntent, which blocks the purchase if its mandate
+ * was revoked or expired during the check. The final verdict is then routed: BLOCK leaves the
+ * purchase `blocked`, ALLOW charges the buyer's saved wallet with chargeAllowed, and ASK asks the
+ * buyer to approve at PayPal with startApproval. Returns where the purchase then stands. Throws,
+ * recording nothing, for a buyer who never had a mandate.
  */
 export async function proposePurchase(deps: PurchaseDeps, i: ProposalRequest): Promise<ProposalOutcome> {
-  const { purchaseId, gateVerdict, check } = await reservePurchase(deps, i);
+  const { purchaseId, mandateId, gateVerdict, check } = await reservePurchase(deps, i);
   if (!check) return purchaseOutcome(deps.db, purchaseId);
 
   const intent = await runIntentCheck(deps.intent, check);
-  const verdict = applyIntent(gateVerdict, intent);
-  await recordIntent(deps.db, purchaseId, intent, verdict);
-  switch (verdict) {
+  const recorded = await recordIntent(deps, { purchaseId, mandateId }, intent, applyIntent(gateVerdict, intent));
+  switch (recorded.verdict) {
     case 'ALLOW':
       return chargeAllowed(deps, purchaseId);
     case 'ASK':
       return startApproval(deps, purchaseId);
-    case 'BLOCK':
-      return purchaseOutcome(deps.db, purchaseId);
+    case 'BLOCK': {
+      const outcome = await purchaseOutcome(deps.db, purchaseId);
+      // The purchase has no column for why its mandate ended, so the reason is added here; its
+      // `mandate_changed` event keeps it.
+      return recorded.mandateEnded ? { ...outcome, reasons: [...outcome.reasons, recorded.mandateEnded] } : outcome;
+    }
   }
 }
 
@@ -157,7 +172,7 @@ async function reservePurchase({ db, now: clock }: Pick<PurchaseDeps, 'db' | 'no
       cart,
       agentRationale: i.proposal.rationale,
     };
-    return { purchaseId: purchase.id, gateVerdict: gate.verdict, check };
+    return { purchaseId: purchase.id, mandateId: mandate.id, gateVerdict: gate.verdict, check };
   });
 }
 
@@ -271,17 +286,48 @@ async function runIntentCheck(intent: PurchaseDeps['intent'], input: IntentInput
 }
 
 /**
- * Stores the intent check's result and the final verdict, logs them as the `intent` event, and moves
- * a purchase the check blocked to `blocked`, all in one transaction. The event carries the verdicts
- * only: the check's reasons can repeat seller-written titles, and stay on the purchase.
+ * Stores the intent check's result and the final verdict and logs them as the `intent` event, in one
+ * transaction that first reads the purchase's mandate again and holds its row FOR SHARE, so no
+ * confirmation can revoke it until the verdict is stored. The check ran with no lock held, so the
+ * mandate may have been revoked, by the buyer confirming a new one, or may have expired meanwhile;
+ * the final verdict is then BLOCK, logged with why as a `mandate_changed` event. A purchase blocked
+ * either way is moved to `blocked`. The events carry verdicts and Behest's own wording only: the
+ * check's reasons can repeat seller-written titles, and stay on the purchase.
  */
-async function recordIntent(db: Db, purchaseId: string, intent: IntentResult, verdict: Verdict): Promise<void> {
-  await db.transaction(async (tx) => {
+async function recordIntent(
+  { db, now }: Pick<PurchaseDeps, 'db' | 'now'>,
+  { purchaseId, mandateId }: { purchaseId: string; mandateId: string },
+  intent: IntentResult,
+  afterIntent: Verdict,
+): Promise<Recorded> {
+  return db.transaction(async (tx) => {
+    const mandateEnded = await whyMandateEnded(tx, mandateId, now());
+    const verdict: Verdict = mandateEnded ? 'BLOCK' : afterIntent;
     await tx
       .update(purchases)
       .set({ intent: { verdict: intent.verdict, reasons: intent.reasons }, finalVerdict: verdict })
       .where(eq(purchases.id, purchaseId));
-    await appendEvent(tx, purchaseId, 'intent', { verdict: intent.verdict, finalVerdict: verdict });
+    await appendEvent(tx, purchaseId, 'intent', { verdict: intent.verdict, finalVerdict: afterIntent });
+    if (mandateEnded) {
+      await appendEvent(tx, purchaseId, 'mandate_changed', { mandateId, reason: mandateEnded, finalVerdict: verdict });
+    }
     if (verdict === 'BLOCK') await transition(tx, purchaseId, 'proposed', 'blocked');
+    return { verdict, mandateEnded };
   });
+}
+
+/**
+ * Why the mandate no longer authorizes purchases at `now`, in the gate's words, or null while it is
+ * still active and unexpired. Locks the mandate's row FOR SHARE until the caller's transaction ends.
+ */
+async function whyMandateEnded(tx: Db, mandateId: string, now: Date): Promise<string | null> {
+  const [mandate] = await tx
+    .select({ status: mandates.status, expiresAt: mandates.expiresAt, policy: mandates.policy })
+    .from(mandates)
+    .where(eq(mandates.id, mandateId))
+    .for('share');
+  const policy = MandatePolicy.safeParse(mandate?.policy);
+  if (!mandate || !policy.success) return MANDATE_UNREADABLE;
+  const check = mandateActive({ mandate: { status: mandate.status, expiresAt: mandate.expiresAt }, now }, policy.data);
+  return check.result === 'pass' ? null : check.detail;
 }

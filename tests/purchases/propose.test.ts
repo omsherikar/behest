@@ -6,6 +6,7 @@ import type { PurchaseProposal } from '@/lib/domain/proposal';
 import { evaluateGate, type CatalogEntry } from '@/lib/gate/evaluate';
 import { GATE_RULES } from '@/lib/gate/rules';
 import type { IntentInput, IntentResult } from '@/lib/intent/types';
+import { confirmMandate } from '@/lib/mandate/confirm';
 import type { PurchaseDeps } from '@/lib/purchases/deps';
 import { proposePurchase } from '@/lib/purchases/propose';
 import { hashOf } from '@/lib/receipts/canonical';
@@ -53,13 +54,18 @@ const LISTINGS: CatalogEntry[] = [
 /** Another seller listing one of the same SKUs far cheaper, which must never price the demo seller's cart. */
 const OTHER_SELLER = { slug: 'cheap-spices', name: 'Cheap Spices', payoutEmail: 'payouts@cheap-spices.example.com' };
 
-/** The intent check, answering as the test says and recording what it was asked. */
+/**
+ * The intent check, answering as the test says and recording what it was asked. A test can run
+ * something while the check is deciding, as the buyer or the clock might act during a real call.
+ */
 class FakeIntent {
   readonly inputs: IntentInput[] = [];
   answer: IntentResult | Error = { verdict: 'consistent', reasons: [] };
+  whileChecking: () => Promise<void> = async () => {};
 
   async check(input: IntentInput): Promise<IntentResult> {
     this.inputs.push(input);
+    await this.whileChecking();
     if (this.answer instanceof Error) throw this.answer;
     return this.answer;
   }
@@ -68,7 +74,7 @@ class FakeIntent {
 /**
  * The demo buyer with an active mandate under `policy` and a saved wallet in `wallet` status, the
  * demo seller's catalog, another seller's, a fake PayPal, a fake seller, a fake intent check and a
- * fixed clock. No purchase exists yet.
+ * clock the test can move. No purchase exists yet.
  */
 async function setUp({
   policy = demoPolicy,
@@ -105,7 +111,8 @@ async function setUp({
   });
   const paypal = new FakePaypal();
   const intent = new FakeIntent();
-  const now = () => NOW;
+  const clock = { now: NOW };
+  const now = () => clock.now;
   const deps: PurchaseDeps = {
     db,
     paypal,
@@ -115,7 +122,7 @@ async function setUp({
     appUrl: 'https://behest.example.com',
     now,
   };
-  return { db, deps, paypal, intent, buyerId: buyer.id, sellerId: seller.id, mandateId: mandate.id };
+  return { db, deps, paypal, intent, clock, buyerId: buyer.id, sellerId: seller.id, mandateId: mandate.id };
 }
 
 type SetUp = Awaited<ReturnType<typeof setUp>>;
@@ -380,6 +387,55 @@ it('blocks when intent says inconsistent', async () => {
   ]);
 });
 
+it('blocks the purchase, with no PayPal call, when its buyer confirms a new mandate during the intent check', async () => {
+  const s = await setUp();
+  // Confirming a new mandate revokes the one the gate checked the purchase against.
+  s.intent.whileChecking = async () => {
+    await confirmMandate({ db: s.db, signer, now: () => NOW }, { buyerId: s.buyerId, text: MANDATE_TEXT, policy: demoPolicy });
+  };
+
+  const outcome = await propose(s, proposal(['TUR-100', 2]));
+
+  expect(outcome).toEqual({
+    purchaseId: expect.any(String),
+    verdict: 'BLOCK',
+    status: 'blocked',
+    reasons: ['This mandate was revoked'],
+    approveUrl: null,
+    receiptId: null,
+  });
+  expect(s.paypal.calls).toEqual([]);
+  expect(await purchaseRow(s.db, outcome.purchaseId)).toMatchObject({
+    mandateId: s.mandateId,
+    gateVerdict: 'ALLOW',
+    intent: { verdict: 'consistent', reasons: [] },
+    finalVerdict: 'BLOCK',
+  });
+  expect(await eventsOf(s.db, outcome.purchaseId)).toEqual([
+    gateEvent('ALLOW'),
+    { kind: 'intent', data: { verdict: 'consistent', finalVerdict: 'ALLOW' } },
+    { kind: 'mandate_changed', data: { mandateId: s.mandateId, reason: 'This mandate was revoked', finalVerdict: 'BLOCK' } },
+    { kind: 'status', data: { from: 'proposed', to: 'blocked' } },
+  ]);
+});
+
+it('blocks the purchase, with no PayPal call, when its mandate expires during the intent check', async () => {
+  const s = await setUp();
+  await s.db
+    .update(mandates)
+    .set({ expiresAt: new Date(NOW.getTime() + 60_000) })
+    .where(eq(mandates.id, s.mandateId));
+  s.intent.whileChecking = async () => {
+    s.clock.now = new Date(NOW.getTime() + 60_000);
+  };
+
+  const outcome = await propose(s, proposal(['TUR-100', 2]));
+
+  expect(outcome).toMatchObject({ verdict: 'BLOCK', status: 'blocked', reasons: ['This mandate has expired'] });
+  expect(s.paypal.calls).toEqual([]);
+  expect(await stepsOf(s, outcome.purchaseId)).toEqual(['gate', 'intent', 'mandate_changed']);
+});
+
 it('sends the purchase to its buyer, after the intent check, when no saved wallet is linked', async () => {
   const s = await setUp({ wallet: 'pending' });
 
@@ -521,4 +577,19 @@ it("locks the buyer's mandate row, and never the buyer row, before reading the s
   const insert = statements.findIndex((q) => q.startsWith('insert into "purchases"'));
   expect(spendRead).toBeGreaterThan(0);
   expect(insert).toBeGreaterThan(spendRead);
+});
+
+it('holds the mandate row FOR SHARE while it records the intent result', async () => {
+  // A confirmation revoking the mandate updates its row, which a FOR SHARE lock makes wait, so the
+  // mandate cannot end between the check that it is still active and the stored final verdict.
+  const statements: string[] = [];
+  const s = await setUp({ logQuery: (query) => statements.push(query) });
+  statements.length = 0;
+
+  await propose(s, proposal(['TUR-100', 2]));
+
+  const share = statements.findIndex((q) => /^select .* from "mandates" where "mandates"\."id" = \$1 for share$/.test(q));
+  const stored = statements.findIndex((q) => /^update "purchases" set .*"final_verdict" = /.test(q));
+  expect(share).toBeGreaterThan(0);
+  expect(stored).toBeGreaterThan(share);
 });

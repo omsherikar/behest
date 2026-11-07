@@ -8,6 +8,7 @@ import { GATE_RULES } from '@/lib/gate/rules';
 import type { IntentInput, IntentResult } from '@/lib/intent/types';
 import { confirmMandate } from '@/lib/mandate/confirm';
 import type { PurchaseDeps } from '@/lib/purchases/deps';
+import { transition } from '@/lib/purchases/events';
 import { proposePurchase } from '@/lib/purchases/propose';
 import { hashOf } from '@/lib/receipts/canonical';
 import { FakePaypal } from '@/tests/helpers/fake-paypal';
@@ -434,6 +435,33 @@ it('blocks the purchase, with no PayPal call, when its mandate expires during th
   expect(outcome).toMatchObject({ verdict: 'BLOCK', status: 'blocked', reasons: ['This mandate has expired'] });
   expect(s.paypal.calls).toEqual([]);
   expect(await stepsOf(s, outcome.purchaseId)).toEqual(['gate', 'intent', 'mandate_changed']);
+});
+
+it('leaves a purchase that moved on during the intent check as it stands', async () => {
+  const s = await setUp();
+  // Something else, such as an operator, blocks the purchase while the check runs.
+  s.intent.whileChecking = async () => {
+    const [reserved] = await s.db.select({ id: purchases.id }).from(purchases).where(eq(purchases.status, 'proposed'));
+    await transition(s.db, reserved.id, 'proposed', 'blocked');
+  };
+
+  const outcome = await propose(s, proposal(['TUR-100', 2]));
+
+  expect(outcome).toEqual({
+    purchaseId: expect.any(String),
+    verdict: 'ALLOW',
+    status: 'blocked',
+    reasons: [],
+    approveUrl: null,
+    receiptId: null,
+  });
+  expect(s.paypal.calls).toEqual([]);
+  // The intent result is never written over a purchase that is no longer waiting for it.
+  expect(await purchaseRow(s.db, outcome.purchaseId)).toMatchObject({ intent: null, finalVerdict: null });
+  expect(await eventsOf(s.db, outcome.purchaseId)).toEqual([
+    gateEvent('ALLOW'),
+    { kind: 'status', data: { from: 'proposed', to: 'blocked' } },
+  ]);
 });
 
 it('sends the purchase to its buyer, after the intent check, when no saved wallet is linked', async () => {

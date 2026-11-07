@@ -79,8 +79,9 @@ type LockedMandate = Pick<typeof mandates.$inferSelect, keyof typeof MANDATE_FIE
  * result and the final verdict are stored by recordIntent, which blocks the purchase if its mandate
  * was revoked or expired during the check. The final verdict is then routed: BLOCK leaves the
  * purchase `blocked`, ALLOW charges the buyer's saved wallet with chargeAllowed, and ASK asks the
- * buyer to approve at PayPal with startApproval. Returns where the purchase then stands. Throws,
- * recording nothing, for a buyer who never had a mandate.
+ * buyer to approve at PayPal with startApproval. A purchase something else moved on from `proposed`
+ * during the check is not routed. Returns where the purchase then stands. Throws, recording
+ * nothing, for a buyer who never had a mandate.
  */
 export async function proposePurchase(deps: PurchaseDeps, i: ProposalRequest): Promise<ProposalOutcome> {
   const { purchaseId, mandateId, gateVerdict, check } = await reservePurchase(deps, i);
@@ -88,6 +89,7 @@ export async function proposePurchase(deps: PurchaseDeps, i: ProposalRequest): P
 
   const intent = await runIntentCheck(deps.intent, check);
   const recorded = await recordIntent(deps, { purchaseId, mandateId }, intent, applyIntent(gateVerdict, intent));
+  if (!recorded) return purchaseOutcome(deps.db, purchaseId);
   switch (recorded.verdict) {
     case 'ALLOW':
       return chargeAllowed(deps, purchaseId);
@@ -292,21 +294,24 @@ async function runIntentCheck(intent: PurchaseDeps['intent'], input: IntentInput
  * mandate may have been revoked, by the buyer confirming a new one, or may have expired meanwhile;
  * the final verdict is then BLOCK, logged with why as a `mandate_changed` event. A purchase blocked
  * either way is moved to `blocked`. The events carry verdicts and Behest's own wording only: the
- * check's reasons can repeat seller-written titles, and stay on the purchase.
+ * check's reasons can repeat seller-written titles, and stay on the purchase. Returns null, writing
+ * nothing, for a purchase that is no longer `proposed` because something else moved it on.
  */
 async function recordIntent(
   { db, now }: Pick<PurchaseDeps, 'db' | 'now'>,
   { purchaseId, mandateId }: { purchaseId: string; mandateId: string },
   intent: IntentResult,
   afterIntent: Verdict,
-): Promise<Recorded> {
+): Promise<Recorded | null> {
   return db.transaction(async (tx) => {
     const mandateEnded = await whyMandateEnded(tx, mandateId, now());
     const verdict: Verdict = mandateEnded ? 'BLOCK' : afterIntent;
-    await tx
+    const stored = await tx
       .update(purchases)
       .set({ intent: { verdict: intent.verdict, reasons: intent.reasons }, finalVerdict: verdict })
-      .where(eq(purchases.id, purchaseId));
+      .where(and(eq(purchases.id, purchaseId), eq(purchases.status, 'proposed')))
+      .returning({ id: purchases.id });
+    if (stored.length === 0) return null;
     await appendEvent(tx, purchaseId, 'intent', { verdict: intent.verdict, finalVerdict: afterIntent });
     if (mandateEnded) {
       await appendEvent(tx, purchaseId, 'mandate_changed', { mandateId, reason: mandateEnded, finalVerdict: verdict });

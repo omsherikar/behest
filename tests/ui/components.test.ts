@@ -1,4 +1,4 @@
-import { createElement } from 'react';
+import { type ComponentProps, createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { AuthorityTrace } from '@/components/ui/authority-trace';
@@ -131,7 +131,8 @@ describe('Console', () => {
 describe('Notice', () => {
   it('interrupts only for a stop', () => {
     const role = (kind: 'info' | 'success' | 'hold' | 'stop') =>
-      renderToStaticMarkup(createElement(Notice, { kind, children: 'Message' })).match(/role="(\w+)"/)?.[1];
+      // The message goes in as children, the third argument; its type comes from Notice's props.
+      renderToStaticMarkup(createElement(Notice, { kind } as ComponentProps<typeof Notice>, 'Message')).match(/role="(\w+)"/)?.[1];
     expect(role('stop')).toBe('alert');
     expect(role('hold')).toBe('status');
     expect(role('success')).toBe('status');

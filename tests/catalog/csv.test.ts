@@ -85,16 +85,27 @@ describe('parseCatalogCsv', () => {
     expect(parseCatalogCsv(messy.replaceAll('\n', '\r\n'))).toEqual(parseCatalogCsv(messy));
   });
 
-  // The 250-row file is generated here rather than kept as a fixture, so the fixture stays readable.
-  it('keeps the first 200 data rows and rejects every row after them', () => {
+  // The 300-row file is generated here rather than kept as a fixture, so the fixture stays readable.
+  it('keeps the first 200 data rows and reports the rest as one rejection saying how many were left out', () => {
     const lines = ['sku,name,price'];
-    for (let i = 1; i <= 250; i += 1) lines.push(`SKU-${i},Item ${i},1.00`);
+    for (let i = 1; i <= 300; i += 1) lines.push(i === 250 ? 'SKU-1,Repeat,free' : `SKU-${i},Item ${i},1.00`);
 
     const { rows, rejected } = parseCatalogCsv(lines.join('\n'));
 
     expect(rows).toHaveLength(200);
     expect(rows.at(-1)).toMatchObject({ line: 201, sku: 'SKU-200' });
-    expect(rejected).toEqual(Array.from({ length: 50 }, (_, i) => ({ line: 202 + i, reason: 'row limit is 200' })));
+    // Rows past the limit are not read, so the bad row among them is not reported on its own.
+    expect(rejected).toEqual([{ line: 202, reason: 'row limit is 200: 100 rows from this line on were left out' }]);
+  });
+
+  it('counts only the rows with a value past the limit, and names a single row left out', () => {
+    const lines = ['sku,name,price'];
+    for (let i = 1; i <= 201; i += 1) lines.push(`SKU-${i},Item ${i},1.00`);
+
+    const { rows, rejected } = parseCatalogCsv(`${lines.join('\n')}\n\n,,\n`);
+
+    expect(rows).toHaveLength(200);
+    expect(rejected).toEqual([{ line: 202, reason: 'row limit is 200: 1 row from this line on was left out' }]);
   });
 
   it('finds columns by any of their names, in any case and with spaces around them', () => {

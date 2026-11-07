@@ -63,6 +63,8 @@ describe('built-in reports', () => {
         ['purchases.request', 'purchases.intent', 'purchases.gateVerdict', 'purchases.buyerId', 'purchases.mandateId', 'purchases.budgetEffect', 'purchases.rulesFlagged', 'purchases.approver', 'budgetUsed'].includes(id),
     );
     expect(buyerSide).toEqual([]);
-    expect(available).toEqual(expect.arrayContaining(['purchases.verdict', 'purchases.total', 'purchases.status', 'receipts.jws']));
+    expect(available).toEqual(
+      expect.arrayContaining(['purchases.verdict', 'purchases.verdictWords', 'purchases.total', 'purchases.status', 'receipts.jws']),
+    );
   });
 });

@@ -37,13 +37,11 @@ const typography = (fontSize: number, fontWeight: 'normal' | 'bold' = 'normal', 
   fontStyle: 'normal' as const,
 });
 
-// A KPI tile, styled the same everywhere: bold title, large value, optional sparkline along `sparklineX`.
-const kpi = (text: string, value: { id: string; aggregation?: 'sum' | 'avg' | 'countd' }, sparklineX?: string) => ({
+// A KPI tile, styled the same everywhere: bold title and large value. No tile carries a sparkline,
+// which would lift its title above its neighbours' in a row of tiles.
+const kpi = (text: string, value: { id: string; aggregation?: 'sum' | 'avg' | 'countd' }) => ({
   type: 'value' as const,
-  dataMapping: {
-    value: [value],
-    ...(sparklineX && { sparklineX: [{ id: sparklineX }] }),
-  },
+  dataMapping: { value: [value] },
   format: {
     title: { enabled: true, text, typography: typography(14, 'bold') },
     caption: { enabled: true, text: '', typography: typography(0) },
@@ -56,16 +54,17 @@ const kpi = (text: string, value: { id: string; aggregation?: 'sum' | 'avg' | 'c
 const decisions: PageState = {
   id: 'decisions',
   widgets: {
-    'kpi-proposals': kpi('Proposals', sum('purchases.proposals'), 'calendar::day'),
+    'kpi-proposals': kpi('Proposals', sum('purchases.proposals')),
     'kpi-allowed': kpi('Allowed', sum('purchases.allowed')),
-    'kpi-asked': kpi('Needed approval', sum('purchases.asked')),
+    'kpi-asked': kpi('Needs approval', sum('purchases.asked')),
     'kpi-blocked': kpi('Blocked', sum('purchases.blocked')),
     verdict: {
       type: 'button-filter',
-      dataMapping: { value: [{ id: 'purchases.verdict' }] },
+      // Allowed, Needs approval and Blocked, as the ledger's badges say them, rather than the codes.
+      dataMapping: { value: [{ id: 'purchases.verdictWords' }] },
       format: {
         ...title('Verdict'),
-        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 64 } },
+        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 56 } },
       },
     },
     ledger: {
@@ -102,15 +101,16 @@ const decisions: PageState = {
     },
   },
   widgetLayout: {
-    'kpi-proposals': at(0, 0, 4, 7),
-    'kpi-allowed': at(4, 0, 4, 7),
-    'kpi-asked': at(8, 0, 4, 7),
-    'kpi-blocked': at(12, 0, 4, 7),
-    verdict: at(16, 0, 8, 7),
-    ledger: at(0, 7, 24, 30),
-    receipt: at(0, 37, 9, 36),
-    'rule-outcomes': at(9, 37, 15, 18),
-    'intent-check': at(9, 55, 15, 18),
+    'kpi-proposals': at(0, 0, 6, 7),
+    'kpi-allowed': at(6, 0, 6, 7),
+    'kpi-asked': at(12, 0, 6, 7),
+    'kpi-blocked': at(18, 0, 6, 7),
+    // A row of its own, so "Needs approval" has room beside the other two verdicts.
+    verdict: at(0, 7, 24, 7),
+    ledger: at(0, 14, 24, 30),
+    receipt: at(0, 44, 9, 36),
+    'rule-outcomes': at(9, 44, 15, 18),
+    'intent-check': at(9, 62, 15, 18),
   },
   filter: {
     // Passing and skipped rules would drown out the few that decided anything.
@@ -235,16 +235,17 @@ const PAID = ['Captured', 'Accepted', 'Settled', 'Disputed', 'Resolved'];
 const sellerOrders: PageState = {
   id: 'orders',
   widgets: {
-    'kpi-orders': kpi('Agent orders', sum('purchases.proposals'), 'calendar::day'),
+    'kpi-orders': kpi('Agent orders', sum('purchases.proposals')),
     'kpi-allowed': kpi('Allowed', sum('purchases.allowed')),
-    'kpi-asked': kpi('Needed approval', sum('purchases.asked')),
+    'kpi-asked': kpi('Needs approval', sum('purchases.asked')),
     'kpi-blocked': kpi('Blocked', sum('purchases.blocked')),
     verdict: {
       type: 'button-filter',
-      dataMapping: { value: [{ id: 'purchases.verdict' }] },
+      // Allowed, Needs approval and Blocked, as the ledger's badges say them, rather than the codes.
+      dataMapping: { value: [{ id: 'purchases.verdictWords' }] },
       format: {
         ...title('Verdict'),
-        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 64 } },
+        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 56 } },
       },
     },
     ledger: {
@@ -284,15 +285,16 @@ const sellerOrders: PageState = {
     },
   },
   widgetLayout: {
-    'kpi-orders': at(0, 0, 4, 7),
-    'kpi-allowed': at(4, 0, 4, 7),
-    'kpi-asked': at(8, 0, 4, 7),
-    'kpi-blocked': at(12, 0, 4, 7),
-    verdict: at(16, 0, 8, 7),
-    ledger: at(0, 7, 24, 26),
-    receipt: at(0, 33, 9, 36),
-    items: at(9, 33, 15, 18),
-    'sales-by-item': at(9, 51, 15, 18),
+    'kpi-orders': at(0, 0, 6, 7),
+    'kpi-allowed': at(6, 0, 6, 7),
+    'kpi-asked': at(12, 0, 6, 7),
+    'kpi-blocked': at(18, 0, 6, 7),
+    // A row of its own, so "Needs approval" has room beside the other two verdicts.
+    verdict: at(0, 7, 24, 7),
+    ledger: at(0, 14, 24, 26),
+    receipt: at(0, 40, 9, 36),
+    items: at(9, 40, 15, 18),
+    'sales-by-item': at(9, 58, 15, 18),
   },
   filter: {
     widget: {

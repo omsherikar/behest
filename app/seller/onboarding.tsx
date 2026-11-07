@@ -4,6 +4,9 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { type ChangeEvent, type FormEvent, type ReactNode, useRef, useState } from 'react';
 import { buttonClass } from '@/components/ui/button';
+import { fieldClass } from '@/components/ui/field';
+import { textLink } from '@/components/ui/link';
+import { cn } from '@/lib/utils';
 import { Notice } from '@/components/ui/notice';
 import { plural } from '@/lib/domain/words';
 import { onboardOutcome, type OnboardOutcome } from '@/lib/seller-pages/onboard-outcome';
@@ -30,13 +33,12 @@ type Photo = PhotoEntry & { key: number; fileName: string };
 type Csv = { fileName: string; text: string };
 
 const primaryButton = buttonClass('primary');
-const textInput =
-  'mt-2 w-full rounded-control border border-line-strong bg-panel px-3 py-2 text-body text-text placeholder:text-muted disabled:opacity-60';
+const textInput = `mt-2 ${fieldClass}`;
 const fileInput =
-  'mt-2 block w-full text-meta text-muted file:mr-3 file:h-9 file:rounded-control file:border file:border-line-strong file:bg-panel file:px-4 file:text-body file:font-medium file:text-text hover:file:bg-raised disabled:opacity-60';
-const linkButton = 'text-meta font-medium text-action hover:text-action-strong hover:underline disabled:opacity-60';
+  'mt-2 block w-full text-meta text-muted file:mr-3 file:h-9 file:rounded-full file:border file:border-control file:bg-surface file:px-4 file:text-body file:font-medium file:text-text hover:file:bg-raised disabled:opacity-60';
+const linkButton = `text-meta ${textLink} disabled:opacity-60`;
 /** Each part of the form is a panel of its own. */
-const panel = 'rounded-panel border border-line bg-panel p-4 sm:p-5';
+const panel = 'panel rounded-frame p-5 sm:p-6';
 
 /** MB of image held by `chars` characters of base64, to two places. */
 const mb = (chars: number) => imageMb(chars).toFixed(2);
@@ -189,7 +191,7 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
             value={slug}
             readOnly
             aria-describedby="shop-slug-hint"
-            className={`${textInput} bg-bg font-mono text-meta text-muted`}
+            className={cn(textInput, 'bg-bg font-mono text-meta text-muted')}
           />
           <p id="shop-slug-hint" className="mt-1 text-meta text-muted">
             Buyers name your shop by this in their mandates. It is fixed for this demo&apos;s seller.

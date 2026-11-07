@@ -16,6 +16,7 @@ import { budgetEffect, burnDown, periodBounds, type BudgetEffect } from '@/lib/d
 import { decisionOutcomes } from '@/lib/dashboard/reasons';
 import type { DashboardData, DashboardPurchase, SellerPurchase } from '@/lib/dashboard/scope';
 import type { TransactionMatch } from '@/lib/dashboard/transactions';
+import { verdictWords } from '@/lib/ui/verdict';
 import type { BehestRegistry } from './widgets';
 
 // --- Helpers ----------------------------------------------------------------------
@@ -28,12 +29,25 @@ type FieldSpec = [id: string, name: string, format: AgFormat, hide?: boolean];
 // Every amount is in US dollars, so money shows with its symbol.
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
+// Every moment as the rest of the app writes it, in UTC: "7 Nov 2026, 19:14 UTC".
+const UTC_MINUTE = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+  timeZone: 'UTC',
+  timeZoneName: 'short',
+});
+
 const fields = (specs: FieldSpec[]): AgFieldDefinition[] =>
   specs.map(([id, name, format, hide]) => ({
     id,
     name,
     format,
     ...(format === 'currencyFormat' && { formatOptions: { format: USD } }),
+    ...(format === 'dateTimeFormat' && { formatOptions: { format: UTC_MINUTE } }),
     ...(hide && { hide }),
   }));
 
@@ -95,6 +109,8 @@ const purchaseRow = (p: SellerPurchase) => ({
   createdAt: p.createdAt,
   sellerId: p.sellerId,
   verdict: p.verdict,
+  // The verdict as the app's badges word it, for the page's verdict filter.
+  verdictWords: verdictWords(p.verdict, false),
   status: words(p.status),
   itemCount: p.cart?.items.reduce((sum, item) => sum + item.quantity, 0) ?? null,
   total: dollars(p.totalCents),
@@ -245,7 +261,7 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
       {
         id: 'purchases',
         description:
-          'One row per purchase the agent proposed. Verdict is the final one (after the intent check). Allowed, Needed ' +
+          'One row per purchase the agent proposed. Verdict is the final one (after the intent check). Allowed, Needs ' +
           'approval and Blocked are 1 or 0, so their sums count purchases.' +
           (full
             ? ' Budget effect says whether the total counts against the budget as spent, is reserved in flight, or was ' +
@@ -256,13 +272,14 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
           ['id', 'Purchase ID', 'textFormat'],
           ['createdAt', 'Proposed at', 'dateTimeFormat'],
           ['sellerId', 'Seller ID', 'textFormat', true],
-          ['verdict', 'Verdict', 'textFormat'],
+          ['verdict', 'Verdict code', 'textFormat'],
+          ['verdictWords', 'Verdict', 'textFormat'],
           ['status', 'Status', 'textFormat'],
           ['itemCount', 'Items', 'integerFormat'],
           ['total', 'Total', 'currencyFormat'],
           ['proposals', 'Proposals', 'integerFormat'],
           ['allowed', 'Allowed', 'integerFormat'],
-          ['asked', 'Needed approval', 'integerFormat'],
+          ['asked', 'Needs approval', 'integerFormat'],
           ['blocked', 'Blocked', 'integerFormat'],
           ['captureId', 'PayPal capture', 'textFormat'],
           ...(full

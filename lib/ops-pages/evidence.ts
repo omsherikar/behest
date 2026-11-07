@@ -117,3 +117,119 @@ export function decisionRecord(body: string): { text: string; hash: string; comm
   const [, hash] = DECISION_HASH.exec(lines[at].trim()) ?? [];
   return { text: lines.slice(0, at).join('\n').trim(), hash, commitment: lines.slice(at + 1).join('\n').trim() };
 }
+
+/** The purchase events Behest logs (appendEvent in lib/purchases), in words for the dispute timeline. */
+const EVENT_WORDS: Record<string, string> = {
+  gate: 'Checked by the gate',
+  intent: 'Intent check',
+  status: 'Status changed',
+  mandate_changed: 'Mandate changed while deciding',
+  proposal_abandoned: 'Proposal abandoned',
+  charge: 'Charged to the saved wallet',
+  charge_declined: 'Charge declined at PayPal',
+  charge_failed: 'Charge failed',
+  charge_refused: 'Charge refused',
+  charge_unknown: "PayPal's answer to the charge was lost",
+  approval_order: 'Approval order created at PayPal',
+  approval_order_failed: 'Approval order failed',
+  approval_pending: 'Waiting for the buyer at PayPal',
+  approval_expired: 'Approval window expired',
+  capture: 'Captured at PayPal',
+  capture_pending: 'Capture pending at PayPal',
+  capture_denied: 'Capture denied at PayPal',
+  capture_unmatched: 'Capture not matched to the order',
+  receipt: 'Receipt signed',
+  seller_accepted: 'Seller accepted the order',
+  seller_rejected: 'Seller rejected the order',
+  seller_ambiguous: "Seller's answer unclear",
+  seller_unknown: "Seller's answer lost",
+  refund_skipped: 'Refund skipped',
+  refund_unknown: "PayPal's answer to the refund was lost",
+  payout_failed: 'Payout failed',
+  payout_unknown: "PayPal's answer to the payout was lost",
+  payout_after_refund: 'Payout reported after a refund',
+  dispute_opened: 'Dispute opened at PayPal',
+  dispute_resolved: 'Dispute resolved at PayPal',
+};
+
+/** A purchase event's kind in words, such as "Receipt signed"; a kind not listed reads as its code in words. */
+export function eventWords(kind: string): string {
+  if (Object.hasOwn(EVENT_WORDS, kind)) return EVENT_WORDS[kind];
+  const text = kind.replaceAll('_', ' ');
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** When the purchase was created and captured, as the purchase log's opening lines record them. */
+export function logMoments(intro: readonly string[]): { createdAt: string | null; capturedAt: string | null } {
+  const text = intro.join('\n');
+  const created = /^Purchase \S+, created at (\d{4}-\d{2}-\d{2}T[\d:.]+Z)\.$/m.exec(text);
+  const captured = /, captured at (\d{4}-\d{2}-\d{2}T[\d:.]+Z)\.$/m.exec(text);
+  return { createdAt: created?.[1] ?? null, capturedAt: captured?.[1] ?? null };
+}
+
+/** A piece of a line of evidence: plain text, or a span the pack quoted as written by someone else. */
+export type EvidenceInline = { kind: 'text'; text: string } | { kind: 'quote'; source: string; text: string };
+/** A run of lines, or a list of the lines that start with "- ", keeping each item's exact prefix. */
+export type EvidenceBlock =
+  | { kind: 'lines'; lines: EvidenceInline[][] }
+  | { kind: 'list'; items: { prefix: string; parts: EvidenceInline[] }[] };
+
+const QUOTED = /<untrusted source="([a-z_]+)">([\s\S]*?)<\/untrusted>/g;
+const LIST_ITEM = /^(\s*- )/;
+
+/**
+ * Evidence text as blocks to display: the pack's quoted spans as quotes with their source, and lines
+ * starting with "- " as list items. Only for display: `blocksText` gives back the exact text, and the
+ * text sent to PayPal is the pack's own, never rebuilt from these.
+ */
+export function evidenceBlocks(text: string): EvidenceBlock[] {
+  // The text as pieces, then as lines: a quote stays whole on its line even when it holds a line break.
+  const pieces: EvidenceInline[] = [];
+  let at = 0;
+  for (const match of text.matchAll(QUOTED)) {
+    if (match.index > at) pieces.push({ kind: 'text', text: text.slice(at, match.index) });
+    pieces.push({ kind: 'quote', source: match[1], text: match[2] });
+    at = match.index + match[0].length;
+  }
+  if (at < text.length) pieces.push({ kind: 'text', text: text.slice(at) });
+
+  const lines: EvidenceInline[][] = [[]];
+  for (const piece of pieces) {
+    if (piece.kind === 'quote') {
+      lines[lines.length - 1].push(piece);
+      continue;
+    }
+    piece.text.split('\n').forEach((part, index) => {
+      if (index > 0) lines.push([]);
+      if (part !== '') lines[lines.length - 1].push({ kind: 'text', text: part });
+    });
+  }
+
+  const blocks: EvidenceBlock[] = [];
+  for (const line of lines) {
+    const first = line[0];
+    const prefix = first?.kind === 'text' ? LIST_ITEM.exec(first.text)?.[1] : undefined;
+    if (prefix !== undefined) {
+      const rest = first.text.slice(prefix.length);
+      const parts: EvidenceInline[] = [...(rest ? [{ kind: 'text' as const, text: rest }] : []), ...line.slice(1)];
+      const last = blocks[blocks.length - 1];
+      if (last?.kind === 'list') last.items.push({ prefix, parts });
+      else blocks.push({ kind: 'list', items: [{ prefix, parts }] });
+    } else {
+      const last = blocks[blocks.length - 1];
+      if (last?.kind === 'lines') last.lines.push(line);
+      else blocks.push({ kind: 'lines', lines: [line] });
+    }
+  }
+  return blocks;
+}
+
+const inlineText = (parts: readonly EvidenceInline[]) =>
+  parts.map((part) => (part.kind === 'text' ? part.text : `<untrusted source="${part.source}">${part.text}</untrusted>`)).join('');
+
+/** The exact text `evidenceBlocks` was given. */
+export function blocksText(blocks: readonly EvidenceBlock[]): string {
+  return blocks
+    .flatMap((block) => (block.kind === 'lines' ? block.lines.map(inlineText) : block.items.map((item) => `${item.prefix}${inlineText(item.parts)}`)))
+    .join('\n');
+}

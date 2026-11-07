@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { nextPasskeyStep } from '@/lib/buyer-pages/passkey-flow';
 import type { MandatePolicy } from '@/lib/domain/policy';
 import { post, RequestFailed, type Signed } from './requests';
+import { textLink } from '@/components/ui/link';
 
 // Confirming a mandate with a passkey registered to the buyer's account, which signs the exact
 // mandate they confirm, something a session confirmation cannot show. Every visitor shares the demo
@@ -129,7 +130,7 @@ export function SignWithPasskey({
         type="button"
         onClick={() => void sign(true)}
         disabled={disabled || !mandate}
-        className="text-body font-medium text-action hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+        className={`text-body ${textLink} disabled:cursor-not-allowed disabled:opacity-50`}
       >
         Use a passkey on this device
       </button>

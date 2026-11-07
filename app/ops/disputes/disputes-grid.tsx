@@ -8,6 +8,7 @@ import { StatusBadge } from '@/components/ui/status-badge';
 import { formatUsd } from '@/lib/domain/money';
 import type { DisputeRow } from '@/lib/ops-pages/disputes';
 import { SellerGrid } from '@/app/seller/seller-grid';
+import { textLink } from '@/components/ui/link';
 
 // Every dispute buyers opened at PayPal, latest first. The dispute id links to its page, and comes
 // first so the link is in view on a phone too; a click on the row, or Enter on it, opens it as well.
@@ -31,7 +32,7 @@ function DisputeLinkCell({ data }: CustomCellRendererProps<DisputeRow>) {
   return (
     <Link
       href={`/ops/disputes/${data.id}`}
-      className="font-mono font-medium text-action underline-offset-2 hover:text-action-strong hover:underline"
+      className={`font-mono ${textLink}`}
     >
       {data.paypalDisputeId}
     </Link>
@@ -79,8 +80,7 @@ const columns: ColDef<DisputeRow>[] = [
   {
     field: 'amountCents',
     headerName: 'Amount',
-    type: 'rightAligned',
-    cellClass: 'font-mono',
+    type: 'numeric',
     valueFormatter: ({ value }: ValueFormatterParams<DisputeRow, number>) => (typeof value === 'number' ? formatUsd(value) : ''),
     filter: 'agNumberColumnFilter',
     filterValueGetter: ({ data }) => (typeof data?.amountCents === 'number' ? data.amountCents / 100 : null),

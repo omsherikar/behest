@@ -3,16 +3,17 @@ import { JwsView } from '@/components/ui/jws-view';
 import { ProofFields } from '@/components/ui/proof-fields';
 import { ProofId } from '@/components/ui/proof-id';
 import { type BadgeTone, StatusBadge } from '@/components/ui/status-badge';
-import { consoleTime } from '@/lib/ui/format';
 import type { DraftItem } from '@/lib/ops-pages/dispute-outcomes';
 import {
   decisionRecord,
+  eventWords,
   logTimeline,
   type PasskeyCheckResult,
   type PasskeySignature,
   passkeySignature,
   signedArtifact,
 } from '@/lib/ops-pages/evidence';
+import { EvidenceText } from './evidence-text';
 
 // The evidence items of a dispute's pack as a stack of panels, each one a citation can jump to. The
 // signed mandate and receipt are decoded under their facts, a passkey's signature on the mandate and
@@ -21,6 +22,10 @@ import {
 // shown as plain text, wrapped anywhere so a long value never widens the page.
 
 const prose = 'text-body whitespace-pre-wrap text-text wrap-anywhere';
+
+/** An instant as "7 Nov 2026, 13:49 UTC", as the rest of the app writes times. */
+const utcMinute = (iso: string) =>
+  `${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'UTC' }).format(new Date(iso))} UTC`;
 
 const CHECK_BADGES: Record<PasskeyCheckResult, { tone: BadgeTone; word: string }> = {
   verified: { tone: 'seal', word: 'Verified' },
@@ -118,7 +123,7 @@ function ItemBody({ item }: { item: DraftItem }) {
   if (artifact) {
     return (
       <div className="grid gap-3">
-        {artifact.text && <p className={prose}>{artifact.text}</p>}
+        {artifact.text && <EvidenceText text={artifact.text} className={prose} />}
         <JwsView jws={artifact.jws} label={item.id === 'mandate' ? 'Signed mandate' : 'Signed receipt'} decoded="folded" token="short" />
         {signed && <PasskeyProof passkey={signed.passkey} />}
       </div>
@@ -129,9 +134,9 @@ function ItemBody({ item }: { item: DraftItem }) {
   if (decision) {
     return (
       <div className="grid gap-3">
-        {decision.text && <p className={prose}>{decision.text}</p>}
+        {decision.text && <EvidenceText text={decision.text} className={prose} />}
         <ProofFields fields={[{ label: 'Decision record', value: <ProofId value={decision.hash} label="Decision record hash" /> }]} />
-        {decision.commitment && <p className={`${prose} text-muted`}>{decision.commitment}</p>}
+        {decision.commitment && <EvidenceText text={decision.commitment} className={`${prose} text-muted`} />}
       </div>
     );
   }
@@ -140,20 +145,20 @@ function ItemBody({ item }: { item: DraftItem }) {
   if (timeline) {
     return (
       <div className="grid gap-3">
-        <p className={`${prose} text-muted`}>{timeline.intro.join('\n')}</p>
+        <EvidenceText text={timeline.intro.join('\n')} className={`${prose} text-muted`} />
         <ol aria-label="Recorded steps" className="grid gap-0">
           {timeline.steps.map((step, index) => (
             <li key={step.n} className="relative grid grid-cols-[1.25rem_minmax(0,1fr)] gap-x-3 pb-3 last:pb-0">
               {index < timeline.steps.length - 1 && <span aria-hidden className="absolute top-4 bottom-0 left-[9px] w-0.5 bg-line" />}
               <span aria-hidden className="mt-1.5 size-2.5 justify-self-center rounded-full border-2 border-[#d49cf0] bg-bg" />
               <div className="min-w-0">
-                <p className="flex flex-wrap items-baseline gap-x-3 font-mono text-meta">
-                  <time dateTime={step.at} title={step.at} className="text-muted tabular-nums">
-                    {step.at.slice(0, 10)} {consoleTime(step.at)}
+                <p className="flex flex-wrap items-baseline gap-x-3">
+                  <span className="text-body font-medium text-text">{eventWords(step.kind)}</span>
+                  <time dateTime={step.at} title={step.at} className="font-mono text-meta text-muted tabular-nums">
+                    {utcMinute(step.at)} <span className="sr-only">({step.kind})</span>
                   </time>
-                  <span className="font-medium text-text">{step.kind}</span>
                 </p>
-                {step.detail && <p className="mt-0.5 font-mono text-meta whitespace-pre-wrap text-muted wrap-anywhere">{step.detail}</p>}
+                {step.detail && <EvidenceText text={step.detail.trim()} className="mt-0.5 font-mono text-meta whitespace-pre-wrap text-muted" />}
               </div>
             </li>
           ))}
@@ -162,7 +167,7 @@ function ItemBody({ item }: { item: DraftItem }) {
     );
   }
 
-  return <p className={prose}>{item.body}</p>;
+  return <EvidenceText text={item.body} className={prose} />;
 }
 
 export function EvidenceItems({ items }: { items: readonly DraftItem[] }) {

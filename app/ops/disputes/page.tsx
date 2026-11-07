@@ -1,12 +1,12 @@
 import type { Metadata } from 'next';
 import { connection } from 'next/server';
 import { appDb } from '@/lib/app-deps';
-import { plural } from '@/lib/domain/words';
 import { disputeRows } from '@/lib/ops-pages/disputes';
 import { requireOperator } from '../require-operator';
 import { DisputesGrid } from './disputes-grid';
-import { fillWindow } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/ui/empty-state';
+import { Figure, Figures } from '@/components/ui/figures';
+import { Money } from '@/components/ui/money';
 import { PageHeader } from '@/components/ui/page-header';
 
 export const metadata: Metadata = {
@@ -23,18 +23,30 @@ export default async function DisputesPage() {
 
   const rows = await disputeRows(appDb());
   const submitted = rows.filter((row) => row.submitted).length;
+  const matched = rows.filter((row) => row.linked).length;
+  const disputedCents = rows.reduce((sum, row) => sum + row.amountCents, 0);
 
   return (
-    <div className={fillWindow}>
+    <div className="flex flex-1 flex-col">
       <PageHeader
         id="disputes-heading"
         title="Disputes"
-        purpose={`${plural(rows.length, 'dispute')} opened by buyers at PayPal, ${submitted} answered with evidence. Behest answers each one as the merchant of record, from its signed records. Open a dispute to draft, review and submit its answer.`}
+        purpose="Behest answers each dispute as the merchant of record, from its signed records. Open one to draft, review and submit its answer."
       />
       {rows.length > 0 ? (
-        <div className="flex min-h-0 flex-1 flex-col">
+        <>
+          <Figures>
+            <Figure label="Opened by buyers at PayPal">{rows.length}</Figure>
+            <Figure label="Matched to a purchase">{matched}</Figure>
+            <Figure label="Answered with evidence" tone={submitted < rows.length ? 'text-hold' : 'text-seal'}>
+              {submitted}
+            </Figure>
+            <Figure label="Disputed in total">
+              <Money cents={disputedCents} />
+            </Figure>
+          </Figures>
           <DisputesGrid rows={rows} labelledBy="disputes-heading" />
-        </div>
+        </>
       ) : (
         <EmptyState
           message="No buyer has opened a dispute yet. When one does, PayPal tells Behest and it appears here, matched to its purchase."

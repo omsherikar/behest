@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { decisionRecord, logTimeline, passkeySignature, signedArtifact } from '@/lib/ops-pages/evidence';
+import {
+  blocksText,
+  decisionRecord,
+  eventWords,
+  evidenceBlocks,
+  logMoments,
+  logTimeline,
+  passkeySignature,
+  signedArtifact,
+} from '@/lib/ops-pages/evidence';
 
 const JWS = 'eyJhbGciOiJFZERTQSJ9.eyJpZCI6InJjdC0xIn0.c2lnbmF0dXJl';
 
@@ -170,5 +179,62 @@ describe('decisionRecord', () => {
 
   it('is null for an item that names no record hash', () => {
     expect(decisionRecord('What the shopping agent looked at.\nDecision record hash: not-a-hash')).toBeNull();
+  });
+});
+
+describe('evidenceBlocks', () => {
+  const body = [
+    'Seller: Ravi',
+    'Why it was held:',
+    '- <untrusted source="seller_listing">Saffron, best\nin class</untrusted> is over the limit',
+    '   - ravi-spices TUR-100 at $4.50: <untrusted source="seller_listing">Turmeric \\u003c100g</untrusted>',
+    'The agent said: <untrusted source="shopping_agent">one jar</untrusted>.',
+    '',
+    'Total: $9.00 USD',
+  ].join('\n');
+
+  it('gives back every character of the text it was given, so displaying evidence changes nothing PayPal is sent', () => {
+    expect(blocksText(evidenceBlocks(body))).toBe(body);
+    for (const text of ['', 'one line', '- only a list', 'a\n\n- b\n- c\nd', '<untrusted source="paypal_error">x</untrusted>']) {
+      expect(blocksText(evidenceBlocks(text))).toBe(text);
+    }
+  });
+
+  it('turns quoted spans into quotes with their source, and dash lines into a list', () => {
+    const blocks = evidenceBlocks(body);
+    expect(blocks.map((block) => block.kind)).toEqual(['lines', 'list', 'lines']);
+    const list = blocks[1];
+    if (list.kind !== 'list') throw new Error('expected a list');
+    expect(list.items).toHaveLength(2);
+    expect(list.items[0].parts[0]).toEqual({ kind: 'quote', source: 'seller_listing', text: 'Saffron, best\nin class' });
+    expect(list.items[1].prefix).toBe('   - ');
+    const last = blocks[2];
+    if (last.kind !== 'lines') throw new Error('expected lines');
+    expect(last.lines[0]).toEqual([
+      { kind: 'text', text: 'The agent said: ' },
+      { kind: 'quote', source: 'shopping_agent', text: 'one jar' },
+      { kind: 'text', text: '.' },
+    ]);
+  });
+});
+
+describe('eventWords', () => {
+  it('words the purchase events Behest logs, and any other code readably', () => {
+    expect(eventWords('receipt')).toBe('Receipt signed');
+    expect(eventWords('capture')).toBe('Captured at PayPal');
+    expect(eventWords('dispute_opened')).toBe('Dispute opened at PayPal');
+    expect(eventWords('some_new_kind')).toBe('Some new kind');
+  });
+});
+
+describe('logMoments', () => {
+  it('reads when the purchase was created and captured from the log', () => {
+    const intro = [
+      'Purchase 9b2f, created at 2026-11-07T13:40:00.000Z.',
+      "The buyer's request to the agent: one jar",
+      'PayPal order 8MC5, capture 3GG2, captured at 2026-11-07T13:45:10.000Z.',
+    ];
+    expect(logMoments(intro)).toEqual({ createdAt: '2026-11-07T13:40:00.000Z', capturedAt: '2026-11-07T13:45:10.000Z' });
+    expect(logMoments(['No PayPal capture is recorded.'])).toEqual({ createdAt: null, capturedAt: null });
   });
 });

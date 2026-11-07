@@ -5,8 +5,9 @@ import { STATE_WORDS, STEP_NAMES, type StepState, type TraceStates, type TraceSt
 import { STATE_SHAPES, STATE_TEXT, StateGlyph } from './state-glyph';
 
 // The authority trace: the five steps that authorized a purchase, as one line of nodes joined by a
-// rail, numbered because the order is the point. Each rail segment takes the colour of the step it
-// leads into. A node with proof is a disclosure button that opens the proof under the trace (under
+// rail, numbered because the order is the point. The rail is neutral so only the nodes carry colour:
+// a solid segment leads into a step the purchase reached, a dashed one into a step it never reached.
+// A node with proof is a disclosure button that opens the proof under the trace (under
 // the node itself when the trace is narrow and runs down the page); one node is open at a time.
 //
 // Motion: a node animates when its state changes after the first render, as when a streamed
@@ -31,14 +32,12 @@ type Props = {
 /** How long the demonstration waits between one node and the next, in milliseconds. */
 const PLAY_STEP_MS = 380;
 
-const RAIL: Record<StepState, string> = {
-  done: 'bg-seal',
-  current: 'bg-text/70',
-  held: 'bg-hold',
-  stopped: 'bg-stop',
+/** A rail segment, by the state of the step it leads into: solid when reached, dashed when not. */
+function rail(state: StepState, side: 'top' | 'left'): string {
   // Not reached: a dashed line, drawn with a border instead of a fill.
-  not_reached: 'border-dashed border-line-strong',
-};
+  if (state === 'not_reached') return `${side === 'top' ? 'border-t-2' : 'border-l-2'} border-dashed border-line-strong`;
+  return 'bg-line-strong';
+}
 
 /** The steps whose state differs between two traces. */
 function changedSteps(before: TraceStates, after: TraceStates): TraceStep[] {
@@ -67,10 +66,11 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
   });
 
   return (
-    // The trace runs across when it has room for five nodes side by side (42rem), and down the page
-    // otherwise, whatever the window: in a narrow panel it reads down even on a wide screen.
+    // The trace runs across only when its own width fits all five step names on one line each, with
+    // their numbers and chevrons (44rem), and down the page otherwise, whatever the window: in a
+    // narrow panel it reads down even on a wide screen.
     <div className={`@container ${className}`}>
-      <ol aria-label={label} className="grid grid-cols-1 @2xl:grid-cols-5">
+      <ol aria-label={label} className="grid grid-cols-1 @min-[44rem]:grid-cols-5">
         {TRACE_STEPS.map((step, index) => {
           const state = states[step];
           const next = TRACE_STEPS[index + 1];
@@ -83,7 +83,7 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
   
           const node = (
             <>
-              <span className="flex h-5 items-center @2xl:w-full">
+              <span className="flex h-5 items-center @min-[44rem]:w-full">
                 <span
                   // Changing the key restarts the arrival animation when this step's state changes.
                   key={state}
@@ -95,19 +95,20 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                   <StateGlyph shape={STATE_SHAPES[state]} pulse={state === 'current'} className="size-5" />
                 </span>
                 {next && (
-                  <span aria-hidden className="relative mx-2 hidden h-0.5 flex-1 bg-line @2xl:block">
+                  <span aria-hidden className="relative mx-2 hidden h-0.5 flex-1 bg-line @min-[44rem]:block">
                     <span
                       key={states[next]}
                       className={`absolute inset-0 origin-left transition-colors duration-300 ${
-                        states[next] === 'not_reached' ? `border-t-2 ${RAIL.not_reached}` : RAIL[states[next]]
+                        rail(states[next], 'top')
                       } ${play || changed.includes(next) ? 'motion-safe:animate-trace-rail-x' : ''}`}
                       style={changed.includes(next) ? arrival(next, -PLAY_STEP_MS * 0.45) : delay(PLAY_STEP_MS * 0.55)}
                     />
                   </span>
                 )}
               </span>
-              <span className={`min-w-0 @2xl:pr-3 ${play ? 'motion-safe:animate-trace-play' : ''}`} style={delay(60)}>
-                <span className="flex items-baseline gap-1.5">
+              <span className={`min-w-0 @min-[44rem]:pr-3 ${play ? 'motion-safe:animate-trace-play' : ''}`} style={delay(60)}>
+                {/* A step name never wraps: the trace runs down the page instead when its names do not fit across. */}
+                <span className="flex items-baseline gap-1.5 whitespace-nowrap">
                   <span className="font-mono text-meta text-muted tabular-nums">{index + 1}</span>
                   <span
                     className={`font-medium ${state === 'not_reached' ? 'text-muted' : 'text-text'} ${
@@ -115,22 +116,26 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                     }`}
                   >
                     {STEP_NAMES[step]}
+                    {hasProof && (
+                      <svg
+                        viewBox="0 0 16 16"
+                        aria-hidden
+                        className={`ml-1.5 inline size-3 align-[-1px] text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                      >
+                        <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
                   </span>
-                  {hasProof && (
-                    <svg viewBox="0 0 16 16" aria-hidden className={`size-3 self-center text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`}>
-                      <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  )}
                 </span>
                 <span className={`block text-meta ${STATE_TEXT[state]}`}>{STATE_WORDS[state]}</span>
               </span>
             </>
           );
   
-          const nodeClass = 'flex w-full items-start gap-3 py-2 text-left @2xl:row-start-1 @2xl:flex-col @2xl:gap-2';
+          const nodeClass = 'flex w-full items-start gap-3 py-2 text-left @min-[44rem]:row-start-1 @min-[44rem]:flex-col @min-[44rem]:gap-2';
   
           return (
-            <li key={step} className="relative @2xl:contents">
+            <li key={step} className="relative @min-[44rem]:contents">
               {hasProof ? (
                 <button
                   id={buttonId}
@@ -148,11 +153,11 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
   
               {next && (
                 // The rail on a phone: from under this node down to the next one, beside any open proof.
-                <span aria-hidden className="absolute top-8 bottom-0 left-[9px] w-0.5 bg-line @2xl:hidden">
+                <span aria-hidden className="absolute top-8 bottom-0 left-[9px] w-0.5 bg-line @min-[44rem]:hidden">
                   <span
                     key={states[next]}
                     className={`absolute inset-0 origin-top transition-colors duration-300 ${
-                      states[next] === 'not_reached' ? `border-l-2 ${RAIL.not_reached}` : RAIL[states[next]]
+                      rail(states[next], 'left')
                     } ${play || changed.includes(next) ? 'motion-safe:animate-trace-rail-y' : ''}`}
                     style={changed.includes(next) ? arrival(next, -PLAY_STEP_MS * 0.45) : delay(PLAY_STEP_MS * 0.55)}
                   />
@@ -165,7 +170,7 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                   role="region"
                   aria-labelledby={buttonId}
                   hidden={!isOpen}
-                  className={`mb-2 ml-8 rounded-panel border border-line bg-raised p-3 text-body @2xl:col-span-5 @2xl:p-4 @2xl:row-start-2 @2xl:mt-2 @2xl:mb-0 @2xl:ml-0 ${
+                  className={`mb-2 ml-8 rounded-panel border border-line bg-raised p-3 text-body @min-[44rem]:col-span-5 @min-[44rem]:p-4 @min-[44rem]:row-start-2 @min-[44rem]:mt-2 @min-[44rem]:mb-0 @min-[44rem]:ml-0 ${
                     play && step === defaultOpen ? 'motion-safe:animate-trace-play' : ''
                   }`}
                   // When the trace plays, the proof open from the start arrives after the last node.

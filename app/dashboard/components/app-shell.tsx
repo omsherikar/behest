@@ -21,27 +21,17 @@ export function viewerFor(persona: Persona): Viewer {
   return { initials: 'OP', name: 'Behest operator', role: 'Operator' };
 }
 
-function PayPalWordmark({ className = '' }: { className?: string }) {
-  return (
-    <span className={`font-bold italic tracking-tight ${className}`}>
-      <span className="text-pp-blue-dark">Pay</span>
-      <span className="text-pp-sky">Pal</span>
-    </span>
-  );
-}
-
 function BrandLockup() {
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <Link href="/" aria-label="behest home" className="rounded-control font-mono text-[1.0625rem] font-semibold tracking-tight text-text">
+      <Link href="/" aria-label="behest home" className="rounded-md font-mono text-[1.0625rem] font-semibold tracking-[-0.03em] text-text">
         behest
       </Link>
       <span className="hidden h-6 w-px bg-pp-border sm:block" aria-hidden />
       <AgStudioLogo className="-ml-3 hidden h-12 w-auto sm:block" />
       <span className="hidden h-6 w-px bg-pp-border lg:block" aria-hidden />
-      <span className="hidden items-baseline gap-1 text-xs text-pp-muted lg:flex">
-        powered by <PayPalWordmark className="text-base" /> APIs
-      </span>
+      {/* Plain words, not PayPal's logo artwork. */}
+      <span className="hidden text-meta text-muted lg:inline">Built on PayPal APIs, in the sandbox</span>
     </div>
   );
 }

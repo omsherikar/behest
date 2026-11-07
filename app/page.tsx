@@ -1,40 +1,54 @@
-import { AppShell } from '@/components/shell/app-shell';
+import { TopBar } from '@/components/shell/top-bar';
 import { buttonClass } from '@/components/ui/button';
-import { Hero } from './_landing/hero';
-import { BuiltOnPayPal, Footer, HowItWorks, InspectReceipt, Problem, SafetyModel, TryIt } from './_landing/sections';
+import { BuiltOnPayPal } from './_landing/built-on-paypal';
+import { Faq } from './_landing/faq';
+import { Footer, TryIt } from './_landing/footer';
+import { Hero, HeroBackdrop } from './_landing/hero';
+import { HowItWorks } from './_landing/how-it-works';
+import { InspectReceipt } from './_landing/inspect-receipt';
+import { ProductFrame } from './_landing/product-frame';
+import { Security } from './_landing/security';
+import { SiteNav } from './_landing/site-nav';
 
-// The home page: what Behest is and why, how a purchase is authorized, a real signed receipt to
-// inspect, what it uses PayPal for, its safety model, and the persona choice that starts the demo.
+// The home page: what Behest is, the product itself in a frame, how a purchase is authorized, the
+// attack replay, what it uses PayPal for, a real signed receipt to inspect, straight answers, and
+// the persona choice that starts the demo.
 
-function HeaderLinks() {
+function BarEnd() {
   return (
-    <nav aria-label="On this page" className="flex items-center gap-1 sm:gap-2">
-      <a href="#how-it-works" className="hidden rounded-control px-2 py-1 text-body text-muted hover:text-text sm:inline">
-        How it works
-      </a>
-      <a href="#receipt" className="hidden rounded-control px-2 py-1 text-body text-muted hover:text-text md:inline">
-        Inspect a receipt
-      </a>
-      <a href="#try" className={buttonClass('secondary', 'small', 'ml-1')}>
+    <>
+      <span className="hidden rounded-full border border-line px-3 py-1 text-meta text-muted sm:inline">PayPal sandbox</span>
+      <a href="#try" className={buttonClass('primary', 'small')}>
         Try the demo
       </a>
-    </nav>
+    </>
   );
 }
 
 export default function Home() {
   return (
-    <AppShell bleed aside={<HeaderLinks />}>
-      <div className="bg-schematic">
+    <>
+      <a
+        href="#content"
+        className="sr-only rounded-full bg-text px-4 py-2 font-medium text-on-fill focus:not-sr-only focus:fixed focus:top-3 focus:left-4 focus:z-50"
+      >
+        Skip to content
+      </a>
+      <TopBar fixed wideNavOnly nav={<SiteNav />} end={<BarEnd />} />
+      <main id="content" tabIndex={-1} className="relative isolate focus:outline-none">
+        <HeroBackdrop />
         <Hero />
-        <Problem />
-        <HowItWorks />
-        <InspectReceipt />
-        <BuiltOnPayPal />
-        <SafetyModel />
-        <TryIt />
-        <Footer />
-      </div>
-    </AppShell>
+        <ProductFrame />
+        <div className="pt-10 lg:pt-12">
+          <HowItWorks />
+          <Security />
+          <BuiltOnPayPal />
+          <InspectReceipt />
+          <Faq />
+          <TryIt />
+        </div>
+      </main>
+      <Footer />
+    </>
   );
 }

@@ -11,6 +11,7 @@ import { ProofFields } from '@/components/ui/proof-fields';
 import { ProofId } from '@/components/ui/proof-id';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { disputeView, type DisputeView } from '@/lib/ops-pages/disputes';
+import { eventWords, logMoments, logTimeline } from '@/lib/ops-pages/evidence';
 import { requireOperator } from '../../require-operator';
 import { DisputeEvidence } from './dispute-evidence';
 import { EvidenceItems } from './evidence-items';
@@ -19,10 +20,12 @@ export const metadata: Metadata = {
   title: 'Dispute',
 };
 
-// One dispute: what PayPal reported, the buyer's notes as they wrote them, and Behest's answer.
-// Until evidence is submitted the operator drafts, edits and submits the narrative here; after,
-// the page shows the narrative PayPal was sent, read-only. Everything others wrote (the buyer's
-// notes, PayPal's reason, the evidence items) is shown as plain text.
+// One dispute, in two columns from 1024 px: the buyer's notes as they wrote them and Behest's answer
+// with its evidence on the left; on the right, what PayPal reported and a timeline of the dispute and
+// of the purchase behind it, from the purchase log the evidence pack records. Until evidence is
+// submitted the operator drafts, edits and submits the narrative here; after, the page shows the
+// narrative PayPal was sent, read-only. Everything others wrote (the buyer's notes, PayPal's reason,
+// the evidence items) is shown as plain text.
 
 // 7 Nov 2026, 09:00.
 const dateTime = new Intl.DateTimeFormat('en-GB', {
@@ -46,46 +49,112 @@ export default async function DisputePage({ params }: PageProps<'/ops/disputes/[
   if (!dispute) notFound();
 
   return (
-    <div className="w-full max-w-3xl">
-      <Link href="/ops/disputes" className={buttonClass('quiet', 'small', '-ml-2.5')}>
+    <>
+      <Link href="/ops/disputes" className={buttonClass('quiet', 'small', '-ml-3.5 self-start')}>
         All disputes
       </Link>
-      <header className="mt-3 mb-6">
-        <h1 className="text-title font-semibold text-text">Dispute</h1>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
+      <header className="mt-3 mb-8 lg:mb-10">
+        <h1 className="text-title font-medium text-text">Dispute</h1>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
           <ProofId value={dispute.paypalDisputeId} label="PayPal dispute id" full />
           <StatusBadge tone={dispute.submitted ? 'seal' : 'hold'} label="Evidence">
             {dispute.submitted ? 'Answered with evidence' : 'Not answered yet'}
           </StatusBadge>
         </div>
-        <p className="mt-2 max-w-[75ch] text-body text-muted">
+        <p className="mt-3 max-w-[68ch] text-lead text-pretty text-muted">
           Behest answers as the merchant of record, with evidence drawn from its signed records. Check every claim against
           the evidence before you submit.
         </p>
       </header>
-      <Facts dispute={dispute} />
-      <BuyerNotes notes={dispute.buyerNotes} />
 
-      {dispute.submitted ? (
-        <>
-          <SubmittedNarrative submitted={dispute.submitted} titles={titlesOf(dispute)} />
-          {dispute.items && <EvidenceItems items={dispute.items} />}
-        </>
-      ) : dispute.linked ? (
-        <DisputeEvidence disputeId={dispute.id} items={dispute.items} startFrom={dispute.lastNarrative} />
+      <div className="grid gap-8 lg:grid-cols-12 lg:gap-x-6 xl:gap-x-8">
+        <aside aria-label="What PayPal reported, and the timeline" className="grid min-w-0 content-start gap-4 lg:sticky lg:top-28 lg:col-span-4 lg:col-start-9 lg:row-start-1 lg:self-start">
+          <Facts dispute={dispute} />
+          <Timeline dispute={dispute} />
+        </aside>
+
+        <div className="min-w-0 lg:col-span-8 lg:col-start-1 lg:row-start-1">
+          <BuyerNotes notes={dispute.buyerNotes} />
+          {dispute.submitted ? (
+            <>
+              <SubmittedNarrative submitted={dispute.submitted} titles={titlesOf(dispute)} />
+              {dispute.items && <EvidenceItems items={dispute.items} />}
+            </>
+          ) : dispute.linked ? (
+            <DisputeEvidence disputeId={dispute.id} items={dispute.items} startFrom={dispute.lastNarrative} />
+          ) : (
+            <Notice kind="info" className="mt-8">
+              This dispute is not matched to a purchase yet, so Behest has no evidence to answer it with. Behest matches a
+              dispute to a purchase by the PayPal capture it disputes.
+            </Notice>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+type TimelineEntry = { at: string; what: string; detail?: string };
+
+/**
+ * The whole story in time order: when the purchase was proposed and captured, as the purchase log's
+ * opening lines record it, every step the log recorded, worded, and the dispute's own moments,
+ * opened and answered. Before a draft gathers the evidence, the purchase's side is not known here,
+ * and the timeline says so.
+ */
+function Timeline({ dispute }: { dispute: DisputeView }) {
+  const log = dispute.items?.find((item) => item.id === 'purchase_log');
+  const timeline = log ? logTimeline(log.body) : null;
+  const moments = timeline ? logMoments(timeline.intro) : { createdAt: null, capturedAt: null };
+  const steps = timeline?.steps ?? [];
+  const logged = (kind: string) => steps.some((step) => step.kind === kind);
+
+  const entries: TimelineEntry[] = [
+    ...(moments.createdAt ? [{ at: moments.createdAt, what: 'Purchase proposed by the agent' }] : []),
+    ...steps.map((step) => ({ at: step.at, what: eventWords(step.kind) })),
+    // The capture time is on the purchase itself; a logged capture event already says it.
+    ...(moments.capturedAt && !logged('capture') ? [{ at: moments.capturedAt, what: 'Captured at PayPal' }] : []),
+    ...(dispute.openedAt ? [{ at: dispute.openedAt, what: 'Dispute opened at PayPal', detail: dispute.reason }] : []),
+    ...(dispute.submitted ? [{ at: dispute.submitted.at, what: 'Evidence submitted to PayPal' }] : []),
+  ].sort((a, b) => a.at.localeCompare(b.at));
+
+  return (
+    <section aria-labelledby="timeline-heading" className="panel rounded-frame p-5 sm:p-6">
+      <h2 id="timeline-heading" className="text-heading font-medium text-text">
+        Timeline
+      </h2>
+      {entries.length === 0 ? (
+        <p className="mt-2 text-body text-muted">PayPal gave no time for this dispute, and no evidence has been gathered yet.</p>
       ) : (
-        <Notice kind="info" className="mt-8">
-          This dispute is not matched to a purchase yet, so Behest has no evidence to answer it with. Behest matches a
-          dispute to a purchase by the PayPal capture it disputes.
-        </Notice>
+        <ol aria-label="What happened, in order" className="mt-4 grid">
+          {entries.map((entry, index) => (
+            <li key={`${entry.at}-${entry.what}`} className="relative grid grid-cols-[1rem_minmax(0,1fr)] gap-x-3 pb-4 last:pb-0">
+              {index < entries.length - 1 && <span aria-hidden className="absolute top-4 bottom-0 left-[7px] w-0.5 bg-line" />}
+              <span aria-hidden className="mt-1.5 size-2.5 justify-self-center rounded-full border-2 border-muted bg-bg" />
+              <div className="min-w-0">
+                <p className="text-body text-text">{entry.what}</p>
+                <time dateTime={entry.at} title={entry.at} className="block font-mono text-meta text-muted tabular-nums">
+                  {utc(entry.at)}
+                </time>
+                {entry.detail && <p className="text-meta text-muted">{entry.detail}</p>}
+              </div>
+            </li>
+          ))}
+        </ol>
       )}
-    </div>
+      {!log && dispute.linked && (
+        <p className="mt-4 text-meta text-muted">The purchase&apos;s own steps join this timeline once a draft gathers the evidence.</p>
+      )}
+    </section>
   );
 }
 
 function Facts({ dispute }: { dispute: DisputeView }) {
   return (
-    <section aria-label="What PayPal reported" className="rounded-panel border border-line bg-panel p-4 sm:p-5">
+    <section aria-labelledby="reported-heading" className="panel rounded-frame p-5 sm:p-6">
+      <h2 id="reported-heading" className="mb-4 text-heading font-medium text-text">
+        What PayPal reported
+      </h2>
       <ProofFields
         fields={[
           { label: 'Reason', value: dispute.reason },
@@ -101,8 +170,8 @@ function Facts({ dispute }: { dispute: DisputeView }) {
 
 function BuyerNotes({ notes }: { notes: string | null }) {
   return (
-    <section aria-labelledby="notes-heading" className="mt-8">
-      <h2 id="notes-heading" className="text-lead font-medium text-text">
+    <section aria-labelledby="notes-heading">
+      <h2 id="notes-heading" className="text-heading font-medium text-text">
         The buyer&apos;s notes
       </h2>
       {notes ? (
@@ -133,8 +202,8 @@ function SubmittedNarrative({
 }) {
   const { narrative } = submitted;
   return (
-    <section aria-labelledby="submitted-heading" className="mt-8 rounded-panel border border-line bg-panel p-4 sm:p-5">
-      <h2 id="submitted-heading" className="text-lead font-medium text-text">
+    <section aria-labelledby="submitted-heading" className="panel mt-8 rounded-frame p-5 sm:p-6">
+      <h2 id="submitted-heading" className="text-heading font-medium text-text">
         Submitted narrative
       </h2>
       <Notice kind="success" className="mt-3">

@@ -23,7 +23,7 @@ export function MandateActions({
   passkey?: ReactNode;
 }) {
   return (
-    <div className="grid gap-2 rounded-panel border border-line bg-panel p-4">
+    <div className="grid gap-3 rounded-panel border border-line bg-raised/40 p-4 sm:p-5">
       <p className="text-body text-muted">
         Confirming signs this mandate. From then on your agent can only pay within it, and every purchase records it.
       </p>

@@ -58,15 +58,15 @@ const MIX_FILL: Record<Verdict, string> = { ALLOW: 'bg-pp-success', ASK: 'bg-pp-
 
 const modules = [ClientSideRowModelModule, RowAutoHeightModule, RowStyleModule, CellStyleModule];
 
-// Narrowest a mapped column may get, so a date or an amount never truncates.
+// Narrowest a mapped column may get, so a date or an amount never truncates. A moment, such as
+// "17 Nov 2026, 19:14 UTC", keeps to one line.
 const MIN_WIDTH: Record<AgWidgetField['dataType'], number> = {
-  string: 110,
-  number: 88,
+  string: 100,
+  number: 84,
   boolean: 80,
-  date: 112,
-  datetime: 148,
+  date: 120,
+  datetime: 184,
 };
-const CELL_CLASS = 'leading-5 !py-2.5';
 
 /**
  * The ledger's rows: the purchases in view, and each one's non-passing decision outcomes in order.
@@ -130,6 +130,19 @@ function VerdictCell({ data }: CustomCellRendererProps<LedgerRow>) {
   return data ? <VerdictBadge verdict={data.verdict} personal={false} /> : null;
 }
 
+// Every text cell's box: the same line height and vertical padding in each column, so a wrapped
+// seller name or request reads as easily as the reasons beside it.
+const CELL_TEXT = 'block py-2.5 leading-[1.4]';
+
+/** A mapped column's value: wrapping text, or a date or number kept to one line. */
+function ValueCell({ valueFormatted, value, colDef }: CustomCellRendererProps<LedgerRow>) {
+  const wraps = colDef?.wrapText === true;
+  return <span className={`${CELL_TEXT} ${wraps ? 'whitespace-normal' : 'whitespace-nowrap tabular-nums'}`}>{valueFormatted ?? value}</span>;
+}
+
+// What a rule did, in words: the rule's own name can read as the opposite ("Listing clean" next
+// to a block), so the cell gives the outcome and the rule's reason sentence.
+const RESULT_WORDS: Record<Reason['result'], string> = { Ask: 'Asks the buyer', Block: 'Blocked' };
 const RESULT_TAG: Record<Reason['result'], string> = {
   Ask: 'bg-pp-warning/10 text-pp-ink ring-pp-warning/40',
   Block: 'bg-pp-danger/10 text-pp-ink ring-pp-danger/40',
@@ -139,20 +152,18 @@ function ReasonsCell({ data }: CustomCellRendererProps<LedgerRow>) {
   if (!data) return null;
   if (data.reasons.length === 0) {
     return (
-      <span className="block py-2.5 leading-5 text-pp-muted">
-        {data.verdict === 'ALLOW' ? 'Every rule passed' : 'No rule reason recorded'}
-      </span>
+      <span className={`${CELL_TEXT} text-pp-muted`}>{data.verdict === 'ALLOW' ? 'Every rule passed' : 'No rule reason recorded'}</span>
     );
   }
   return (
-    <ul className="flex flex-col gap-1.5 py-2.5 leading-5 whitespace-normal">
-      {data.reasons.map((reason) => (
-        <li key={reason.rule} className="flex items-baseline gap-2">
+    <ul className="flex flex-col gap-1.5 py-2.5 leading-[1.4] whitespace-normal">
+      {data.reasons.map((reason, index) => (
+        <li key={`${reason.rule}-${index}`} className="flex items-baseline gap-2">
           <span className={`shrink-0 rounded px-1.5 text-[11px] font-semibold ring-1 ring-inset ${RESULT_TAG[reason.result]}`}>
-            {reason.result}
+            {RESULT_WORDS[reason.result]}
           </span>
-          <span>
-            <span className="font-semibold text-pp-navy">{reason.rule}.</span> <span className="text-pp-ink">{reason.detail}</span>
+          <span className="text-pp-ink" title={`Rule: ${reason.rule}`}>
+            {reason.detail || `${reason.rule}.`}
           </span>
         </li>
       ))}
@@ -199,13 +210,13 @@ export function LedgerWidget(params: AgWidgetParams<LedgerDef>) {
         headerName: widgetApi.getFieldName(field),
         valueGetter: ({ data }) => data?.values[field.key],
         valueFormatter: ({ value }) => widgetApi.formatFieldValue(field, value),
+        // Every cell starts on the same line as the verdict chip and the first reason.
+        cellRenderer: ValueCell,
         flex: text ? 2 : 1,
         minWidth: MIN_WIDTH[field.dataType],
-        wrapText: true,
+        // Only text wraps; a date or an amount stays on one line.
+        wrapText: text,
         autoHeight: true,
-        // Every cell starts on the same line as the verdict chip and the first reason.
-        // The column's own cellClass replaces the right alignment the column type would add.
-        cellClass: field.dataType === 'number' ? `${CELL_CLASS} ag-right-aligned-cell` : CELL_CLASS,
         type: field.dataType === 'number' ? 'rightAligned' : undefined,
       };
     });
@@ -216,13 +227,14 @@ export function LedgerWidget(params: AgWidgetParams<LedgerDef>) {
         field: 'verdict',
         cellRenderer: VerdictCell,
         cellClass: '!py-2',
-        width: 108,
-        minWidth: 108,
-        maxWidth: 108,
+        // Wide enough for the longest badge, "Needs approval", with its glyph and the cell's padding.
+        width: 170,
+        minWidth: 170,
       },
       ...mapped,
       ...(showReasons
-        ? [{ colId: 'reasons', headerName: 'Why', cellRenderer: ReasonsCell, flex: 4, minWidth: 260, autoHeight: true, sortable: false }]
+        ? // The reasons wrap inside whatever width the other columns leave (the cell sets its own wrapping), so they never run off the widget.
+          [{ colId: 'reasons', headerName: 'Why', cellRenderer: ReasonsCell, flex: 4, minWidth: 200, autoHeight: true, sortable: false }]
         : []),
     ];
   }, [ledger, showReasons, widgetApi]);

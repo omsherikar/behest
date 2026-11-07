@@ -32,12 +32,21 @@ const dateTime = new Intl.DateTimeFormat('en-GB', {
   timeZone: 'UTC',
 });
 
+/** The verdict, with the authority trace in small under it: both say how the purchase was decided. */
 function VerdictCell({ data }: CustomCellRendererProps<PurchaseDetail>) {
-  return data ? <VerdictBadge verdict={data.verdict} /> : null;
+  if (!data) return null;
+  // The grid's own styles set the cell's line height to the row height, so the cell sets its own.
+  return (
+    <div className="flex flex-col items-start gap-1.5 py-2.5 leading-normal">
+      <VerdictBadge verdict={data.verdict} />
+      <MiniTrace states={data.trace} />
+    </div>
+  );
 }
 
-function TraceCell({ data }: CustomCellRendererProps<PurchaseDetail>) {
-  return data ? <MiniTrace states={data.trace} /> : null;
+function StatusCell({ value }: CustomCellRendererProps<PurchaseDetail, string>) {
+  // Its own line height, as the reasons set theirs, so a wrapped status reads as one block.
+  return <span className="block py-2.5 leading-snug">{value}</span>;
 }
 
 function ReasonsCell({ data }: CustomCellRendererProps<PurchaseDetail>) {
@@ -66,24 +75,34 @@ const columns: ColDef<PurchaseDetail>[] = [
   {
     field: 'totalCents',
     headerName: 'Total',
-    type: 'rightAligned',
-    cellClass: 'font-mono',
+    type: 'numeric',
     valueFormatter: ({ value }: ValueFormatterParams<PurchaseDetail, number | null>) =>
       typeof value === 'number' ? formatUsd(value) : 'Not priced',
     filter: 'agNumberColumnFilter',
     filterValueGetter: ({ data }) => (typeof data?.totalCents === 'number' ? data.totalCents / 100 : null),
   },
-  { field: 'verdict', headerName: 'Verdict', cellRenderer: VerdictCell },
-  { colId: 'trace', headerName: 'Trace', cellRenderer: TraceCell, filter: false, sortable: false },
-  { colId: 'status', headerName: 'Status', valueGetter: ({ data }) => (data ? statusWords(data.status) : '') },
+  // Wide enough for the longest verdict, "Needs your approval", with its glyph; the trace sits under it.
+  { field: 'verdict', headerName: 'Verdict and trace', cellRenderer: VerdictCell, minWidth: 190, autoHeight: true },
+  {
+    colId: 'status',
+    headerName: 'Status',
+    valueGetter: ({ data }) => (data ? statusWords(data.status) : ''),
+    // "Waiting for your approval" wraps rather than widening the column.
+    width: 150,
+    suppressAutoSize: true,
+    wrapText: true,
+    autoHeight: true,
+    cellRenderer: StatusCell,
+  },
   {
     colId: 'reasons',
     headerName: 'Reasons',
     valueGetter: ({ data }) => data?.reasons.join(' ') ?? '',
     cellRenderer: ReasonsCell,
-    // Reasons can run long, so they wrap in a column of their own width instead of setting it.
-    width: 320,
+    // Reasons can run long, so they wrap, and the column takes whatever width the others leave.
+    width: 240,
     suppressAutoSize: true,
+    context: { fill: true },
     wrapText: true,
     autoHeight: true,
   },
@@ -103,7 +122,7 @@ function itemsLine(items: PurchaseDetail['items']): string {
   return `${first.quantity} × ${first.title}${rest.length === 0 ? '' : ` and ${rest.length} more ${rest.length === 1 ? 'item' : 'items'}`}`;
 }
 
-/** The side panel for one purchase: its trace with the proof behind each step, why, and what would change. */
+/** The side panel for one purchase: what it bought, its trace with the proof behind each step, why, and what would change. */
 function DetailPanel({ detail, onClose }: { detail: PurchaseDetail | null; onClose: () => void }) {
   return (
     <SidePanel
@@ -116,19 +135,36 @@ function DetailPanel({ detail, onClose }: { detail: PurchaseDetail | null; onClo
         <>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <VerdictBadge verdict={detail.verdict} />
-            <span className="font-medium text-text">{statusWords(detail.status)}</span>
-            <Money cents={detail.totalCents} className="ml-auto font-medium text-text" />
+            <span className="text-body text-text">{statusWords(detail.status)}</span>
+            <Money cents={detail.totalCents} className="ml-auto text-heading font-medium text-text" />
           </div>
+          {detail.items.length > 0 && (
+            <section aria-label="What it bought" className="rounded-panel border border-line">
+              <ul className="divide-y divide-line">
+                {detail.items.map((item) => (
+                  <li key={item.sku} className="flex items-baseline justify-between gap-4 px-4 py-3 text-body">
+                    <span className="min-w-0 break-words text-text">
+                      {item.quantity} × {item.title} <span className="ml-1 font-mono text-meta text-muted">{item.sku}</span>
+                    </span>
+                    <Money cents={item.unitPriceCents * item.quantity} mono className="shrink-0 text-meta text-text" />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <PurchaseTrace key={detail.id} detail={detail} defaultOpen={focusStep(detail)} />
           {detail.reasons.length > 0 && (
             <section aria-labelledby="ledger-detail-why">
               <h3 id="ledger-detail-why" className="text-meta text-muted">
                 Why it was not simply allowed
               </h3>
-              <ul className="mt-1 grid list-disc gap-0.5 pl-4 text-body break-words text-text marker:text-muted">
+              <ul className="mt-1.5 grid gap-1">
                 {detail.reasons.map((reason, index) => (
                   // Two reasons can read the same.
-                  <li key={index}>{reason}</li>
+                  <li key={index} className="flex gap-2.5 text-body break-words text-text">
+                    <span aria-hidden className="mt-2.5 size-1 shrink-0 rounded-full bg-muted" />
+                    {reason}
+                  </li>
                 ))}
               </ul>
             </section>

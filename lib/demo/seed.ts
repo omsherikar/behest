@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ne } from 'drizzle-orm';
+import { eq, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { demoBuyerId } from '@/lib/app-deps';
 import { screenRow } from '@/lib/catalog/build';
@@ -125,6 +125,15 @@ export type Removed = {
 
 export type ResetResult = { removed: Removed; seeded: SeedResult };
 
+/** Why a reset removed nothing: a purchase is being charged or a job is running, so a payment is under way. */
+export class DemoBusy extends Error {
+  override name = 'DemoBusy';
+
+  constructor() {
+    super('A payment is in progress. Reset the demo between runs, not during one.');
+  }
+}
+
 /**
  * Puts the demo back to where the seed leaves it: removes every purchase with its events, receipt,
  * payouts, refunds and disputes, every seller order, job and mandate, and every wallet that is not
@@ -132,11 +141,18 @@ export type ResetResult = { removed: Removed; seeded: SeedResult };
  * needs the buyer to approve at PayPal in a browser; `full` removes it too. Buyers, sellers and
  * products stay, and so do the model call log, which the daily spend cap sums, and the webhook
  * events, which keep each PayPal event from being processed twice. Throws, removing nothing, when
- * the payee email is missing or not an email.
+ * the payee email is missing or not an email, and DemoBusy while a purchase is being charged or a
+ * job is running, since wiping the demo then would cut a payment off halfway.
  */
 export async function resetDemo(db: Db, options: ResetOptions): Promise<ResetResult> {
   const payeeEmail = checkedPayeeEmail(options.payeeEmail);
   return db.transaction(async (tx) => {
+    // Held until the reset commits, so no charge or job can start between this check and the deletes.
+    await tx.execute(sql`lock table ${purchases}, ${jobs} in exclusive mode`);
+    const charging = await tx.$count(purchases, eq(purchases.status, 'charging'));
+    const running = await tx.$count(jobs, eq(jobs.status, 'running'));
+    if (charging > 0 || running > 0) throw new DemoBusy();
+
     // Deleted one table at a time in the order written, each before the tables its rows refer to.
     const removed: Removed = {
       purchaseEvents: (await tx.delete(purchaseEvents).returning({ id: purchaseEvents.id })).length,

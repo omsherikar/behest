@@ -6,9 +6,9 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { buildListings, screenRow } from '@/lib/catalog/build';
 import { parseCatalogCsv } from '@/lib/catalog/csv';
 import type { Db } from '@/lib/db/client';
-import { buyers, products, purchases, sellers, wallets } from '@/lib/db/schema';
+import { buyers, jobs, products, purchases, sellers, wallets } from '@/lib/db/schema';
 import { DEMO_BUYER_NAME, DEMO_SELLER_SLUG } from '@/lib/demo/personas';
-import { RAVI_CATALOG_CSV, resetDemo, seedDemo } from '@/lib/demo/seed';
+import { DemoBusy, RAVI_CATALOG_CSV, resetDemo, seedDemo } from '@/lib/demo/seed';
 import nextConfig from '@/next.config';
 import { addDemoActivity, rowCounts, seededRows } from '@/tests/helpers/demo-activity';
 import { fakeClaude, messageJson } from '@/tests/helpers/fake-claude';
@@ -283,6 +283,29 @@ describe('resetDemo', () => {
   it('seeds an empty database', async () => {
     expect(await resetDemo(db, { payeeEmail: PAYEE })).toEqual({ removed: NOTHING_REMOVED, seeded: SEEDED });
     expect(await listings(db)).toEqual(SEEDED_LISTINGS);
+  });
+
+  it('refuses while a purchase is being charged, and removes nothing', async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    await addDemoActivity(db);
+    await db.update(purchases).set({ status: 'charging' });
+    const before = await rowCounts(db);
+
+    const reset = resetDemo(db, { payeeEmail: PAYEE, full: true });
+
+    await expect(reset).rejects.toBeInstanceOf(DemoBusy);
+    await expect(reset).rejects.toThrow('A payment is in progress. Reset the demo between runs, not during one.');
+    expect(await rowCounts(db)).toEqual(before);
+  });
+
+  it('refuses while a job is running, and removes nothing', async () => {
+    await seedDemo(db, { payeeEmail: PAYEE });
+    await addDemoActivity(db);
+    await db.update(jobs).set({ status: 'running' });
+    const before = await rowCounts(db);
+
+    await expect(resetDemo(db, { payeeEmail: PAYEE })).rejects.toBeInstanceOf(DemoBusy);
+    expect(await rowCounts(db)).toEqual(before);
   });
 
   it('removes nothing when the payee email is missing', async () => {

@@ -102,3 +102,8 @@ export function runRefusal(status: number, body: unknown): string {
   }
   return REFUSALS.get(status) ?? NOT_STARTED;
 }
+
+/** Whether a run's error is about the buyer's mandate, such as "Sign a mandate first.", so the page links to it. */
+export function aboutMandate(message: string): boolean {
+  return /\bmandate\b/i.test(message);
+}

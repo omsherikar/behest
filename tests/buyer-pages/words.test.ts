@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { purchaseStatus } from '@/lib/db/schema';
-import { runRefusal, statusWords, toolStep } from '@/lib/buyer-pages/words';
+import { aboutMandate, runRefusal, statusWords, toolStep } from '@/lib/buyer-pages/words';
 
 describe('statusWords', () => {
   it('says paid for a captured purchase and every status after it that kept the money', () => {
@@ -95,5 +95,14 @@ describe('runRefusal', () => {
     expect(runRefusal(404, answer(42))).toBe('Behest could not start your agent. Try again in a minute.');
     expect(runRefusal(500, { error: 'boom' })).toBe('Behest could not start your agent. Try again in a minute.');
     expect(runRefusal(502, answer('   '))).toBe('Behest could not start your agent. Try again in a minute.');
+  });
+});
+
+describe('aboutMandate', () => {
+  it('picks out a run error that is about the mandate, so the page can link to it', () => {
+    expect(aboutMandate('Sign a mandate first.')).toBe(true);
+    expect(aboutMandate('Your Mandate has ended. Sign a new one.')).toBe(true);
+    expect(aboutMandate('Your agent stopped because something went wrong. Check your purchases, then try again.')).toBe(false);
+    expect(aboutMandate('Mandated reporting is off.')).toBe(false);
   });
 });

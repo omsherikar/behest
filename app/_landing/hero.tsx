@@ -38,8 +38,7 @@ export function Hero() {
       className="mx-auto grid w-full max-w-[1200px] gap-10 px-4 pt-10 pb-14 sm:px-6 sm:pt-16 lg:gap-12 lg:pt-20 lg:pb-20"
     >
       <div className="max-w-3xl">
-        <p className="font-mono text-meta text-muted">Authority for AI agent payments on PayPal</p>
-        <h1 id="hero-title" className="mt-3 max-w-[28ch] text-display font-semibold text-balance text-text">
+        <h1 id="hero-title" className="max-w-[28ch] text-display font-semibold text-balance text-text">
           Signed proof of what you authorized, on every purchase your AI agent makes.
         </h1>
         <p className="mt-4 max-w-[60ch] text-lead text-pretty text-muted">

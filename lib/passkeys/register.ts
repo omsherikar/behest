@@ -13,10 +13,10 @@ import { sha256Hex } from '@/lib/receipts/canonical';
 import { type PasskeyDeps, relyingParty } from './relying-party';
 import { issueTicket, readTicket, TICKET_SECONDS, ticketExpiry } from './ticket';
 
-// Registering a buyer's passkey (a WebAuthn credential), so that their own device can sign the
+// Registering a passkey (a WebAuthn credential) to the buyer's account, so that it can sign the
 // mandates they confirm. Behest asks for no attestation: what matters is that the same key signs
-// later, not which device holds it. Behest keeps the public key; the private key never leaves the
-// buyer's device.
+// later, not which authenticator holds it. Behest keeps only the public key; the private key stays
+// with the authenticator.
 
 /** The transports WebAuthn defines. A registration's list comes from the browser, so others are dropped. */
 const TRANSPORTS = new Set(['ble', 'cable', 'hybrid', 'internal', 'nfc', 'smart-card', 'usb']);

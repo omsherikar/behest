@@ -70,9 +70,9 @@ export const LIMITS: { title: string; detail: string }[] = [
       'Earbuds listed as spices pass the gate under a mandate that forbids electronics. This replay stores the seller\'s own category, as the demo seed does, to show the gate alone; in a real onboarding the catalog builder\'s model assigns the category from the listing text, and the intent check reads the cart\'s titles. Both are models, so this spoof is not stopped outright.',
   },
   {
-    title: 'Seller names are neither checked nor unique.',
+    title: 'Seller names are compared as text, not as they look.',
     detail:
-      "A new seller can call itself Ravi's Spice Co, and the screen does not read seller names. Each seller has its own slug, which the agent sees and the receipt names, and a mandate that lists the sellers it allows blocks every other; the demo mandate allows any seller.",
+      "Onboarding refuses a seller whose name reads the same as an existing seller's once compatibility forms, case, punctuation and a trailing Co, Company, Inc, LLC or Ltd are set aside, and refuses a name or shop address written as instructions to AI agents. It does not catch a lookalike spelled differently, such as Ravi's Spices, or one using accented letters or letters from another script that look alike. Each seller has its own slug, which the agent sees and the receipt names, and a mandate that lists the sellers it allows blocks every other; the demo mandate allows any seller.",
   },
   {
     title: 'The price check needs a market benchmark.',
@@ -119,6 +119,16 @@ const quoted = (phrases: string[]) => listed(phrases.map((phrase) => `"${phrase}
 
 function screenCell({ screen }: ReplayResult): Cell {
   const words = { layer: 'screen' as const, ...WORDS[screen.state] };
+  const refused = screen.sellerRefused;
+  if (refused?.code === 'name_taken') {
+    return {
+      ...words,
+      detail: `Refused the seller: "${refused.existing}" is already a Behest seller, and names are compared without case, punctuation or a company suffix.`,
+    };
+  }
+  if (refused?.code === 'name_screened') {
+    return { ...words, detail: `Refused the seller: its name or address matched ${quoted(refused.phrases)}.` };
+  }
   if (screen.state === 'flagged') return { ...words, detail: `Matched ${quoted([...screen.strong, ...screen.weak])}.` };
   if (screen.state === 'stopped') {
     return {

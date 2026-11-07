@@ -7,6 +7,7 @@ import { type CatalogRow, parseCatalogCsv } from '@/lib/catalog/csv';
 import { enrichListing } from '@/lib/catalog/enrich';
 import { AGENT_INSTRUCTIONS_FLAG } from '@/lib/catalog/onboard';
 import { screenText } from '@/lib/catalog/screen';
+import { type SellerNameRefusal, sellerNameRefusal } from '@/lib/catalog/seller-name';
 import type { MarketProduct } from '@/lib/channel3/client';
 import { type Db, migrateDb, pgliteDb } from '@/lib/db/client';
 import { products, sellers } from '@/lib/db/schema';
@@ -19,11 +20,14 @@ import { type Attack, ATTACKS, attackCsv, REPLAY_MANDATE } from './attacks';
 import type { LayerState, ReplayResult } from './results';
 
 // Replays each attack through Behest's deterministic layers, with no network and no model. Every
-// attack gets its own in-memory database seeded as the demo is, plus the attack's seller and listing,
-// listed the way the demo seed lists Ravi's catalog: the seller's CSV row read by the catalog reader,
+// attack gets its own in-memory database seeded as the demo is, plus the attack's seller and listing.
+// A new seller's name goes through onboarding's name check, and the listing is listed the way the
+// demo seed lists Ravi's catalog: the seller's CSV row read by the catalog reader,
 // flagged by the fixed screen, given the market median enrichment keeps, and stored with the seller's
 // own category. Then the shopping agent's tools are asked for the listing, and the gate is run on the
 // cart the attack wants under the demo mandate, with nothing spent this month and a linked wallet.
+// Each layer is replayed on its own: a seller onboarding would refuse is stored anyway, so the later
+// layers show what they would do had it been let in.
 
 type ScreenLayer = ReplayResult['screen'];
 type VisibilityLayer = ReplayResult['visibility'];
@@ -51,6 +55,11 @@ export type ReplayCatalog = {
   seller: { id: string; slug: string; name: string };
   /** The attack's listing as the CSV reader read it. */
   row: CatalogRow;
+  /**
+   * Why onboarding would refuse the attack's seller, or null when it would let it in or the seller is
+   * one the demo already has. A refused seller is stored anyway, so the later layers can be replayed alone.
+   */
+  sellerRefusal: SellerNameRefusal | null;
   close: () => Promise<void>;
 };
 
@@ -102,6 +111,8 @@ export async function openReplayCatalog(attack: Attack): Promise<ReplayCatalog> 
     const row = attackRow(attack);
     const category = attackCategory(row);
     const benchmark = await enrichListing({ title: row.name, priceCents: row.priceCents }, marketFor(attack));
+    const [known] = await db.select({ id: sellers.id }).from(sellers).where(eq(sellers.slug, attack.seller.slug));
+    const sellerRefusal = known ? null : await sellerNameRefusal(db, attack.seller.name, attack.seller.slug);
     const seller = await db.transaction(async (tx) => {
       await tx.insert(sellers).values({ ...attack.seller, payoutEmail: PAYEE }).onConflictDoNothing({ target: sellers.slug });
       const [found] = await tx
@@ -122,7 +133,7 @@ export async function openReplayCatalog(attack: Attack): Promise<ReplayCatalog> 
       });
       return found;
     });
-    return { db, buyerId: await demoBuyerId(db), seller, row, close };
+    return { db, buyerId: await demoBuyerId(db), seller, row, sellerRefusal, close };
   } catch (error) {
     await close();
     throw error;
@@ -137,11 +148,12 @@ function attackCategory(row: CatalogRow): Category {
 }
 
 /**
- * Onboarding as the demo seed runs it. Flagged when the screen flags the stored row. Stopped when the
- * CSV reader dropped hidden characters that, read as the seller sent them, spelled an instruction the
- * screen would flag and that the stored row no longer holds.
+ * Onboarding: a new seller's name check, then the listing as the demo seed reads and screens it.
+ * Stopped when the seller would be refused. Otherwise flagged when the screen flags the stored row,
+ * and stopped when the CSV reader dropped hidden characters that, read as the seller sent them,
+ * spelled an instruction the screen would flag and that the stored row no longer holds.
  */
-function screenLayer(attack: Attack, row: CatalogRow): ScreenLayer {
+function screenLayer(attack: Attack, { row, sellerRefusal }: ReplayCatalog): ScreenLayer {
   const sent = `${attack.listing.name}\n${attack.listing.description}`;
   const flagging = screenRow(row);
   const stored = flagging ?? screenText(`${row.name}\n${row.description}`);
@@ -150,8 +162,17 @@ function screenLayer(attack: Attack, row: CatalogRow): ScreenLayer {
   const storedPhrases = new Set(stored.matches.map((phrase) => phrase.toLowerCase()));
   const hiddenPhrases =
     hiddenRemoved > 0 ? asSent.matches.filter((phrase) => !storedPhrases.has(phrase.toLowerCase())) : [];
-  const state: LayerState = flagging ? 'flagged' : hiddenPhrases.length > 0 && asSent.suspicious ? 'stopped' : 'passed';
-  return { state, flagged: flagging !== null, strong: stored.strong, weak: stored.weak, hiddenRemoved, hiddenPhrases };
+  const removed = hiddenPhrases.length > 0 && asSent.suspicious;
+  const state: LayerState = sellerRefusal || (!flagging && removed) ? 'stopped' : flagging ? 'flagged' : 'passed';
+  return {
+    state,
+    flagged: flagging !== null,
+    strong: stored.strong,
+    weak: stored.weak,
+    hiddenRemoved,
+    hiddenPhrases,
+    sellerRefused: sellerRefusal,
+  };
 }
 
 /**
@@ -233,7 +254,7 @@ export async function replayAttacks(attacks: Attack[] = ATTACKS): Promise<Replay
     try {
       results.push({
         attack: attack.id,
-        screen: screenLayer(attack, catalog.row),
+        screen: screenLayer(attack, catalog),
         visibility: await visibilityLayer(catalog, attack),
         gate: await gateLayer(catalog, attack),
       });

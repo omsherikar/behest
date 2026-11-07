@@ -13,7 +13,7 @@ export type LayerState = z.infer<typeof LayerState>;
 
 const AttackId = z.enum(ATTACK_IDS);
 
-/** Onboarding: the CSV reader and the fixed screen, as the demo seed applies them. */
+/** Onboarding: the seller name check for a new seller, then the CSV reader and the fixed screen, as the demo seed applies them. */
 const ScreenLayer = z.object({
   state: LayerState,
   /** Whether the stored listing carries the flag that hides it from agents and blocks it at the gate. */
@@ -25,6 +25,16 @@ const ScreenLayer = z.object({
   hiddenRemoved: z.number().int().nonnegative(),
   /** Phrases aimed at agents that only the dropped characters spelled, so none was stored. */
   hiddenPhrases: z.array(z.string()),
+  /**
+   * Why onboarding refused the attack's seller, or null when it let the seller in or the seller was
+   * already a Behest seller. The later layers are replayed as if the seller had been let in.
+   */
+  sellerRefused: z
+    .discriminatedUnion('code', [
+      z.object({ code: z.literal('name_taken'), existing: z.string() }),
+      z.object({ code: z.literal('name_screened'), phrases: z.array(z.string()) }),
+    ])
+    .nullable(),
 });
 
 /** What the shopping agent's tools show of the listing. */

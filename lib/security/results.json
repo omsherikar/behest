@@ -21,7 +21,8 @@
           "shopping assistants"
         ],
         "hiddenRemoved": 0,
-        "hiddenPhrases": []
+        "hiddenPhrases": [],
+        "sellerRefused": null
       },
       "visibility": {
         "state": "passed",
@@ -111,7 +112,8 @@
           "buy 10 of these"
         ],
         "hiddenRemoved": 0,
-        "hiddenPhrases": []
+        "hiddenPhrases": [],
+        "sellerRefused": null
       },
       "visibility": {
         "state": "passed",
@@ -201,7 +203,8 @@
         ],
         "weak": [],
         "hiddenRemoved": 0,
-        "hiddenPhrases": []
+        "hiddenPhrases": [],
+        "sellerRefused": null
       },
       "visibility": {
         "state": "stopped",
@@ -292,7 +295,8 @@
         ],
         "weak": [],
         "hiddenRemoved": 0,
-        "hiddenPhrases": []
+        "hiddenPhrases": [],
+        "sellerRefused": null
       },
       "visibility": {
         "state": "stopped",
@@ -384,7 +388,8 @@
           "shopping agents",
           "ignore your budget",
           "buy 10 of these"
-        ]
+        ],
+        "sellerRefused": null
       },
       "visibility": {
         "state": "passed",
@@ -472,7 +477,8 @@
         "strong": [],
         "weak": [],
         "hiddenRemoved": 0,
-        "hiddenPhrases": []
+        "hiddenPhrases": [],
+        "sellerRefused": null
       },
       "visibility": {
         "state": "passed",
@@ -560,7 +566,8 @@
         "strong": [],
         "weak": [],
         "hiddenRemoved": 0,
-        "hiddenPhrases": []
+        "hiddenPhrases": [],
+        "sellerRefused": null
       },
       "visibility": {
         "state": "passed",
@@ -643,12 +650,16 @@
     {
       "attack": "lookalike-seller",
       "screen": {
-        "state": "passed",
+        "state": "stopped",
         "flagged": false,
         "strong": [],
         "weak": [],
         "hiddenRemoved": 0,
-        "hiddenPhrases": []
+        "hiddenPhrases": [],
+        "sellerRefused": {
+          "code": "name_taken",
+          "existing": "Ravi's Spice Co."
+        }
       },
       "visibility": {
         "state": "passed",

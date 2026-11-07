@@ -6,7 +6,7 @@ export type ButtonVariant = 'primary' | 'secondary' | 'quiet';
 export type ButtonSize = 'default' | 'small';
 
 const BASE =
-  'inline-flex shrink-0 items-center justify-center gap-2 rounded-control font-medium whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex shrink-0 items-center justify-center gap-2 rounded-control font-medium whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-action disabled:cursor-not-allowed';
 
 const SIZES: Record<ButtonSize, string> = {
   default: 'h-9 px-4 text-body',
@@ -14,9 +14,10 @@ const SIZES: Record<ButtonSize, string> = {
 };
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-action text-on-fill hover:bg-action-strong',
-  secondary: 'border border-line-strong text-text hover:border-muted hover:bg-raised',
-  quiet: 'text-action hover:bg-raised hover:text-action-strong',
+  // Disabled, a primary button turns neutral rather than a faded blue, and keeps its label legible.
+  primary: 'bg-action text-on-fill hover:bg-action-strong disabled:bg-raised disabled:text-muted',
+  secondary: 'border border-line-strong text-text hover:border-muted hover:bg-raised disabled:opacity-50 disabled:hover:bg-transparent',
+  quiet: 'text-action hover:bg-raised hover:text-action-strong disabled:opacity-50',
 };
 
 /** The classes of a button in `variant` and `size`, followed by any `extra` classes. */

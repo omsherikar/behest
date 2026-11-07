@@ -12,7 +12,8 @@ import { Section } from './section';
 // clamped and the payload starts as its six key claims, so the two columns end together; the whole
 // token and payload are one click away.
 
-const Code = ({ children }: { children: ReactNode }) => <code className="font-mono text-[0.92em] text-text">{children}</code>;
+/** Inline code, never broken mid-token: a path or a type moves to the next line whole. */
+const Code = ({ children }: { children: ReactNode }) => <code className="font-mono text-[0.92em] whitespace-nowrap text-text">{children}</code>;
 
 const STEPS: ReactNode[] = [
   <>
@@ -60,7 +61,7 @@ export function InspectReceipt() {
     >
       <div className="grid gap-12 lg:grid-cols-12 lg:gap-8">
         {/* Sticks beside the decoded receipt, which runs far longer, so the column never sits empty. */}
-        <div className="lg:sticky lg:top-28 lg:col-span-4 lg:self-start">
+        <div className="lg:sticky lg:top-28 lg:col-span-5 lg:self-start">
           <h3 className="text-heading font-medium text-text">How a seller verifies it</h3>
           <ol className="mt-6 grid gap-5">
             {STEPS.map((step, index) => (
@@ -77,7 +78,7 @@ export function InspectReceipt() {
             in <Code>lib/demo/sample-receipt.json</Code>, not against the live one.
           </p>
         </div>
-        <GlowBorderCard className="min-w-0 rounded-panel lg:col-span-8">
+        <GlowBorderCard className="min-w-0 rounded-panel lg:col-span-7">
           <JwsView jws={SAMPLE.receiptJws} token="clamp" decoded="summary" summary={summaryRows()} />
         </GlowBorderCard>
       </div>

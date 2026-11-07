@@ -3,9 +3,9 @@ import { connection } from 'next/server';
 import { appDb, demoBuyerId } from '@/lib/app-deps';
 import { ledgerRows } from '@/lib/buyer-pages/purchases';
 import { plural } from '@/lib/domain/words';
-import { BuyerNav } from '../buyer-nav';
 import { requireBuyer } from '../require-buyer';
 import { LedgerGrid } from './ledger-grid';
+import { fillWindow } from '@/components/shell/app-shell';
 
 export const metadata: Metadata = {
   title: 'Your ledger',
@@ -23,9 +23,8 @@ export default async function LedgerPage() {
   const rows = await ledgerRows(db, await demoBuyerId(db));
 
   return (
-    <main className="flex h-dvh flex-col overflow-y-auto bg-pp-canvas px-4 py-6 font-paypal text-pp-ink sm:px-8">
-      <BuyerNav current="/buyer/ledger" />
-      <h1 id="ledger-heading" className="mt-4 text-[28px] font-semibold text-pp-navy">
+    <div className={fillWindow}>
+      <h1 id="ledger-heading" className="text-[28px] font-semibold text-pp-navy">
         Your ledger
       </h1>
       <p className="mt-2 max-w-3xl text-sm text-pp-muted">
@@ -40,6 +39,6 @@ export default async function LedgerPage() {
       ) : (
         <p className="mt-6 text-pp-muted">Your agent has not proposed a purchase yet.</p>
       )}
-    </main>
+    </div>
   );
 }

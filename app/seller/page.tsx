@@ -7,7 +7,6 @@ import { plural } from '@/lib/domain/words';
 import { sellerSummary, type SellerSummary } from '@/lib/seller-pages/seller';
 import { Onboarding } from './onboarding';
 import { requireSeller } from './require-seller';
-import { SellerNav } from './seller-nav';
 
 export const metadata: Metadata = {
   title: 'Your shop',
@@ -30,9 +29,8 @@ export default async function SellerPage() {
   const summary = await sellerSummary(appDb(), DEMO_SELLER_SLUG);
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-10 font-paypal text-pp-ink sm:py-16">
-      <SellerNav current="/seller" />
-      <h1 className="mt-6 text-3xl font-semibold text-pp-navy">Your shop</h1>
+    <div className="w-full max-w-2xl">
+      <h1 className="text-3xl font-semibold text-pp-navy">Your shop</h1>
       <p className="mt-3 text-pp-muted">
         {summary
           ? "Shopping agents buy from your catalog for their buyers. Each order arrives with a signed receipt, and Behest checks it before the order is yours."
@@ -41,7 +39,7 @@ export default async function SellerPage() {
       <Onboarding slug={DEMO_SELLER_SLUG} onboarded={summary !== null}>
         {summary && <ShopSummary summary={summary} />}
       </Onboarding>
-    </main>
+    </div>
   );
 }
 

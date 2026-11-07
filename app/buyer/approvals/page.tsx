@@ -7,7 +7,6 @@ import { returnNotices, type ReturnNotice } from '@/lib/buyer-pages/notices';
 import { pendingApprovals, type PendingApproval } from '@/lib/buyer-pages/purchases';
 import { qrDataUrl } from '@/lib/buyer-pages/qr';
 import { formatUsd } from '@/lib/domain/money';
-import { BuyerNav } from '../buyer-nav';
 import { requireBuyer } from '../require-buyer';
 
 export const metadata: Metadata = {
@@ -63,9 +62,8 @@ export default async function ApprovalsPage({ searchParams }: PageProps<'/buyer/
   const notices = returnNotices(await searchParams);
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-10 font-paypal text-pp-ink sm:py-16">
-      <BuyerNav current="/buyer/approvals" />
-      <h1 className="mt-6 text-3xl font-semibold text-pp-navy">Approvals</h1>
+    <div className="w-full max-w-2xl">
+      <h1 className="text-3xl font-semibold text-pp-navy">Approvals</h1>
       <p className="mt-3 text-pp-muted">
         Your agent proposed these purchases, and your mandate says you decide. Nothing is paid until you approve a
         purchase at PayPal.
@@ -104,7 +102,7 @@ export default async function ApprovalsPage({ searchParams }: PageProps<'/buyer/
           ))}
         </ul>
       )}
-    </main>
+    </div>
   );
 }
 

@@ -5,6 +5,7 @@ import { plural } from '@/lib/domain/words';
 import { disputeRows } from '@/lib/ops-pages/disputes';
 import { requireOperator } from '../require-operator';
 import { DisputesGrid } from './disputes-grid';
+import { fillWindow } from '@/components/shell/app-shell';
 
 export const metadata: Metadata = {
   title: 'Disputes',
@@ -22,7 +23,7 @@ export default async function DisputesPage() {
   const submitted = rows.filter((row) => row.submitted).length;
 
   return (
-    <main className="flex h-dvh flex-col overflow-y-auto bg-pp-canvas px-4 py-6 font-paypal text-pp-ink sm:px-8">
+    <div className={fillWindow}>
       <h1 id="disputes-heading" className="text-[28px] font-semibold text-pp-navy">
         Disputes
       </h1>
@@ -38,6 +39,6 @@ export default async function DisputesPage() {
       ) : (
         <p className="mt-6 text-pp-muted">No buyer has opened a dispute yet.</p>
       )}
-    </main>
+    </div>
   );
 }

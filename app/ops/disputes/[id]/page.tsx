@@ -43,7 +43,7 @@ export default async function DisputePage({ params }: PageProps<'/ops/disputes/[
   if (!dispute) notFound();
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-6 font-paypal text-pp-ink sm:py-10">
+    <div className="w-full max-w-3xl">
       <Link href="/ops/disputes" className={backLink}>
         All disputes
       </Link>
@@ -66,7 +66,7 @@ export default async function DisputePage({ params }: PageProps<'/ops/disputes/[
           dispute to a purchase by the PayPal capture it disputes.
         </p>
       )}
-    </main>
+    </div>
   );
 }
 

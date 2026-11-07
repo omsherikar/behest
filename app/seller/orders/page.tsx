@@ -7,8 +7,8 @@ import { sellerOrderRows } from '@/lib/seller-pages/orders';
 import { findSeller } from '@/lib/seller-pages/seller';
 import { NotOnboarded } from '../not-onboarded';
 import { requireSeller } from '../require-seller';
-import { SellerNav } from '../seller-nav';
 import { OrdersGrid } from './orders-grid';
+import { fillWindow } from '@/components/shell/app-shell';
 
 export const metadata: Metadata = {
   title: 'Your orders',
@@ -28,9 +28,8 @@ export default async function SellerOrdersPage() {
   const accepted = rows.filter((row) => row.status === 'accepted').length;
 
   return (
-    <main className="flex h-dvh flex-col overflow-y-auto bg-pp-canvas px-4 py-6 font-paypal text-pp-ink sm:px-8">
-      <SellerNav current="/seller/orders" />
-      <h1 id="orders-heading" className="mt-4 text-[28px] font-semibold text-pp-navy">
+    <div className={fillWindow}>
+      <h1 id="orders-heading" className="text-[28px] font-semibold text-pp-navy">
         Your orders
       </h1>
       {seller ? (
@@ -52,6 +51,6 @@ export default async function SellerOrdersPage() {
       ) : (
         <NotOnboarded />
       )}
-    </main>
+    </div>
   );
 }

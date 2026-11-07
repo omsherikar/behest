@@ -7,8 +7,8 @@ import { sellerCatalogRows } from '@/lib/seller-pages/catalog';
 import { findSeller } from '@/lib/seller-pages/seller';
 import { NotOnboarded } from '../not-onboarded';
 import { requireSeller } from '../require-seller';
-import { SellerNav } from '../seller-nav';
 import { CatalogGrid } from './catalog-grid';
+import { fillWindow } from '@/components/shell/app-shell';
 
 export const metadata: Metadata = {
   title: 'Your catalog',
@@ -25,9 +25,8 @@ export default async function SellerCatalogPage() {
   const hidden = rows.filter((row) => row.hiddenReason !== null).length;
 
   return (
-    <main className="flex h-dvh flex-col overflow-y-auto bg-pp-canvas px-4 py-6 font-paypal text-pp-ink sm:px-8">
-      <SellerNav current="/seller/catalog" />
-      <h1 id="catalog-heading" className="mt-4 text-[28px] font-semibold text-pp-navy">
+    <div className={fillWindow}>
+      <h1 id="catalog-heading" className="text-[28px] font-semibold text-pp-navy">
         Your catalog
       </h1>
       {seller ? (
@@ -48,6 +47,6 @@ export default async function SellerCatalogPage() {
       ) : (
         <NotOnboarded />
       )}
-    </main>
+    </div>
   );
 }

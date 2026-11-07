@@ -16,7 +16,14 @@ function lead(approve: boolean, together: boolean, count: number): string {
 
 const box = 'rounded-control border border-line bg-bg/40 px-3 py-2.5 text-body';
 
-export function WhatWouldChange({ change }: { change: ChangeView | null }) {
+export function WhatWouldChange({
+  change,
+  reasons = [],
+}: {
+  change: ChangeView | null;
+  /** The reasons already shown beside it: a reason it would repeat is left out. */
+  reasons?: readonly string[];
+}) {
   if (!change || change.kind === 'allowed') return null;
 
   if (change.kind === 'cannot') {
@@ -24,7 +31,9 @@ export function WhatWouldChange({ change }: { change: ChangeView | null }) {
       <div className={box}>
         <p className="text-meta text-muted">What would change</p>
         <p className="mt-1 text-text">This one cannot be allowed by changing your mandate.</p>
-        <p className="mt-0.5 text-muted">{change.reason}</p>
+        {!reasons.some((reason) => change.reason === (/[.!?]$/.test(reason) ? reason : `${reason}.`)) && (
+          <p className="mt-0.5 text-muted">{change.reason}</p>
+        )}
       </div>
     );
   }

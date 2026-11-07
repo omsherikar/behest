@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import { jsonLines, splitJws, type JsonToken } from '@/lib/ui/jws';
 import { CopyButton } from './copy-button';
 
@@ -24,6 +24,9 @@ const TOKEN_CLASS: Record<JsonToken['kind'], string> = {
   punctuation: 'text-muted',
 };
 
+/** How many characters of the payload a short token shows, split between its start and its end. */
+const SHORT_PAYLOAD = 72;
+
 const block = 'rounded-control border border-line bg-bg p-3 font-mono text-meta whitespace-pre-wrap [overflow-wrap:anywhere]';
 
 function Caption({ segment, children }: { segment: Segment; children?: ReactNode }) {
@@ -38,6 +41,13 @@ function Caption({ segment, children }: { segment: Segment; children?: ReactNode
 }
 
 /**
+ * How a token may wrap: a long string, such as a hash or an id, breaks anywhere so it fills its
+ * line; a short one stays whole, and the line wraps at its spaces instead.
+ */
+const wrapClass = (token: JsonToken) =>
+  token.kind === 'string' || token.kind === 'key' ? (token.text.length > 24 ? 'break-all' : 'whitespace-nowrap') : '';
+
+/**
  * Indented JSON, one block per line. Each line is indented with padding and a hanging indent, and
  * strings may break anywhere, so a long hash fills its line and wraps under its own key rather than
  * at the left edge of the block.
@@ -50,7 +60,7 @@ function Json({ value }: { value: unknown }) {
         {jsonLines(value).map((line, index) => (
           <span key={index} className="block" style={{ paddingLeft: `${line.indent + 2}ch`, textIndent: '-2ch' }}>
             {line.tokens.map((token, at) => (
-              <span key={at} className={`${TOKEN_CLASS[token.kind]} ${token.kind === 'string' || token.kind === 'key' ? 'break-all' : ''}`}>
+              <span key={at} className={`${TOKEN_CLASS[token.kind]} ${wrapClass(token)}`}>
                 {token.text}
               </span>
             ))}
@@ -61,14 +71,34 @@ function Json({ value }: { value: unknown }) {
   );
 }
 
-export function JwsView({ jws, label = 'Signed receipt', actions }: { jws: string; /** What the token is. */ label?: string; actions?: ReactNode }) {
+export function JwsView({
+  jws,
+  label = 'Signed receipt',
+  actions,
+  decoded = 'open',
+  token = 'full',
+}: {
+  jws: string;
+  /** What the token is. */
+  label?: string;
+  actions?: ReactNode;
+  /** Whether the decoded header, payload and signature show at first, or wait behind a button. */
+  decoded?: 'open' | 'folded';
+  /**
+   * The whole token, the payload cut to its start and end where space is short, or `auto`: cut on
+   * a phone and whole from 768 px. Copy always takes all of it.
+   */
+  token?: 'full' | 'short' | 'auto';
+}) {
   const parts = splitJws(jws);
+  const [showDecoded, setShowDecoded] = useState(decoded === 'open');
+  const decodedId = useId();
 
   return (
     <section aria-label={label} className="min-w-0 rounded-panel border border-line bg-panel">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2.5 sm:px-4">
         <p className="font-medium text-text">
-          {label} <span className="font-normal text-muted">compact JWS</span>
+          {label} <span className="hidden font-normal text-muted sm:inline">compact JWS</span>
         </p>
         <div className="flex items-center gap-2">
           {/* Wrapped: a node passed in from a server page must not share an array with siblings. */}
@@ -78,16 +108,46 @@ export function JwsView({ jws, label = 'Signed receipt', actions }: { jws: strin
       </div>
 
       {parts ? (
-        <div className="grid gap-4 p-4">
+        <div className="grid gap-4 p-3 sm:p-4">
           <p className="font-mono text-meta leading-5 break-all">
             <span className={SEGMENTS.header.text}>{parts.header}</span>
             <span className="text-muted">.</span>
-            <span className={SEGMENTS.payload.text}>{parts.payload}</span>
+            {token !== 'full' && parts.payload.length > SHORT_PAYLOAD + 3 && (
+              <span className={token === 'auto' ? 'md:hidden' : undefined}>
+                <span className={SEGMENTS.payload.text}>{parts.payload.slice(0, SHORT_PAYLOAD - 16)}</span>
+                <span className="text-muted">...</span>
+                <span className={SEGMENTS.payload.text}>{parts.payload.slice(-16)}</span>
+              </span>
+            )}
+            {(token === 'full' || parts.payload.length <= SHORT_PAYLOAD + 3) && (
+              <span className={SEGMENTS.payload.text}>{parts.payload}</span>
+            )}
+            {token === 'auto' && parts.payload.length > SHORT_PAYLOAD + 3 && (
+              <span className={`hidden md:inline ${SEGMENTS.payload.text}`}>{parts.payload}</span>
+            )}
             <span className="text-muted">.</span>
             <span className={SEGMENTS.signature.text}>{parts.signature}</span>
           </p>
 
-          <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] md:grid-rows-[auto_1fr]">
+          {decoded === 'folded' && (
+            <button
+              type="button"
+              aria-expanded={showDecoded}
+              aria-controls={decodedId}
+              onClick={() => setShowDecoded((shown) => !shown)}
+              className="flex items-center gap-1.5 justify-self-start rounded-control text-meta font-medium text-action hover:text-action-strong"
+            >
+              {showDecoded ? 'Hide the decoded header and payload' : 'Show the decoded header and payload'}
+              <svg viewBox="0 0 16 16" aria-hidden className={`size-3 transition-transform ${showDecoded ? 'rotate-180' : ''}`}>
+                <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
+          <div
+            id={decodedId}
+            hidden={!showDecoded}
+            className="grid min-w-0 gap-4 md:grid-cols-[minmax(15.5rem,1fr)_minmax(0,2fr)] md:grid-rows-[auto_1fr]"
+          >
             <figure className="min-w-0 md:col-start-1 md:row-start-1">
               <Caption segment="header">
                 <span className="text-muted">decoded</span>
@@ -114,7 +174,7 @@ export function JwsView({ jws, label = 'Signed receipt', actions }: { jws: strin
           </div>
         </div>
       ) : (
-        <div className="grid gap-3 p-4">
+        <div className="grid gap-3 p-3 sm:p-4">
           <p className="text-body text-muted">
             This is not a compact JWS. A compact JWS is three base64url parts joined by dots: header, payload and signature.
           </p>

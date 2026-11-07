@@ -4,9 +4,10 @@ import type { Db } from '@/lib/db/client';
 import { disputes, type StoredEvidenceItem, type StoredNarrative } from '@/lib/db/schema';
 
 // The operator's disputes pages: every dispute PayPal opened against Behest, and one dispute with
-// the evidence items of its last draft and, once submitted, the narrative PayPal was sent. Reasons
-// and statuses are PayPal's codes, read as words. The buyer's notes are kept exactly as PayPal sent
-// them; the page shows them as plain text.
+// the evidence items of its last draft, what PayPal last said it allows Behest to do, when the answer
+// went to the buyer as a message and, once submitted, the narrative PayPal was sent. Reasons,
+// statuses and stages are PayPal's codes, read as words. The buyer's notes are kept exactly as
+// PayPal sent them; the page shows them as plain text.
 
 export type DisputeRow = {
   id: string;
@@ -24,11 +25,20 @@ export type DisputeRow = {
 
 export type DisputeView = Omit<DisputeRow, 'submitted'> & {
   buyerNotes: string | null;
+  /** PayPal's stage for the case in words, such as Inquiry, or null until PayPal has given one. */
+  stage: string | null;
+  /**
+   * What PayPal last said Behest may do with the case, such as provide_evidence or send_message, or
+   * null until the dispute has been read with them.
+   */
+  actions: string[] | null;
+  /** When the answer was last sent to the buyer as a message, as an ISO timestamp, or null. */
+  messagedAt: string | null;
   /** The evidence items of the pack stored by the last draft, or null before any draft. */
   items: StoredEvidenceItem[] | null;
   /**
-   * The narrative of a submission PayPal did not take, for the operator to start from again. Null
-   * once submitted, and when there was no such submission.
+   * The narrative last sent to the buyer as a message, or of a submission PayPal did not take, for
+   * the operator to start from again. Null once submitted, and when there was neither.
    */
   lastNarrative: StoredNarrative | null;
   /** When evidence was submitted and the narrative sent, or null until then. */
@@ -39,6 +49,19 @@ export type DisputeView = Omit<DisputeRow, 'submitted'> & {
 export function codeWords(code: string): string {
   const text = code.toLowerCase().replaceAll('_', ' ');
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** PayPal's names for the stages of a case, as words. */
+const STAGES: Readonly<Record<string, string>> = {
+  INQUIRY: 'Inquiry',
+  CHARGEBACK: 'Chargeback',
+  PRE_ARBITRATION: 'Pre-arbitration',
+  ARBITRATION: 'Arbitration',
+};
+
+/** PayPal's stage for a case as words, or as PayPal gave it when it is not a stage Behest knows. */
+export function stageWords(stage: string): string {
+  return Object.hasOwn(STAGES, stage) ? STAGES[stage] : stage;
 }
 
 /** Every dispute as the list shows it, latest opened first, and those PayPal gave no time last. */
@@ -83,8 +106,12 @@ export async function disputeView(db: Db, id: string): Promise<DisputeView | nul
     amountCents: row.amountCents,
     linked: row.purchaseId !== null,
     buyerNotes: row.buyerNotes,
+    stage: row.stage === null ? null : stageWords(row.stage),
+    actions: row.actions,
+    messagedAt: row.messagedAt?.toISOString() ?? null,
     items: row.evidencePack?.items ?? null,
-    // Only the submit route writes a narrative, and it clears the submission time when PayPal fails.
+    // Only the submit and message routes write a narrative: the submit route clears the submission
+    // time when PayPal fails, and a message never sets it.
     lastNarrative: row.submittedAt === null ? row.narrative : null,
     submitted: row.submittedAt === null ? null : { at: row.submittedAt.toISOString(), narrative: row.narrative },
   };

@@ -67,10 +67,10 @@ export function SellerGrid<Row extends { id: string }>({
 }) {
   const [search, setSearch] = useState('');
   const box = useRef<HTMLDivElement>(null);
-  // AG Grid has no option for the grid's accessible name. It puts role="grid" on its .ag-root
-  // element itself, so the name goes on that element once the grid is ready.
+  // AG Grid has no option for the grid's accessible name. It sets role="grid" on one of its own
+  // elements, so the name goes on whichever element carries that role once the grid is ready.
   const nameGrid = useCallback(() => {
-    box.current?.querySelector('.ag-root')?.setAttribute('aria-labelledby', labelledBy);
+    box.current?.querySelector('[role="grid"], [role="treegrid"]')?.setAttribute('aria-labelledby', labelledBy);
   }, [labelledBy]);
 
   return (

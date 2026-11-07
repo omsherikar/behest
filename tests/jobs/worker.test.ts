@@ -146,7 +146,7 @@ it('keeps polling after running the jobs fails', async () => {
 });
 
 it('runs the periodic pass on the first tick, then at most once a minute, each time before the due jobs', async () => {
-  const periodic = vi.fn(async (_deps: string) => {});
+  const periodic = vi.fn<(deps: string) => Promise<void>>(async () => {});
   const stop = startWorker(async () => ({ ...runtime, periodic }), 1000);
 
   vi.advanceTimersByTime(1000);

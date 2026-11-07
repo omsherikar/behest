@@ -1,5 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { join } from 'node:path';
 import { CompactSign } from 'jose';
 import { expect, it, vi } from 'vitest';
 import { Cart } from '@/lib/domain/cart';
@@ -8,6 +7,7 @@ import { canonicalJson, hashOf, sha256Hex } from '@/lib/receipts/canonical';
 import { generateSigningKey, loadSigningKey, publicJwks } from '@/lib/receipts/keys';
 import { createSigner } from '@/lib/receipts/sign';
 import { cartClaims, type ReceiptRejection, verifyReceipt } from '@/lib/receipts/verify-receipt';
+import { modulesReachedFrom, REPO_ROOT } from '@/tests/helpers/module-graph';
 
 const key = await loadSigningKey({ RECEIPT_SIGNING_KEY: (await generateSigningKey()).pem });
 const signer = createSigner(key);
@@ -227,30 +227,8 @@ it('states the cart claims a receipt makes: hash, total, currency and the number
   expect(cartClaims(cart)).toStrictEqual({ hash: hashOf(cart), totalCents: 1650, currency: 'USD', itemCount: 3 });
 });
 
-const ROOT = resolve(import.meta.dirname, '../..');
-
-/** Repo-relative paths of the modules `file` reaches through its imports, itself included. */
-function modulesReachedFrom(file: string, reached = new Set<string>()): Set<string> {
-  const path = relative(ROOT, file);
-  if (reached.has(path)) return reached;
-  reached.add(path);
-  if (!existsSync(file)) return reached;
-  // Static, side-effect and dynamic imports, and re-exports.
-  for (const [, specifier] of readFileSync(file, 'utf8').matchAll(/\b(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g)) {
-    const base = specifier.startsWith('@/')
-      ? join(ROOT, specifier.slice(2))
-      : specifier.startsWith('.')
-        ? resolve(dirname(file), specifier)
-        : null;
-    if (base === null) continue;
-    const target = [`${base}.ts`, join(base, 'index.ts')].find((candidate) => existsSync(candidate)) ?? base;
-    modulesReachedFrom(target, reached);
-  }
-  return reached;
-}
-
 it('reaches no purchase or database module through its imports', () => {
-  const reached = [...modulesReachedFrom(join(ROOT, 'lib/receipts/verify-receipt.ts'))];
+  const reached = [...modulesReachedFrom(join(REPO_ROOT, 'lib/receipts/verify-receipt.ts'))];
   expect(reached).toContain('lib/receipts/sign.ts');
   expect(reached.filter((path) => /^lib\/(db|purchases)\b/.test(path))).toEqual([]);
 });

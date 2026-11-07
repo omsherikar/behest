@@ -1,7 +1,7 @@
 // Reads a request body with a size limit, so a route never holds more than it means to accept.
 
-/** The default limit, in bytes: about a quarter of a million tokens, for the dashboard analyst's turns. */
-export const MAX_BODY_BYTES = 1_000_000;
+/** The default limit, in bytes: 256 KiB, about 65 thousand tokens, for the dashboard analyst's turns. */
+export const MAX_BODY_BYTES = 256 * 1024;
 
 /** The limit for a form-sized JSON request, in bytes, such as a mandate with its answers or policy. */
 export const FORM_BODY_BYTES = 64 * 1024;

@@ -8,13 +8,13 @@ import type { Verdict } from '@/lib/domain/verdict';
 import { evaluateGateSafely, type CatalogEntry, type GateInput } from '@/lib/gate/evaluate';
 import { periodStart } from '@/lib/gate/period';
 import { quoteAgentText } from '@/lib/gate/rules/check';
-import { mandateActive } from '@/lib/gate/rules/mandate';
 import { applyIntent } from '@/lib/intent/apply';
 import { hashOf } from '@/lib/receipts/canonical';
 import { startApproval } from './approval';
 import { chargeAllowed, purchaseOutcome } from './charge';
 import type { IntentInput, IntentResult, ProposalOutcome, PurchaseDeps } from './deps';
 import { appendEvent, transition } from './events';
+import { whyMandateEnded } from './mandate-check';
 import { COUNTS_AGAINST_BUDGET } from './transitions';
 
 // Turning a shopping agent's proposal into a decision and acting on it (architecture sections 5.1,
@@ -49,9 +49,6 @@ const HOUR_MS = 60 * 60 * 1000;
 
 /** The reason recorded when the intent check throws, or answers with something that is not a result. */
 const CHECK_FAILED = 'internal_error';
-
-/** What blocks a purchase whose mandate cannot be read back with a valid policy. */
-const MANDATE_UNREADABLE = 'The mandate could not be checked again, so nothing was bought.';
 
 /** An intent check result as the purchase stores it. Anything else the check answers with counts as a failed check. */
 const IntentAnswer = z.object({
@@ -319,20 +316,4 @@ async function recordIntent(
     if (verdict === 'BLOCK') await transition(tx, purchaseId, 'proposed', 'blocked');
     return { verdict, mandateEnded };
   });
-}
-
-/**
- * Why the mandate no longer authorizes purchases at `now`, in the gate's words, or null while it is
- * still active and unexpired. Locks the mandate's row FOR SHARE until the caller's transaction ends.
- */
-async function whyMandateEnded(tx: Db, mandateId: string, now: Date): Promise<string | null> {
-  const [mandate] = await tx
-    .select({ status: mandates.status, expiresAt: mandates.expiresAt, policy: mandates.policy })
-    .from(mandates)
-    .where(eq(mandates.id, mandateId))
-    .for('share');
-  const policy = MandatePolicy.safeParse(mandate?.policy);
-  if (!mandate || !policy.success) return MANDATE_UNREADABLE;
-  const check = mandateActive({ mandate: { status: mandate.status, expiresAt: mandate.expiresAt }, now }, policy.data);
-  return check.result === 'pass' ? null : check.detail;
 }

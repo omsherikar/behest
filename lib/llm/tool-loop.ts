@@ -2,7 +2,7 @@ import type { Middleware } from '@anthropic-ai/sdk';
 import type { BetaRunnableTool } from '@anthropic-ai/sdk/lib/tools/BetaRunnableTool';
 import { transformJSONSchema } from '@anthropic-ai/sdk/lib/transform-json-schema';
 import type { BetaMessage, BetaMessageParam, BetaStopReason } from '@anthropic-ai/sdk/resources/beta/messages';
-import { dailyCapUsd, type LlmDeps, type LlmFailure, type LlmResult, recordCall, spendCapFailure } from './client';
+import { type LlmDeps, type LlmFailure, type LlmResult, recordCall, spendCapFailure, spendCaps } from './client';
 import { type LlmRoute, ROUTE_HEADER, routeConfig } from './routes';
 import { type BilledUsage, billedUsage, FALLBACK_BETA, isMessage, salvagedUsage, stopFailure } from './structured';
 
@@ -93,7 +93,7 @@ export async function runToolLoop(
 ): Promise<LlmResult<BetaMessage>> {
   const env = deps.env ?? process.env;
   const { model, effort, maxTokens } = routeConfig(route, env);
-  const cap = dailyCapUsd(env);
+  const cap = spendCaps(route, env);
   // The runner treats a max_iterations of 0 as no limit at all.
   if (!Number.isInteger(req.maxTurns) || req.maxTurns < 1) {
     throw new Error(`maxTurns must be a whole number of turns, 1 or more, got ${req.maxTurns}`);

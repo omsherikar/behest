@@ -95,7 +95,7 @@ curl -fsS -b cookies.txt -X POST "https://$DOMAIN/api/demo/reset" \
 rm cookies.txt
 ```
 
-The reset answers with how many rows it removed and what it seeded. It keeps a linked wallet unless the body also says `"full":true`, and it answers 409 while a payment is in progress.
+The reset answers with how many rows it removed and what it seeded. It keeps a linked wallet unless the body also says `"full":true`, and it answers 409 while a purchase that changed in the last 30 minutes is being charged or a job is running.
 
 ## 8. Smoke checks
 
@@ -104,13 +104,22 @@ curl -fsS "https://$DOMAIN/api/health"                         # {"ok":true}
 curl -fsS "https://$DOMAIN/.well-known/jwks.json" | jq '.keys | length'   # 1
 ```
 
-Then make one ALLOW purchase end to end in the sandbox. As the buyer, write a mandate, confirm its readback and link a sandbox PayPal wallet. Ask the shopping agent for something the mandate allows from a demo seller. The decision ledger should show ALLOW, the payment should be captured, the receipt should verify against the key set, and the seller's orders page should show the order. `docker compose logs app` shows the PayPal webhooks arriving and the payout job settling the seller's payout.
+Then make one ALLOW purchase end to end in the sandbox. As the buyer, write a mandate, confirm its readback and link a sandbox PayPal wallet. Ask the shopping agent for something the mandate allows from a demo seller. The decision ledger should show ALLOW, the payment should be captured, the receipt should verify against the key set, and the seller's orders page should show the order and its payout. Accepted webhooks and settled payouts are not logged: `docker compose logs app` shows only the webhooks it rejected or ignored, and failures.
 
 ## Running it
 
 - **Update:** `git pull && docker compose up -d --build`. Migrations run on every start.
 - **Logs:** `docker compose logs -f app`.
 - **Back up the database:** `docker compose exec db pg_dump -U behest behest > behest.sql`.
+
+## Checks for the operator
+
+No page lists the purchase events that ask for an operator, or the jobs that ran out of retries, so read them from the database:
+
+```sh
+docker compose exec db psql -U behest behest -c "select purchase_id, kind, data, created_at from purchase_events where kind in ('charge_stale', 'capture_unmatched', 'seller_unreachable', 'seller_ambiguous', 'refund_failed', 'refund_skipped', 'refund_stuck', 'payout_failed', 'payout_after_refund', 'payout_unclaimed_after_refund') order by created_at desc"
+docker compose exec db psql -U behest behest -c "select kind, payload, attempts, last_error, run_at from jobs where status = 'dead' order by run_at desc"
+```
 
 ## Client addresses and Cloudflare
 

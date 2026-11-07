@@ -36,8 +36,12 @@ export interface ToolkitLike {
   }): Promise<{ content: string | { text: string }[] }>;
 }
 
-/** The official toolkit, signed in with Behest's PayPal app credentials and given only the read actions. */
-export function paypalAgentToolkit(): PayPalAgentToolkit {
+/**
+ * The official toolkit, signed in with Behest's PayPal app credentials and given only the read actions.
+ * Not exported: its handleToolCall runs any of the toolkit's tools by name, so nothing outside this
+ * module gets it, only the read-only tools paypalReadOnlyTools builds from it.
+ */
+function paypalAgentToolkit(): PayPalAgentToolkit {
   const { PAYPAL_CLIENT_ID: clientId, PAYPAL_CLIENT_SECRET: clientSecret } = process.env;
   if (!clientId || !clientSecret) {
     throw new Error('PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET must be set (see .env.example)');

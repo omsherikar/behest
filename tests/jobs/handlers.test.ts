@@ -96,7 +96,7 @@ describe('jobHandlers', () => {
     const s = await setUpCaptured();
     await s.db.update(purchases).set({ status: 'settled' }).where(eq(purchases.id, s.purchaseId));
     s.paypal.disputes = [
-      { id: 'PP-D-1', status: 'OPEN', reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED', amountCents: 1875, captureId: s.captureId, createTime: NOW.toISOString(), buyerNotes: null },
+      { id: 'PP-D-1', status: 'OPEN', reason: 'MERCHANDISE_OR_SERVICE_NOT_RECEIVED', amountCents: 1875, captureId: s.captureId, createTime: NOW.toISOString(), buyerNotes: null, outcome: null },
     ];
     await enqueue(s.db, 'dispute_sync', {}, NOW);
 

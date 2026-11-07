@@ -7,14 +7,19 @@ import { paypalRequest } from './http';
 
 const WEBHOOKS = '/v1/notifications/webhooks';
 
-/** The PayPal events Behest acts on. */
+/**
+ * The PayPal events Behest acts on. A dispute the buyer wins comes back as a refund or a reversal of
+ * the capture, and a resolved dispute asks for the dispute sync that records its outcome.
+ */
 export const WEBHOOK_EVENT_TYPES = [
   'CHECKOUT.ORDER.APPROVED',
   'PAYMENT.CAPTURE.COMPLETED',
   'PAYMENT.CAPTURE.DENIED',
   'PAYMENT.CAPTURE.REFUNDED',
+  'PAYMENT.CAPTURE.REVERSED',
   'CUSTOMER.DISPUTE.CREATED',
   'CUSTOMER.DISPUTE.UPDATED',
+  'CUSTOMER.DISPUTE.RESOLVED',
   'PAYMENT.PAYOUTS-ITEM.SUCCEEDED',
   'PAYMENT.PAYOUTS-ITEM.FAILED',
 ] as const;

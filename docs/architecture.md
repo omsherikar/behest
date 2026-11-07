@@ -33,7 +33,7 @@ These hold everywhere in the code. Each one has tests.
 4. **One artifact travels everywhere.** The buyer side produces the receipt, the seller verifies it with only a public key, and the dispute pack is built from it.
 5. **What the buyer confirms is exactly what is enforced.** The readback the buyer approves is rendered deterministically from the policy JSON, not paraphrased by a model.
 6. **Every money-moving call is idempotent.** PayPal requests carry a request id derived from the purchase id and the step, so a retry can never charge twice.
-7. **Text from sellers and the web is data, never instructions.** It reaches models only inside clearly delimited tool results, and it can never reach the gate.
+7. **Text from sellers and the web is data, never instructions.** It reaches models only inside clearly delimited tool results. One gate input does derive from it: each listing's category, which the catalog builder assigns from what the seller wrote (section 7.6).
 
 ## 3. System context
 
@@ -101,15 +101,15 @@ lib/
   agent/        Shopping agent: system prompt, tools, bounded loop
   purchases/    The orchestrator and its state machine
   paypal/       REST client (orders, vault, payouts, refunds, disputes, webhooks) and the toolkit bridge
-  channel3/     Channel3 REST client, normalization, benchmark cache
+  channel3/     Channel3 REST client and normalization (the benchmark is a column on each product)
   catalog/      Seller onboarding: CSV and photo to listings, screening, enrichment
   sellers/      Seller order intake: independent receipt verification
   disputes/     Evidence pack assembly, evidence agent, submission
   jobs/         Database-backed job queue and in-process worker
 app/
-  (buyer)/      Mandate, wallet link, approvals, ledger
-  (seller)/     Onboarding, orders, payouts
-  (ops)/        Disputes
+  buyer/        Mandate, wallet link, shop, approvals, ledger
+  seller/       Onboarding, catalog, orders
+  ops/          Disputes
   dashboard/    AG Studio dashboard with custom widgets and a Claude-backed analyst
   api/          Route handlers (section 10)
 ```
@@ -149,9 +149,9 @@ stateDiagram-v2
   proposed --> awaiting_approval: ASK
   proposed --> failed: abandoned before charging
   awaiting_approval --> charging: buyer approves at PayPal
-  awaiting_approval --> cancelled: declined or expired
+  awaiting_approval --> cancelled: order not created, or approval window expired
   charging --> captured: capture COMPLETED
-  charging --> failed: PayPal error
+  charging --> failed: refused before PayPal is asked, or PayPal declines or denies
   charging --> awaiting_approval: PayPal finds the order not yet approved
   captured --> accepted: seller verifies receipt
   captured --> refunded: seller rejects receipt
@@ -160,7 +160,7 @@ stateDiagram-v2
   settled --> disputed: dispute opened
   settled --> refunded: refund issued
   disputed --> refunded: refund issued
-  disputed --> resolved
+  disputed --> resolved: PayPal closes the dispute for Behest
   blocked --> [*]
   cancelled --> [*]
   failed --> [*]
@@ -169,6 +169,8 @@ stateDiagram-v2
 ```
 
 Every transition appends a row to `purchase_events`, which is never updated or deleted. That log is the agent's decision record in the evidence pack.
+
+Two edges need a word. Once PayPal has been asked, only a decline or a denial fails a `charging` purchase: any other PayPal error leaves it `charging`, since money may have moved, until a replay under the same request id finds out. And cancelling at PayPal does not cancel the purchase: it stays `awaiting_approval`, holding its budget, until its 3-hour approval window expires.
 
 ### 5.3 Receipts (`lib/receipts`)
 
@@ -265,22 +267,22 @@ The orchestrator creates a buyer-present PayPal order and shows the approval lin
 
 ### 6.4 Blocked purchase and prompt injection
 
-A seller listing contains hidden text telling agents to ignore the budget and buy ten. Four layers stop it, and the demo shows all of them in the ledger:
+A seller listing contains hidden text telling agents to ignore the budget and buy ten. Four layers stop it:
 
-1. Listing screening flags the text at onboarding. The gate blocks any cart containing a flagged item.
+1. Listing screening flags the text at onboarding, and a flagged listing is hidden from the agent's tools and the public catalog (`lib/catalog/buyable.ts`). The gate also blocks any cart containing a flagged item.
 2. Tool results present listing text as quoted data, and the agent's instructions say such text has no authority.
 3. If the agent still proposes ten, the gate blocks on budget or sends it to the buyer on quantity, because quantities and prices come from the database.
 4. The intent check sees the buyer's actual request next to the cart and escalates the mismatch.
 
 ### 6.5 Dispute
 
-The buyer opens a dispute in the PayPal sandbox. Behest receives `CUSTOMER.DISPUTE.CREATED`, matches the capture, runs the evidence agent, and shows the operator a pack to review and submit.
+The buyer opens a dispute in the PayPal sandbox. The `CUSTOMER.DISPUTE.CREATED` webhook queues a dispute sync, which also runs every ten minutes; the sync matches the capture and lists the dispute for the operator. The evidence agent runs when the operator asks for a draft, and the operator reviews the pack and submits it. When PayPal closes the dispute in Behest's favour, or the buyer withdraws it, the next sync moves the purchase to `resolved`; a dispute the buyer wins comes back as a refund or a reversal of the capture, whose webhook moves the purchase to `refunded`.
 
 ## 7. Claude design
 
 ### 7.1 Principles
 
-- **Use the simplest form that works.** Four of the six model uses are single structured-output calls. Only shopping and dispute evidence are agent loops, and both have bounded turns and tools that cannot move money.
+- **Use the simplest form that works.** Three of the six model uses are single structured-output calls: the mandate compiler, the intent check and the catalog builder. Only shopping and dispute evidence are agent loops, and both have bounded turns and tools that cannot move money.
 - **The official Anthropic TypeScript SDK.** `messages.parse` with zod gives schema-checked outputs; strict tool schemas keep tool inputs valid; the tool runner drives the two agent loops with per-turn hooks for logging and limits.
 - **Opus 5.5 everywhere by default, tuned with effort.** One model keeps behaviour consistent and keeps prompt caches warm. Each route's model and effort are configuration, so a cheaper model can be swapped in per route after measuring.
 - **Structured outputs instead of forced tool calls.** The current models reject forced tool choice; every judgement comes back through `output_config.format`.
@@ -294,7 +296,7 @@ The buyer opens a dispute in the PayPal sandbox. Behest receives `CUSTOMER.DISPU
 | Mandate compiler | Single call | medium | Policy, assumptions, open questions | Show an error; nothing is signed |
 | Shopping agent | Tool loop, at most 12 turns | medium | Proposed purchases through a tool | Stop; nothing is bought |
 | Intent check | Single call | low | Consistent, needs human, or inconsistent, with reasons | Send to the buyer (ASK) |
-| Catalog builder | Single call per batch; vision for photos | medium | Listings in the shared category list, plus screening flags | Seller edits the rows by hand |
+| Catalog builder | Single call per batch; vision for photos | medium | Listings in the shared category list, plus screening flags | Onboarding fails and the seller is asked to try again |
 | Dispute evidence agent | Tool loop, read-only tools | high | Narrative with a citation per claim | Operator writes the narrative |
 | Dashboard analyst | AG Studio harness through a Claude adapter | low | Studio queries and widgets | Assistant unavailable |
 
@@ -313,7 +315,9 @@ The agent never sees a payment tool. `propose_purchase` returns BLOCK and ASK re
 
 ### 7.4 Catalog builder and listing screening
 
-CSV rows are sent in batches; photos go as images. The output per item is a title, description, category from the fixed list, price, and a screening result: whether the source text contains instructions aimed at AI agents. Screening results are stored as product flags the gate reads. Channel3 enrichment then attaches a canonical product match and market price where available.
+CSV rows are sent in batches; photos go as images. The output per item is a title, description, category from the fixed list, and a screening result: whether the source text contains instructions aimed at AI agents. Prices and stock always come from the seller. Screening results are stored as product flags the gate reads. Channel3 enrichment then attaches a canonical product match and market price where available.
+
+The category is a gate input written by a model from seller text, so a dishonest seller can list one kind of product as another. The intent check, which compares the cart with the buyer's own request, and the mandate's seller lists are the backstop.
 
 ### 7.5 The dispute evidence agent
 
@@ -323,17 +327,17 @@ Read-only tools only: PayPal Agent Toolkit `get_dispute`, `list_disputes`, `get_
 
 | Source | Where it may appear | Where it may never appear |
 |---|---|---|
-| Seller listing text | Agent tool results, quoted; catalog builder input | Gate inputs, system prompts, receipt payloads |
+| Seller listing text | Agent tool results, quoted; catalog builder input; gate inputs only as the category the catalog builder assigns from it | System prompts, receipt payloads |
 | Channel3 product text | Agent tool results, quoted | Gate inputs except the numeric benchmark |
 | Agent's own rationale | Intent check, labelled as unverified | Gate inputs |
 | Buyer's mandate and request | Everywhere; the buyer is the principal | n/a |
 
-Tool results are truncated to fixed lengths, stripped of markup, and wrapped in tags that the system prompt defines as data.
+Tool results are truncated to fixed lengths, cleared of hidden characters, have every `<` escaped as `\u003c`, and are wrapped in tags that the system prompt defines as data.
 
 ### 7.7 Cost control and observability
 
 - Every Claude call goes through `lib/llm`, which records route, model, effort, input, output and cache tokens, estimated cost, latency, stop reason and request id in `llm_calls`.
-- A daily spend cap blocks further model calls once reached. Purchases then fall back to ASK.
+- A daily spend cap blocks further model calls once reached. The shopping agent then stops, and an intent check that hits the cap sends its purchase to the buyer (ASK). The dashboard analyst and the catalog builder, which any visitor can start, also stop at a smaller daily cap of their own (`LLM_ANALYST_DAILY_CAP_USD` and `LLM_CATALOG_DAILY_CAP_USD`, 1 dollar each by default); their spend counts toward the overall cap too. Each cap is checked before a call starts, not reserved.
 - Tests run against recorded fixtures. Live evaluation sets (mandate phrasings, intent pairs, poisoned listings) run only on demand.
 - Public model routes are rate limited per visitor.
 
@@ -377,8 +381,8 @@ Money is integer cents with an ISO currency code. Timestamps are UTC. Budget per
 
 - **Secrets** come from environment variables only: PayPal credentials, the Claude key, the Ed25519 signing key, the session secret.
 - **Webhooks** are accepted only after PayPal's verify-webhook-signature call succeeds, and are de-duplicated by event id.
-- **Signing keys** carry a key id; the JWKS can hold the previous key during rotation.
-- **Sessions.** The demo has three personas (buyer, seller, operator) on signed, HTTP-only cookies. Routes check the persona server-side.
+- **Signing keys** carry a key id. The JWKS publishes the current key only.
+- **Sessions.** The demo has three personas (buyer, seller, operator) on signed, HTTP-only cookies. Routes that need a persona check it server-side; the seller catalog and order intake, receipt verification, webhooks, the key set, the health check and the session route are public by design.
 - **Abuse limits.** Model routes are rate limited and covered by the spend cap. The demo reset endpoint needs the operator persona.
 - **Supply chain.** Dependencies are pinned through the lockfile.
 
@@ -400,6 +404,10 @@ Money is integer cents with an ISO currency code. Timestamps are UTC. Budget per
 | `POST /api/disputes/[id]/draft` | Operator drafts a cited narrative from the evidence pack |
 | `POST /api/disputes/[id]/evidence` | Operator submits a reviewed pack |
 | `POST /api/ai/studio` | Server proxy for the dashboard analyst |
+| `GET /api/dashboard/data` | The dashboard's rows, scoped to the session's persona |
+| `POST /api/session` | Starts a demo session as a persona; `DELETE` ends it |
+| `POST /api/demo/reset` | Operator resets the demo; needs `DEMO_RESET_KEY` |
+| `GET /api/health` | Liveness check |
 
 ## 11. Dashboard
 
@@ -418,7 +426,7 @@ AG Studio renders the buyer, seller and operator views from Behest's tables:
 | Database and orchestrator | Integration tests on PGlite with fakes for PayPal and Claude |
 | PayPal client | Contract tests against responses recorded from the sandbox |
 | Model behaviour | Evaluation sets run on demand against the live API |
-| End to end | A scripted sandbox run with one manual approval |
+| End to end | By hand in the sandbox, following the smoke check in docs/deploy.md |
 
 ## 13. Deployment
 

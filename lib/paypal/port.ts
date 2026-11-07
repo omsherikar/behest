@@ -17,4 +17,8 @@ export interface PaypalPort {
 }
 
 export type DisputeSummary = { id: string; status: string; reason: string; amountCents: number; captureId: string | null; createTime: string };
-export type DisputeDetail = DisputeSummary & { buyerNotes: string | null };
+export type DisputeDetail = DisputeSummary & {
+  buyerNotes: string | null;
+  /** PayPal's outcome code once it has decided the dispute, such as RESOLVED_SELLER_FAVOUR; null before. */
+  outcome: string | null;
+};

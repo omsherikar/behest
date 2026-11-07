@@ -8,7 +8,7 @@ import type {
   BetaUsage,
 } from '@anthropic-ai/sdk/resources/beta/messages';
 import { z } from 'zod';
-import { dailyCapUsd, type LlmDeps, type LlmFailure, type LlmResult, recordCall, spendCapFailure } from './client';
+import { type LlmDeps, type LlmFailure, type LlmResult, recordCall, spendCapFailure, spendCaps } from './client';
 import { estimateCostUsd, type TokenUsage } from './prices';
 import { type LlmRoute, ROUTE_HEADER, routeConfig } from './routes';
 
@@ -197,7 +197,7 @@ export async function callStructured<T>(
 ): Promise<LlmResult<T>> {
   const env = deps.env ?? process.env;
   const { model, effort, maxTokens } = routeConfig(route, env);
-  const cap = dailyCapUsd(env);
+  const cap = spendCaps(route, env);
   // Built before the request, so a schema that cannot become a JSON schema throws as the bug it is.
   const format = outputFormat(req.schema);
   const capped = await spendCapFailure(deps.db, deps.now(), cap);

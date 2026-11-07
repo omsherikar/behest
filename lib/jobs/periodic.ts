@@ -34,6 +34,8 @@ const PROPOSAL_ABANDONED_AFTER_MS = 15 * MINUTE_MS;
 const REDELIVER_AFTER_MS = 5 * MINUTE_MS;
 /** How long after its last lost answer a refund is asked for again. */
 const REFUND_RETRY_AFTER_MS = 5 * MINUTE_MS;
+/** How long a purchase may stay `charging` with no change before an operator is told to check PayPal. */
+const CHARGE_STALE_AFTER_MS = 30 * MINUTE_MS;
 /** Unanswered deliveries, or lost refund answers, after which the pass stops and flags the purchase. */
 const MAX_ATTEMPTS = 12;
 /** The most rows one step takes in one pass. */
@@ -63,7 +65,8 @@ let passRunning = false;
 /**
  * Runs every step once, with the clock read once for what is due: keeps a dispute sync queued,
  * queues the polls of unfinished payouts, fails abandoned proposals, delivers unanswered orders
- * again, retries lost refunds and flags payouts left unclaimed after a refund. A pass that starts
+ * again, retries lost refunds, flags payouts left unclaimed after a refund and flags purchases left
+ * `charging`. A pass that starts
  * while another runs, in this process or, on Postgres, in another worker, does nothing. Never throws.
  */
 export async function runPeriodicPass(deps: JobDeps): Promise<void> {
@@ -88,6 +91,7 @@ async function runSteps(deps: JobDeps): Promise<void> {
     ['undelivered orders', deliverUnansweredOrders],
     ['lost refunds', retryLostRefunds],
     ['payouts unclaimed after a refund', flagUnclaimedAfterRefund],
+    ['purchases left charging', flagStaleCharges],
   ];
   for (const [name, step] of steps) {
     try {
@@ -312,6 +316,37 @@ async function flagUnclaimedAfterRefund({ deps: { db } }: Pass): Promise<void> {
   for (const { purchaseId, payoutStatus, paypalBatchId } of held) {
     await forEachPurchase('flag the unclaimed payout of', purchaseId, () =>
       appendOnce(db, purchaseId, 'payout_unclaimed_after_refund', { payoutStatus, paypalBatchId }),
+    );
+  }
+}
+
+/**
+ * Logs `charge_stale` once for each purchase left `charging` with no change for more than 30 minutes:
+ * a capture PayPal holds as PENDING whose webhook never came, or a payment whose answer was lost and
+ * whose replays have stopped. Only an operator checking the order at PayPal can tell what happened,
+ * so this moves no money and leaves the purchase `charging`, still counted against its budget.
+ */
+async function flagStaleCharges({ deps: { db }, now }: Pass): Promise<void> {
+  const stale = await db
+    .select({
+      id: purchases.id,
+      updatedAt: purchases.updatedAt,
+      paypalOrderId: purchases.paypalOrderId,
+      paypalCaptureId: purchases.paypalCaptureId,
+    })
+    .from(purchases)
+    .where(
+      and(
+        eq(purchases.status, 'charging'),
+        lt(purchases.updatedAt, new Date(now.getTime() - CHARGE_STALE_AFTER_MS)),
+        notExists(eventOf(db, eq(purchaseEvents.kind, 'charge_stale'))),
+      ),
+    )
+    .orderBy(asc(purchases.updatedAt))
+    .limit(ROWS_PER_STEP);
+  for (const { id, updatedAt, paypalOrderId, paypalCaptureId } of stale) {
+    await forEachPurchase('flag the stale charge of', id, () =>
+      appendOnce(db, id, 'charge_stale', { updatedAt: updatedAt.toISOString(), paypalOrderId, paypalCaptureId }),
     );
   }
 }

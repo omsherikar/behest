@@ -24,8 +24,8 @@ function streamedRequest(chunks: number, headers: Record<string, string> = {}) {
 }
 
 describe('readBody', () => {
-  it('limits bodies to 1,000,000 bytes by default and to 64 KiB for form-sized requests', () => {
-    expect(MAX_BODY_BYTES).toBe(1_000_000);
+  it('limits bodies to 256 KiB by default and to 64 KiB for form-sized requests', () => {
+    expect(MAX_BODY_BYTES).toBe(262_144);
     expect(FORM_BODY_BYTES).toBe(65_536);
   });
 

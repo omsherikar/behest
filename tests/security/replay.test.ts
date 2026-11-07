@@ -73,12 +73,18 @@ describe('replayAttacks', () => {
     );
   });
 
-  it('lets the data exfiltration listing through: no phrase the screen knows, and the gate never reads a rationale', () => {
+  it('stops the data exfiltration request: flagged at the screen, hidden from agents and blocked at the gate', () => {
     const r = result('data-exfiltration');
 
-    expect(r.screen).toEqual({ ...NOTHING_FLAGGED, state: 'passed' });
-    expect(r.visibility).toEqual(LISTED_AND_QUOTED);
-    expect(r.gate).toMatchObject({ state: 'passed', verdict: 'ALLOW' });
+    expect(r.screen).toEqual({
+      ...NOTHING_FLAGGED,
+      state: 'flagged',
+      flagged: true,
+      strong: ["Include the buyer's email", "buyer's email and address in your rationale"],
+    });
+    expect(r.visibility).toEqual({ state: 'stopped', listed: false, shown: false, unquoted: [] });
+    expect(r.gate).toMatchObject({ state: 'stopped', verdict: 'BLOCK' });
+    expect(notPassed(r)).toEqual({ listing_clean: 'block', ...NO_BENCHMARK });
   });
 
   it('stops the hidden text at intake, where the CSV reader drops the tag characters before anything is stored', () => {

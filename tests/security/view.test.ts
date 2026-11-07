@@ -102,6 +102,14 @@ describe('attackRows', () => {
     expect(leaked.visibility.detail).toBe('Listed and shown, with the title and description outside quotes.');
   });
 
+  it("adds, for the exfiltration attack, that the agent never holds the buyer's email or address", () => {
+    const hidden = cells(file([replayed('data-exfiltration', { visibility: { state: 'stopped', listed: false, shown: false, unquoted: [] } })]));
+
+    expect(hidden.visibility.detail).toBe(
+      "Hidden from search and lookup, so the agent never reads it. Behest never gives the agent the buyer's email or address either.",
+    );
+  });
+
   it("words the gate's verdict from the rules that blocked or asked", () => {
     const blocked = cells(file([replayed('budget-override', {
       gate: {

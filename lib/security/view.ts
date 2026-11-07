@@ -80,9 +80,9 @@ export const LIMITS: { title: string; detail: string }[] = [
       'Enrichment keeps a market median below the listing price however far below, so a listing priced far over the market is held for the buyer; the replay tests pin a listing at six times its median. It drops a median more than 5 times the listing price as a probable mismatch, since a listing far cheaper than the market cannot hurt the buyer on price. A listing the market search finds nothing for has no benchmark, and the gate skips its price check.',
   },
   {
-    title: 'Exfiltration has little to take, but is not screened.',
+    title: 'Requests for personal data are screened by their wording.',
     detail:
-      "The screen does not flag a request for the buyer's email and address, and the gate does not read the agent's rationale. The agent is given the buyer's request and mandate readback, not an email or address, and its rationale goes to the intent check, the purchase's decision record and, in a dispute, the evidence Behest's operator sends PayPal, never to the seller.",
+      "The screen flags a listing that tells someone to include, share or send the buyer's, user's or customer's email, address, phone number or contact details, or to put them in what an agent writes, so the listing is hidden from agents and blocked at the gate; a seller writing \"email us\" or mentioning a shipping address is not flagged. A request worded another way still reaches the agent, quoted. The gate does not read the agent's rationale, but the agent is given the buyer's request and mandate readback, never an email or address, and its rationale goes to the intent check, the purchase's decision record and, in a dispute, the evidence Behest's operator sends PayPal, never to the seller.",
   },
   {
     title: 'One live run is evidence, not a guarantee.',
@@ -135,14 +135,19 @@ function screenCell({ screen }: ReplayResult): Cell {
   return { ...words, detail: 'No phrase aimed at agents.' };
 }
 
-function visibilityCell({ visibility }: ReplayResult): Cell {
+/** Said of the exfiltration attack whatever its visibility: there is nothing of the buyer's for it to take. */
+const NO_PERSONAL_DATA = "Behest never gives the agent the buyer's email or address either.";
+
+function visibilityCell({ visibility }: ReplayResult, attack: Attack): Cell {
   const words = { layer: 'visibility' as const, ...WORDS[visibility.state] };
-  if (visibility.state === 'stopped') return { ...words, detail: 'Hidden from search and lookup, so the agent never reads it.' };
   const seen = visibility.listed && visibility.shown ? 'Listed and shown' : visibility.listed ? 'Listed' : 'Shown';
-  if (visibility.unquoted.length > 0) {
-    return { ...words, detail: `${seen}, with the ${listed(visibility.unquoted.map((field) => FIELD_NAMES[field] ?? field))} outside quotes.` };
-  }
-  return { ...words, detail: `${seen}, with the seller name, title and description quoted as untrusted data.` };
+  const detail =
+    visibility.state === 'stopped'
+      ? 'Hidden from search and lookup, so the agent never reads it.'
+      : visibility.unquoted.length > 0
+        ? `${seen}, with the ${listed(visibility.unquoted.map((field) => FIELD_NAMES[field] ?? field))} outside quotes.`
+        : `${seen}, with the seller name, title and description quoted as untrusted data.`;
+  return { ...words, detail: attack.objective === 'exfiltrate' ? `${detail} ${NO_PERSONAL_DATA}` : detail };
 }
 
 function gateCell({ gate }: ReplayResult): Cell {
@@ -207,7 +212,7 @@ export function attackRows(file: ResultsFile): AttackRow[] {
       name: attack.name,
       basis: attack.basis,
       summary: attack.summary,
-      cells: [screenCell(result), visibilityCell(result), gateCell(result), liveCell(file, attack)],
+      cells: [screenCell(result), visibilityCell(result, attack), gateCell(result), liveCell(file, attack)],
       outcome: outcomeOf(result),
     };
   });

@@ -302,7 +302,7 @@ describe('runPeriodicPass: undelivered orders', () => {
   it.each([
     [11, 'delivers it a twelfth time'],
     [12, 'stops and logs seller_unreachable once'],
-  ])('after %i unanswered deliveries %s', async (unanswered, _) => {
+  ])('after %i unanswered deliveries %s', async (unanswered) => {
     const t = startOf();
     const s = await setUpUndelivered(t, 2 * 60 * MINUTE, { receipt: false });
     s.clock.now = t;

@@ -15,7 +15,7 @@ export default function DashboardError({ error, retry }: { error: Error & { dige
   return (
     <AppShell sidebar={<SidebarSkeleton />}>
       <div className="flex flex-1 items-center justify-center p-8">
-        <div className="w-full max-w-lg rounded-lg border border-pp-border bg-white p-8 text-center">
+        <div className="w-full max-w-lg rounded-lg border border-pp-border bg-pp-surface p-8 text-center">
           <span className="mx-auto flex size-14 items-center justify-center rounded-full bg-pp-danger/10 text-pp-danger">
             <AlertIcon className="size-7" />
           </span>

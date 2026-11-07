@@ -24,7 +24,7 @@ function AgentsCell({ data }: CustomCellRendererProps<CatalogRow>) {
   if (data.hiddenReason === null) return <span className="text-pp-success">Listed</span>;
   return (
     <span className="inline-flex items-center gap-2">
-      <span className="rounded-full bg-pp-danger px-2 py-0.5 text-xs leading-5 font-semibold text-white">
+      <span className="rounded-full bg-pp-danger px-2 py-0.5 text-xs leading-5 font-semibold text-on-fill">
         Hidden from agents
       </span>
       <span className="text-pp-danger">{data.hiddenReason}</span>

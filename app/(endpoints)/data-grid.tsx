@@ -14,6 +14,7 @@ import {
   NumberFilterModule,
   QuickFilterModule,
   TextFilterModule,
+  colorSchemeDark,
   themeQuartz,
   type ColDef,
   type ColTypeDefs,
@@ -36,9 +37,11 @@ const modules = [
   ColumnAutoSizeModule,
 ];
 
-// Same PayPal tokens as the dashboard (app/globals.css).
-const theme = themeQuartz.withParams({
+// Same tokens as the dashboard (app/globals.css), on AG Grid's dark colour scheme.
+const theme = themeQuartz.withPart(colorSchemeDark).withParams({
   fontFamily: 'var(--pp-font)',
+  backgroundColor: 'var(--pp-surface)',
+  headerBackgroundColor: 'var(--pp-surface)',
   accentColor: 'var(--pp-blue)',
   foregroundColor: 'var(--pp-ink)',
   borderColor: 'var(--pp-border)',
@@ -73,7 +76,7 @@ export function DataGrid({ rows, columns }: { rows: Row[]; columns: ColDef<Row>[
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search all columns…"
         aria-label="Search all columns"
-        className="h-10 w-72 rounded border border-pp-border px-3 text-sm outline-none focus:border-pp-blue"
+        className="h-10 w-72 rounded border border-line-strong bg-pp-surface px-3 text-sm outline-none focus:border-pp-blue"
       />
       <div className="min-h-0 flex-1">
         <AgGridProvider modules={modules}>

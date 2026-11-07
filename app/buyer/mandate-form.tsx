@@ -27,7 +27,7 @@ const BUDGET_QUESTION = 'budget_amount';
 const PLACEHOLDER = '$60 a month on groceries and spices, ask me above $25, never electronics';
 
 const primaryButton =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-white transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
 const secondaryButton =
   'inline-flex h-10 items-center justify-center rounded-full border border-pp-blue px-5 font-semibold text-pp-blue transition-colors hover:bg-pp-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
 
@@ -187,7 +187,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
           rows={3}
           maxLength={2000}
           placeholder={PLACEHOLDER}
-          className="mt-2 w-full rounded-xl border border-pp-border bg-pp-surface p-3 text-pp-ink placeholder:text-pp-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60"
+          className="mt-2 w-full rounded-xl border border-line-strong bg-pp-surface p-3 text-pp-ink placeholder:text-pp-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60"
         />
         <button type="submit" disabled={busy !== null || text.trim() === ''} className={`mt-3 ${primaryButton}`}>
           {busy === 'compile' && !compiled ? 'Reading it back...' : 'Read it back'}
@@ -252,7 +252,7 @@ export function MandateForm({ replacing }: { replacing: boolean }) {
                         onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })}
                         disabled={busy !== null}
                         maxLength={500}
-                        className="mt-2 w-full rounded-xl border border-pp-border bg-pp-surface px-3 py-2 text-pp-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60"
+                        className="mt-2 w-full rounded-xl border border-line-strong bg-pp-surface px-3 py-2 text-pp-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60"
                       />
                     )}
                     <div className="mt-2 flex flex-wrap gap-2">

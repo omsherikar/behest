@@ -93,7 +93,7 @@ export function CreateReportDialog({
           autoFocus
           defaultValue="Untitled report"
           onFocus={(e) => e.currentTarget.select()}
-          className="mt-1 h-11 w-full rounded border border-pp-border px-3 text-[15px] text-pp-ink outline-none focus:border-pp-blue focus:ring-2 focus:ring-pp-highlight"
+          className="mt-1 h-11 w-full rounded border border-line-strong bg-pp-surface px-3 text-[15px] text-pp-ink outline-none focus:border-pp-blue focus:ring-2 focus:ring-pp-highlight"
         />
       </form>
     </Dialog>

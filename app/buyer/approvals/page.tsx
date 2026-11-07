@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 // Seller names, item titles and reasons are shown as text, as they may be a seller's.
 
 const primaryLink =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-white transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
+  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
 const NOTICE_STYLES: Record<ReturnNotice['tone'], string> = {
   success: 'border-pp-success text-pp-success',
   warning: 'border-pp-warning text-pp-warning',

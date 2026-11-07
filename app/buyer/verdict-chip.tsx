@@ -11,7 +11,7 @@ const COLOURS: Record<Verdict, string> = {
 
 export function VerdictChip({ verdict }: { verdict: Verdict }) {
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs leading-5 font-semibold text-white ${COLOURS[verdict]}`}>
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs leading-5 font-semibold text-on-fill ${COLOURS[verdict]}`}>
       <span className="sr-only">Verdict: </span>
       {verdict}
     </span>

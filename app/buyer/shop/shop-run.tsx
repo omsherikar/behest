@@ -18,7 +18,7 @@ const UNREACHABLE = 'Could not reach Behest. Check your connection and try again
 const CUT_OFF = 'The connection closed before your agent finished.';
 
 const primaryButton =
-  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-white transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex h-10 items-center justify-center rounded-full bg-pp-blue px-5 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
 const textLink =
   'font-semibold text-pp-blue underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
 
@@ -88,7 +88,7 @@ export function ShopRun() {
           rows={3}
           maxLength={2000}
           placeholder={PLACEHOLDER}
-          className="mt-2 w-full rounded-xl border border-pp-border bg-pp-surface p-3 text-pp-ink placeholder:text-pp-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60"
+          className="mt-2 w-full rounded-xl border border-line-strong bg-pp-surface p-3 text-pp-ink placeholder:text-pp-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60"
         />
         <button type="submit" disabled={running || request.trim() === ''} className={`mt-3 ${primaryButton}`}>
           {running ? 'Your agent is shopping...' : 'Send your agent'}

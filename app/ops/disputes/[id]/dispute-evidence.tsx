@@ -16,16 +16,16 @@ type Narrative = { summary: string; claims: Claim[] };
 type Notice = { tone: 'success' | 'danger'; text: string };
 
 const primaryButton =
-  'inline-flex min-h-10 items-center justify-center rounded-full bg-pp-blue px-5 py-2 font-semibold text-white transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex min-h-10 items-center justify-center rounded-full bg-pp-blue px-5 py-2 font-semibold text-on-fill transition-colors hover:bg-pp-blue-dark focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
 const secondaryButton =
   'inline-flex min-h-10 items-center justify-center rounded-full border border-pp-blue px-5 py-2 font-semibold text-pp-blue transition-colors hover:bg-pp-highlight focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-not-allowed disabled:opacity-50';
 const linkButton =
   'text-sm font-semibold text-pp-blue hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60';
 const textArea =
-  'mt-2 w-full rounded-xl border border-pp-border bg-pp-surface p-3 text-pp-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60';
+  'mt-2 w-full rounded-xl border border-line-strong bg-pp-surface p-3 text-pp-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60';
 const chip = (cited: boolean) =>
   `inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:opacity-60 ${
-    cited ? 'border-pp-blue bg-pp-blue font-semibold text-white' : 'border-pp-border bg-pp-surface text-pp-ink hover:border-pp-blue'
+    cited ? 'border-pp-blue bg-pp-blue font-semibold text-on-fill' : 'border-pp-border bg-pp-surface text-pp-ink hover:border-pp-blue'
   }`;
 const NOTICE_STYLES: Record<Notice['tone'], string> = { success: 'text-pp-success', danger: 'text-pp-danger' };
 

@@ -15,6 +15,7 @@ import {
   QuickFilterModule,
   RowAutoHeightModule,
   TextFilterModule,
+  colorSchemeDark,
   themeQuartz,
   type ColDef,
   type GetRowIdParams,
@@ -38,9 +39,11 @@ const modules = [
   RowAutoHeightModule,
 ];
 
-// Same PayPal tokens as the dashboard (app/globals.css).
-const theme = themeQuartz.withParams({
+// Same tokens as the dashboard (app/globals.css), on AG Grid's dark colour scheme.
+const theme = themeQuartz.withPart(colorSchemeDark).withParams({
   fontFamily: 'var(--pp-font)',
+  backgroundColor: 'var(--pp-surface)',
+  headerBackgroundColor: 'var(--pp-surface)',
   accentColor: 'var(--pp-blue)',
   foregroundColor: 'var(--pp-ink)',
   borderColor: 'var(--pp-border)',
@@ -85,7 +88,7 @@ export function SellerGrid<Row extends { id: string }>({
         onChange={(event) => setSearch(event.target.value)}
         placeholder={`Search ${label}...`}
         aria-label={`Search ${label}`}
-        className="h-10 w-full rounded border border-pp-border bg-pp-surface px-3 text-sm outline-none focus:border-pp-blue sm:w-72"
+        className="h-10 w-full rounded border border-line-strong bg-pp-surface px-3 text-sm outline-none focus:border-pp-blue sm:w-72"
       />
       <div ref={box} className="min-h-72 flex-1">
         <AgGridProvider modules={modules}>

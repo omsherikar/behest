@@ -100,7 +100,7 @@ export function ReportsSidebar({
                     aria-haspopup="menu"
                     aria-expanded={menuFor === report.id}
                     onClick={() => setMenuFor(menuFor === report.id ? null : report.id)}
-                    className={`flex size-8 items-center justify-center rounded-full text-pp-muted hover:bg-white hover:text-pp-navy ${
+                    className={`flex size-8 items-center justify-center rounded-full text-pp-muted hover:bg-pp-highlight hover:text-pp-navy ${
                       menuFor === report.id ? 'opacity-100' : 'opacity-0 focus-visible:opacity-100 group-hover:opacity-100'
                     }`}
                   >
@@ -171,7 +171,7 @@ export function ReportsSidebar({
                             aria-label={`Remove page ${page.title}`}
                             title="Remove page"
                             onClick={() => onRemovePage(page.id)}
-                            className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-pp-muted opacity-0 hover:bg-white hover:text-pp-danger focus-visible:opacity-100 group-hover:opacity-100"
+                            className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-full text-pp-muted opacity-0 hover:bg-pp-highlight hover:text-pp-danger focus-visible:opacity-100 group-hover:opacity-100"
                           >
                             <CloseIcon className="size-3.5" />
                           </button>
@@ -247,7 +247,7 @@ function RenameInput({
         if (e.key === 'Enter') e.currentTarget.blur();
         if (e.key === 'Escape') onCancel();
       }}
-      className={`rounded-full border border-pp-blue bg-white px-4 font-semibold text-pp-navy outline-none ${className}`}
+      className={`rounded-full border border-pp-blue bg-pp-surface px-4 font-semibold text-pp-navy outline-none ${className}`}
     />
   );
 }

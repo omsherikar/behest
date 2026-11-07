@@ -18,13 +18,13 @@ export default function EndpointError({ error, retry }: { error: Error & { diges
       <p className="mt-2 text-sm text-pp-muted">
         Check the API credentials in <code>.env.local</code>, and that the sandbox app has the features this endpoint needs.
       </p>
-      <pre className="mt-4 whitespace-pre-wrap rounded-lg border border-pp-border bg-white p-4 font-mono text-xs text-pp-muted">
+      <pre className="mt-4 whitespace-pre-wrap rounded-lg border border-pp-border bg-pp-surface p-4 font-mono text-xs text-pp-muted">
         {error.message}
       </pre>
       <button
         type="button"
         onClick={retry}
-        className="mt-4 h-10 self-start rounded-full bg-pp-blue px-5 font-semibold text-white hover:bg-pp-blue-dark"
+        className="mt-4 h-10 self-start rounded-full bg-pp-blue px-5 font-semibold text-on-fill hover:bg-pp-blue-dark"
       >
         Try again
       </button>

@@ -121,7 +121,7 @@ function StatusPill({ status }: { status: Status }) {
 
 function ClaimMark({ verified }: { verified: boolean }) {
   return verified ? (
-    <span role="img" aria-label="Verified" className="flex size-5 shrink-0 items-center justify-center rounded-full bg-pp-success text-white">
+    <span role="img" aria-label="Verified" className="flex size-5 shrink-0 items-center justify-center rounded-full bg-pp-success text-on-fill">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="size-3">
         <path d="m5 12.5 4.5 4.5L19 7.5" />
       </svg>

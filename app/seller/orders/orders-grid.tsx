@@ -25,7 +25,7 @@ function ReceiptCheckCell({ data }: CustomCellRendererProps<SellerOrderRow>) {
   const accepted = data.status === 'accepted';
   return (
     <span
-      className={`rounded-full px-2 py-0.5 text-xs leading-5 font-semibold text-white ${accepted ? 'bg-pp-success' : 'bg-pp-danger'}`}
+      className={`rounded-full px-2 py-0.5 text-xs leading-5 font-semibold text-on-fill ${accepted ? 'bg-pp-success' : 'bg-pp-danger'}`}
     >
       {accepted ? 'Accepted' : 'Rejected'}
     </span>

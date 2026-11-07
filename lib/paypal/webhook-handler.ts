@@ -15,7 +15,10 @@ import { toCents } from './money';
 // event moves only the purchase it names: by the order, capture or payout batch Behest stored for it,
 // or, for a capture whose answer Behest never recorded, by the invoice id Behest sent, which is the
 // purchase id, together with the order Behest stored. An event that names nothing Behest holds is
-// logged and left alone. An event of a type Behest does not act on is quietly done.
+// logged and left alone. An event that arrives before Behest has recorded what it is about, such as
+// a capture of a charge still being recorded or a refund while Behest's own refund awaits PayPal's
+// answer, throws, so its job runs again once that is recorded. An event of a type Behest does not
+// act on is quietly done.
 //
 // Handling the same event again changes nothing: every branch acts only from the state the first
 // handling left behind, and a job it asks for is queued once. Money moves only through the purchase
@@ -47,6 +50,11 @@ const RefundResource = z.object({
 
 const PayoutItemResource = z.object({ payout_batch_id: z.string().min(1) });
 
+/** Every dispute event, whatever happened to the dispute, asks for a dispute sync. */
+const DISPUTE_EVENTS = 'CUSTOMER.DISPUTE.';
+/** Every payout item event, whatever happened to the item, asks for its payout's poll. */
+const PAYOUT_ITEM_EVENTS = 'PAYMENT.PAYOUTS-ITEM.';
+
 /** A refund's link to the capture it refunds: `/v2/payments/captures/{captureId}`. */
 const CAPTURE_PATH = /^\/v2\/payments\/captures\/([^/]+)$/;
 
@@ -60,10 +68,11 @@ const REFUNDING: ReadonlySet<string> = new Set(['COMPLETED', 'PENDING']);
  *   delivery follow;
  * - PAYMENT.CAPTURE.DENIED: fails a `charging` purchase holding the capture;
  * - PAYMENT.CAPTURE.REFUNDED: records a refund made outside Behest;
- * - CUSTOMER.DISPUTE.CREATED and UPDATED: queues a `dispute_sync`;
- * - PAYMENT.PAYOUTS-ITEM.SUCCEEDED and FAILED: queues the payout's `payout_poll`, which decides.
- * Any other type is done with nothing changed. Throws for an event with no id or type, or a
- * resource missing what its type needs.
+ * - PAYMENT.CAPTURE.REVERSED: records PayPal taking the payment back, as a full refund;
+ * - any CUSTOMER.DISPUTE. event: queues a `dispute_sync`, which reads the dispute from PayPal;
+ * - any PAYMENT.PAYOUTS-ITEM. event: queues the payout's `payout_poll`, which decides.
+ * Any other type is done with nothing changed. Throws for an event with no id or type, a resource
+ * missing what its type needs, or an event about something Behest has not finished recording.
  */
 export async function handleWebhook(deps: WebhookDeps, event: Record<string, unknown>): Promise<void> {
   const envelope = Envelope.safeParse(event);
@@ -76,17 +85,15 @@ export async function handleWebhook(deps: WebhookDeps, event: Record<string, unk
     case 'PAYMENT.CAPTURE.COMPLETED':
       return captureCompleted(deps, seen, readResource(CaptureResource, seen, resource));
     case 'PAYMENT.CAPTURE.DENIED':
-      return captureDenied(deps.db, seen, readResource(CaptureResource, seen, resource).id);
+      return captureDenied(deps.db, seen, readResource(CaptureResource, seen, resource));
     case 'PAYMENT.CAPTURE.REFUNDED':
-      return captureRefunded(deps.db, seen, readResource(RefundResource, seen, resource));
-    case 'CUSTOMER.DISPUTE.CREATED':
-    case 'CUSTOMER.DISPUTE.UPDATED':
-      return queueDue(deps.db, 'dispute_sync', {}, deps.now());
-    case 'PAYMENT.PAYOUTS-ITEM.SUCCEEDED':
-    case 'PAYMENT.PAYOUTS-ITEM.FAILED':
-      return payoutItem(deps, seen, readResource(PayoutItemResource, seen, resource).payout_batch_id);
-    default:
-      return;
+      return captureRefunded(deps.db, seen, readResource(RefundResource, seen, resource), 'refund');
+    case 'PAYMENT.CAPTURE.REVERSED':
+      return captureRefunded(deps.db, seen, readResource(RefundResource, seen, resource), 'reversal');
+  }
+  if (type.startsWith(DISPUTE_EVENTS)) return queueDue(deps.db, 'dispute_sync', {}, deps.now());
+  if (type.startsWith(PAYOUT_ITEM_EVENTS)) {
+    return payoutItem(deps, seen, readResource(PayoutItemResource, seen, resource).payout_batch_id);
   }
 }
 
@@ -97,17 +104,23 @@ function readResource<T>(schema: z.ZodType<T>, { id, type }: Seen, resource: unk
   return parsed.data;
 }
 
+/** The error for an event Behest cannot act on until it has recorded `what`; its job runs again. */
+function notYetRecorded({ id, type }: Seen, what: string): Error {
+  return new Error(`PayPal webhook ${id} (${type}) waits until ${what}, so it is handled again later`);
+}
+
 /** Logs, once, why an event names nothing Behest can act on. */
 function ignore({ id, type }: Seen, why: string): void {
   console.warn(`PayPal webhook ${id} (${type}) is ignored: ${why}`);
 }
 
 /**
- * The buyer approved an order at PayPal. completeApproval captures it, but only for a purchase its
- * buyer approves at PayPal (final verdict ASK) that holds the order and is `awaiting_approval`, or
- * `charging` with no capture. A saved-wallet charge's order is never touched, nor a purchase that
- * has moved on. completeApproval locks the purchase itself, so an approval racing the buyer's return
- * from PayPal still captures once.
+ * The buyer approved an order at PayPal. Only a purchase its buyer approves at PayPal (final verdict
+ * ASK) that holds the order and is `awaiting_approval`, or `charging` with no capture, is passed to
+ * completeApproval. That captures only a purchase still `awaiting_approval`; one already `charging`
+ * is left as it is, for its `charge_retry` replay. A saved-wallet charge's order is never touched,
+ * nor a purchase that has moved on. completeApproval locks the purchase itself, so an approval
+ * racing the buyer's return from PayPal still captures once.
  */
 async function orderApproved(deps: WebhookDeps, seen: Seen, orderId: string): Promise<void> {
   const [purchase] = await deps.db
@@ -123,10 +136,12 @@ async function orderApproved(deps: WebhookDeps, seen: Seen, orderId: string): Pr
 /**
  * PayPal completed a capture. The purchase is the one holding the capture id, such as a saved-wallet
  * charge PayPal held as PENDING, as long as the event names no other order than the one it holds.
- * Failing that, it is the purchase named by the capture's invoice id, but only while it is
- * `charging` with no capture recorded and holds the capture's order. completeCapture then records
- * the capture, under the purchase lock, issues the receipt and delivers the order; a capture it has
- * already recorded is a quiet no-op.
+ * Failing that, it is the purchase named by the capture's invoice id while it is `charging` with no
+ * capture recorded and holds the capture's order. completeCapture then records the capture, under
+ * the purchase lock, issues the receipt and delivers the order; a capture it has already recorded is
+ * a quiet no-op. When the invoice names a purchase still `charging` with no capture recorded but under
+ * no order, or another one, its charge is still being recorded, so this throws and the job runs again
+ * after the charge's replay has stored the capture. An invoice naming no such purchase is logged.
  */
 async function captureCompleted(deps: WebhookDeps, seen: Seen, capture: z.infer<typeof CaptureResource>): Promise<void> {
   const { id: captureId, invoice_id: invoiceId } = capture;
@@ -140,44 +155,44 @@ async function captureCompleted(deps: WebhookDeps, seen: Seen, capture: z.infer<
     await completeCapture(deps, holder.id, { orderId, captureId });
     return;
   }
-  const charging = await chargingFor(deps.db, invoiceId, eventOrderId);
-  if (!charging || !eventOrderId) {
-    return ignore(seen, `no purchase holds capture ${captureId}, and none is charging for its invoice and order`);
+  const charging = await chargingFor(deps.db, invoiceId);
+  if (!charging) return ignore(seen, `no purchase holds capture ${captureId}, and its invoice names no purchase still charging`);
+  if (!eventOrderId || charging.orderId !== eventOrderId) {
+    throw notYetRecorded(seen, `purchase ${charging.id}, still charging, has recorded capture ${captureId}`);
   }
-  await completeCapture(deps, charging, { orderId: eventOrderId, captureId });
+  await completeCapture(deps, charging.id, { orderId: eventOrderId, captureId });
 }
 
 /**
- * The purchase the invoice id names, if it is `charging` with no capture recorded and holds
- * `orderId`. A saved-wallet charge whose answer was lost holds no order yet, so it is never matched
- * here: its `charge_retry` job asks PayPal.
+ * The purchase the invoice id names, with the order it holds, if it is `charging` with no capture
+ * recorded. A saved-wallet charge whose answer has not been recorded holds no order yet.
  */
-async function chargingFor(db: Db, invoiceId: string | undefined, orderId: string | undefined): Promise<string | null> {
+async function chargingFor(db: Db, invoiceId: string | undefined): Promise<{ id: string; orderId: string | null } | null> {
   // Behest's invoice id is the purchase id; anything else is not one of its purchases.
   const purchaseId = z.uuid().safeParse(invoiceId);
-  if (!orderId || !purchaseId.success) return null;
+  if (!purchaseId.success) return null;
   const [purchase] = await db
-    .select({ id: purchases.id })
+    .select({ id: purchases.id, orderId: purchases.paypalOrderId })
     .from(purchases)
-    .where(
-      and(
-        eq(purchases.id, purchaseId.data),
-        eq(purchases.status, 'charging'),
-        isNull(purchases.paypalCaptureId),
-        eq(purchases.paypalOrderId, orderId),
-      ),
-    );
-  return purchase?.id ?? null;
+    .where(and(eq(purchases.id, purchaseId.data), eq(purchases.status, 'charging'), isNull(purchases.paypalCaptureId)));
+  return purchase ?? null;
 }
 
 /**
  * PayPal denied a capture it was holding, so no money moved. With the purchase locked, a `charging`
  * purchase holding the capture logs `capture_denied` and fails, releasing its budget. Any other
- * purchase is left as it is.
+ * purchase is left as it is. When no purchase holds the capture yet but its invoice names one still
+ * `charging` with no capture recorded, its charge is still being recorded, so this throws and the
+ * job runs again after the charge's replay has stored the capture.
  */
-async function captureDenied(db: Db, seen: Seen, captureId: string): Promise<void> {
+async function captureDenied(db: Db, seen: Seen, capture: z.infer<typeof CaptureResource>): Promise<void> {
+  const { id: captureId, invoice_id: invoiceId } = capture;
   const holder = await purchaseHolding(db, captureId);
-  if (!holder) return ignore(seen, `no purchase holds capture ${captureId}`);
+  if (!holder) {
+    const charging = await chargingFor(db, invoiceId);
+    if (charging) throw notYetRecorded(seen, `purchase ${charging.id}, still charging, has recorded capture ${captureId}`);
+    return ignore(seen, `no purchase holds capture ${captureId}`);
+  }
   await db.transaction(async (tx) => {
     const [purchase] = await tx.select({ status: purchases.status }).from(purchases).where(eq(purchases.id, holder.id)).for('update');
     if (purchase.status !== 'charging') return;
@@ -187,37 +202,45 @@ async function captureDenied(db: Db, seen: Seen, captureId: string): Promise<voi
 }
 
 /**
- * PayPal refunded a capture: at PayPal itself, by a dispute decision, or for Behest. The refund is
- * recorded with recordRefund. A refund Behest's own refund flow is still waiting to hear about is
- * left to that flow, which records it from PayPal's answer to the same request id.
+ * PayPal returned money from a capture: a refund made at PayPal itself, by a dispute decision or by
+ * Behest, or a reversal, where PayPal took the payment back, such as after a lost chargeback. Either
+ * is recorded with recordRefund, which never refunds anything.
  */
-async function captureRefunded(db: Db, seen: Seen, refund: z.infer<typeof RefundResource>): Promise<void> {
+async function captureRefunded(
+  db: Db,
+  seen: Seen,
+  refund: z.infer<typeof RefundResource>,
+  kind: 'refund' | 'reversal',
+): Promise<void> {
   const captureId = refundedCapture(refund.links);
   if (!captureId) throw new Error(`PayPal webhook ${seen.id} (${seen.type}) cannot be handled: the refund names no capture`);
   const amountCents = toCents(refund.amount.value);
   const holder = await purchaseHolding(db, captureId);
   if (!holder) return ignore(seen, `no purchase holds capture ${captureId}`);
-  const recorded = await recordRefund(db, holder.id, { refundId: refund.id, status: refund.status, amountCents });
-  if (!recorded) {
-    ignore(seen, `Behest's own refund of purchase ${holder.id} still awaits PayPal's answer, and its refund flow records refund ${refund.id}`);
-  }
+  await recordRefund(db, seen, holder.id, { refundId: refund.id, status: refund.status, amountCents }, kind);
 }
 
 /**
- * Records a refund made outside Behest, with the purchase row locked and its payout read, so it
- * cannot interleave with Behest's own refund or payout of the purchase. A refund already recorded is
- * a quiet no-op. Otherwise it writes the refunds row and a `refund_external` event saying whether
- * the seller's payout was made, and once the refunds reach the purchase's total, moves the purchase
- * to `refunded` where the lifecycle allows: from `captured`, `accepted`, `settled` or `disputed`. A
- * partial refund leaves the rest counted against the budget. Returns false, recording nothing, while
- * Behest's own refund of the purchase awaits PayPal's answer.
+ * Records money PayPal returned from a purchase's capture, with the purchase row locked and its
+ * payout read, so it cannot interleave with Behest's own refund or payout of the purchase. A refund
+ * already recorded under PayPal's id, Behest's own included, is a quiet no-op. While Behest's own
+ * refund of the purchase awaits PayPal's answer (its refunds row has no PayPal id yet), this throws,
+ * naming the purchase and that row, so the job runs again: the refund flow, or the periodic pass's
+ * retry under the same request id, records the answer first, and only then can this event be told
+ * apart from it. Otherwise it writes the refunds row and logs `refund_external` for a refund or
+ * `capture_reversed` for a reversal, saying whether the seller's payout was made. It moves the
+ * purchase to `refunded` where the lifecycle allows, from `captured`, `accepted`, `settled` or
+ * `disputed`: at once for a reversal, which takes the whole payment back, and for refunds once they
+ * reach the purchase's total. A partial refund leaves the rest counted against the budget.
  */
 async function recordRefund(
   db: Db,
+  seen: Seen,
   purchaseId: string,
   refund: { refundId: string; status: string; amountCents: number },
-): Promise<boolean> {
-  return db.transaction(async (tx) => {
+  kind: 'refund' | 'reversal',
+): Promise<void> {
+  await db.transaction(async (tx) => {
     const [purchase] = await tx
       .select({ status: purchases.status, totalCents: purchases.totalCents })
       .from(purchases)
@@ -225,22 +248,27 @@ async function recordRefund(
       .for('update');
     const [payout] = await tx.select({ status: payouts.status }).from(payouts).where(eq(payouts.purchaseId, purchaseId));
     const recorded = await tx
-      .select({ paypalRefundId: refunds.paypalRefundId, amountCents: refunds.amountCents, status: refunds.status })
+      .select({ id: refunds.id, paypalRefundId: refunds.paypalRefundId, amountCents: refunds.amountCents, status: refunds.status })
       .from(refunds)
       .where(eq(refunds.purchaseId, purchaseId));
-    if (recorded.some((row) => row.paypalRefundId === refund.refundId)) return true;
-    if (recorded.some((row) => row.paypalRefundId === null)) return false;
+    if (recorded.some((row) => row.paypalRefundId === refund.refundId)) return;
+    const pending = recorded.find((row) => row.paypalRefundId === null);
+    if (pending) throw notYetRecorded(seen, `Behest's own refund ${pending.id} of purchase ${purchaseId} has PayPal's answer`);
 
     const { refundId, status, amountCents } = refund;
     await tx.insert(refunds).values({ purchaseId, amountCents, paypalRefundId: refundId, status });
-    await appendEvent(tx, purchaseId, 'refund_external', { refundId, status, amountCents, payoutStatus: payout?.status ?? null });
+    await appendEvent(tx, purchaseId, kind === 'refund' ? 'refund_external' : 'capture_reversed', {
+      refundId,
+      status,
+      amountCents,
+      payoutStatus: payout?.status ?? null,
+    });
 
     const refundedCents = [...recorded, refund]
       .filter((row) => REFUNDING.has(row.status))
       .reduce((sum, row) => sum + row.amountCents, 0);
-    const whole = purchase.totalCents !== null && refundedCents >= purchase.totalCents;
+    const whole = kind === 'reversal' || (purchase.totalCents !== null && refundedCents >= purchase.totalCents);
     if (whole && canTransition(purchase.status, 'refunded')) await transition(tx, purchaseId, purchase.status, 'refunded');
-    return true;
   });
 }
 

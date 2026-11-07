@@ -5,7 +5,9 @@ import { jobs, payouts, purchases, receipts, refunds, type PurchaseStatus } from
 import { enqueue } from '@/lib/jobs/queue';
 import { handleWebhook } from '@/lib/paypal/webhook-handler';
 import { completeApproval, startApproval } from '@/lib/purchases/approval';
-import { chargeAllowed } from '@/lib/purchases/charge';
+import { chargeAllowed, retryCharge } from '@/lib/purchases/charge';
+import { deliverToSeller, retryLostRefund } from '@/lib/purchases/deliver';
+import { issueReceipt } from '@/lib/purchases/receipt';
 import type { FakePaypal } from '@/tests/helpers/fake-paypal';
 import { NOW, setUp, setUpCaptured } from '@/tests/helpers/purchase-deps';
 import { eventsOf, purchaseRow, statusOf } from '@/tests/helpers/seed-purchase';
@@ -48,8 +50,18 @@ function captureEvent(
 }
 
 /** A refund event as PayPal sends it: the refund, linking `up` to the capture it refunds. */
-function refunded({ refundId, captureId, value = '18.75' }: { refundId: string; captureId: string; value?: string }) {
-  return webhook('PAYMENT.CAPTURE.REFUNDED', {
+function refunded({
+  refundId,
+  captureId,
+  value = '18.75',
+  eventType = 'PAYMENT.CAPTURE.REFUNDED',
+}: {
+  refundId: string;
+  captureId: string;
+  value?: string;
+  eventType?: 'PAYMENT.CAPTURE.REFUNDED' | 'PAYMENT.CAPTURE.REVERSED';
+}) {
+  return webhook(eventType, {
     id: refundId,
     status: 'COMPLETED',
     amount: { currency_code: 'USD', value },
@@ -60,7 +72,7 @@ function refunded({ refundId, captureId, value = '18.75' }: { refundId: string; 
   });
 }
 
-function payoutItem(eventType: 'PAYMENT.PAYOUTS-ITEM.SUCCEEDED' | 'PAYMENT.PAYOUTS-ITEM.FAILED', payoutBatchId: string) {
+function payoutItem(eventType: string, payoutBatchId: string) {
   return webhook(eventType, {
     payout_item_id: 'ITEM-1',
     payout_batch_id: payoutBatchId,
@@ -117,6 +129,15 @@ async function setUpPendingCapture() {
   const { paypalOrderId: orderId, paypalCaptureId: captureId } = await purchaseRow(s.db, s.purchaseId);
   if (!orderId || !captureId) throw new Error('the pending capture was not stored');
   return { ...s, orderId, captureId };
+}
+
+/** An allowed purchase left `charging` with nothing stored: both charge attempts were lost before reaching PayPal. */
+async function setUpUnrecordedCharge() {
+  const s = await setUp('proposed');
+  s.paypal.failNext('chargeSavedWallet', 'network');
+  s.paypal.failNext('chargeSavedWallet', 'network');
+  await chargeAllowed(s.deps, s.purchaseId);
+  return s;
 }
 
 /** A captured purchase moved on to `status`, with its seller's payout `payoutStatus` on record. */
@@ -221,7 +242,6 @@ describe('handleWebhook: PAYMENT.CAPTURE.COMPLETED', () => {
   });
 
   it.each([
-    ['an order other than the one the purchase holds', { orderId: 'ORDER-OTHER' }],
     ['an invoice id that is not a purchase id', { invoiceId: 'INV-2026-0001' }],
     ['no invoice id', { invoiceId: undefined }],
   ])('moves nothing for a capture with %s, logging it', async (_, changes) => {
@@ -249,19 +269,45 @@ describe('handleWebhook: PAYMENT.CAPTURE.COMPLETED', () => {
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
-  it('never matches a saved-wallet charge by invoice id, since Behest has stored no order for it', async () => {
-    const s = await setUp('proposed');
-    s.paypal.failNext('chargeSavedWallet', 'lost_response');
-    s.paypal.failNext('chargeSavedWallet', 'lost_response');
-    await chargeAllowed(s.deps, s.purchaseId);
-    const [{ captureId, orderId }] = s.paypal.captures;
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  it('ignores a capture whose invoice names a purchase that is not charging', async () => {
+    const s = await setUpPaid('settled');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const before = await snapshot(s);
 
-    await handleWebhook(s.deps, captureEvent('PAYMENT.CAPTURE.COMPLETED', { captureId, orderId, invoiceId: s.purchaseId }));
+    await handleWebhook(s.deps, captureEvent('PAYMENT.CAPTURE.COMPLETED', { captureId: 'CAPTURE-77', orderId: s.orderId, invoiceId: s.purchaseId }));
 
     expect(await snapshot(s)).toEqual(before);
-    expect(await statusOf(s.db, s.purchaseId)).toBe('charging');
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it('throws, changing nothing, for a capture whose invoice names a charging purchase under another order', async () => {
+    const s = await setUpUnknownCapture();
+    const before = await snapshot(s);
+
+    await expect(
+      handleWebhook(s.deps, captureEvent('PAYMENT.CAPTURE.COMPLETED', { captureId: 'CAPTURE-77', orderId: 'ORDER-OTHER', invoiceId: s.purchaseId })),
+    ).rejects.toThrow(s.purchaseId);
+
+    expect(await snapshot(s)).toEqual(before);
+  });
+
+  it('throws for a capture that arrives before its charge is recorded, and completes it once the replay stores it', async () => {
+    const s = await setUpUnrecordedCharge();
+    const event = captureEvent('PAYMENT.CAPTURE.COMPLETED', { captureId: 'CAPTURE-1', orderId: 'ORDER-1', invoiceId: s.purchaseId });
+    const before = await snapshot(s);
+
+    await expect(handleWebhook(s.deps, event)).rejects.toThrow(s.purchaseId);
+    expect(await snapshot(s)).toEqual(before);
+
+    // The charge's replay finds PayPal holding the capture and stores it as pending.
+    s.paypal.failNext('chargeSavedWallet', { status: 'PENDING' });
+    expect(await retryCharge(s.deps, s.purchaseId)).toBe('done');
+    expect(await purchaseRow(s.db, s.purchaseId)).toMatchObject({ status: 'charging', paypalOrderId: 'ORDER-1', paypalCaptureId: 'CAPTURE-1' });
+
+    await handleWebhook(s.deps, event);
+
+    expect(await purchaseRow(s.db, s.purchaseId)).toMatchObject({ status: 'accepted', paypalCaptureId: 'CAPTURE-1' });
+    expect(await s.db.select().from(receipts)).toHaveLength(1);
   });
 });
 
@@ -286,6 +332,22 @@ describe('handleWebhook: PAYMENT.CAPTURE.DENIED', () => {
     await handleWebhook(s.deps, captureEvent('PAYMENT.CAPTURE.DENIED', { captureId: s.captureId, orderId: s.orderId }));
 
     expect(await snapshot(s)).toEqual(before);
+  });
+
+  it('throws for a denial that arrives before its charge is recorded, and fails the purchase once the replay stores it', async () => {
+    const s = await setUpUnrecordedCharge();
+    const event = captureEvent('PAYMENT.CAPTURE.DENIED', { captureId: 'CAPTURE-1', orderId: 'ORDER-1', invoiceId: s.purchaseId });
+    const before = await snapshot(s);
+
+    await expect(handleWebhook(s.deps, event)).rejects.toThrow(s.purchaseId);
+    expect(await snapshot(s)).toEqual(before);
+
+    s.paypal.failNext('chargeSavedWallet', { status: 'PENDING' });
+    await retryCharge(s.deps, s.purchaseId);
+    await handleWebhook(s.deps, event);
+
+    expect(await statusOf(s.db, s.purchaseId)).toBe('failed');
+    expect((await eventsOf(s.db, s.purchaseId)).map((e) => e.kind)).toContain('capture_denied');
   });
 
   it('logs a denied capture no purchase holds and moves nothing', async () => {
@@ -354,16 +416,37 @@ describe('handleWebhook: PAYMENT.CAPTURE.REFUNDED', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("leaves a refund to Behest's own refund of the purchase while that still awaits PayPal's answer", async () => {
+  it("throws while Behest's own refund awaits PayPal's answer, and is a quiet no-op once the retry records it", async () => {
     const s = await setUpCaptured();
-    await s.db.insert(refunds).values({ purchaseId: s.purchaseId, amountCents: 1875, reason: 'Rejected.' });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await issueReceipt(s.deps, s.purchaseId);
+    s.seller.mode = 'reject';
+    s.paypal.failNext('refundCapture', 'lost_response');
+    s.paypal.failNext('refundCapture', 'lost_response');
+    await deliverToSeller(s.deps, s.purchaseId);
+    const [{ refundId }] = s.paypal.refunds;
+    const [ownRow] = await s.db.select().from(refunds);
+    expect(ownRow.paypalRefundId).toBeNull();
+    const event = refunded({ refundId, captureId: s.captureId });
     const before = await snapshot(s);
 
-    await handleWebhook(s.deps, refunded({ refundId: 'REFUND-1', captureId: s.captureId }));
-
+    const thrown = await handleWebhook(s.deps, event).catch((error: unknown) => error);
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain(s.purchaseId);
+    expect((thrown as Error).message).toContain(ownRow.id);
     expect(await snapshot(s)).toEqual(before);
-    expect(warn).toHaveBeenCalledOnce();
+
+    // The periodic pass's retry asks PayPal again under the same request id and records the refund.
+    expect(await retryLostRefund(s.deps, s.purchaseId)).toBe(true);
+    expect(await statusOf(s.db, s.purchaseId)).toBe('refunded');
+    const recorded = await snapshot(s);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await handleWebhook(s.deps, event);
+
+    expect(await snapshot(s)).toEqual(recorded);
+    expect(await s.db.select({ paypalRefundId: refunds.paypalRefundId }).from(refunds)).toEqual([{ paypalRefundId: refundId }]);
+    expect(s.paypal.refunds).toHaveLength(1);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('logs a refund of a capture no purchase holds and records nothing', async () => {
@@ -378,8 +461,43 @@ describe('handleWebhook: PAYMENT.CAPTURE.REFUNDED', () => {
   });
 });
 
+describe('handleWebhook: PAYMENT.CAPTURE.REVERSED', () => {
+  it('records a reversal as a refund, logs capture_reversed and moves a settled purchase to refunded, once, refunding nothing', async () => {
+    const s = await setUpPaid('settled');
+
+    await handleTwice(s, refunded({ refundId: 'REVERSAL-1', captureId: s.captureId, eventType: 'PAYMENT.CAPTURE.REVERSED' }));
+
+    expect(await s.db.select().from(refunds)).toEqual([
+      expect.objectContaining({ purchaseId: s.purchaseId, amountCents: 1875, paypalRefundId: 'REVERSAL-1', status: 'COMPLETED' }),
+    ]);
+    expect((await eventsOf(s.db, s.purchaseId)).slice(-2)).toEqual([
+      { kind: 'capture_reversed', data: { refundId: 'REVERSAL-1', status: 'COMPLETED', amountCents: 1875, payoutStatus: 'SUCCESS' } },
+      { kind: 'status', data: { from: 'settled', to: 'refunded' } },
+    ]);
+    expect(s.paypal.callsTo('refundCapture')).toEqual([]);
+  });
+
+  it.each<PurchaseStatus>(['captured', 'accepted', 'disputed'])('moves a %s purchase to refunded', async (status) => {
+    const s = await setUpPaid(status, 'PENDING');
+
+    await handleWebhook(s.deps, refunded({ refundId: 'REVERSAL-1', captureId: s.captureId, eventType: 'PAYMENT.CAPTURE.REVERSED' }));
+
+    expect(await statusOf(s.db, s.purchaseId)).toBe('refunded');
+  });
+
+  it('records a reversal on a purchase already refunded without moving it', async () => {
+    const s = await setUpPaid('refunded');
+
+    await handleWebhook(s.deps, refunded({ refundId: 'REVERSAL-1', captureId: s.captureId, eventType: 'PAYMENT.CAPTURE.REVERSED' }));
+
+    expect(await statusOf(s.db, s.purchaseId)).toBe('refunded');
+    expect((await s.db.select().from(refunds)).map((r) => r.paypalRefundId)).toEqual(['REVERSAL-1']);
+    expect((await eventsOf(s.db, s.purchaseId)).at(-1)?.kind).toBe('capture_reversed');
+  });
+});
+
 describe('handleWebhook: disputes', () => {
-  it.each(['CUSTOMER.DISPUTE.CREATED', 'CUSTOMER.DISPUTE.UPDATED'])('queues one dispute sync, due now, for %s', async (eventType) => {
+  it.each(['CUSTOMER.DISPUTE.CREATED', 'CUSTOMER.DISPUTE.UPDATED', 'CUSTOMER.DISPUTE.RESOLVED'])('queues one dispute sync, due now, for %s', async (eventType) => {
     const s = await setUp('settled');
 
     await handleTwice(s, webhook(eventType, { dispute_id: 'PP-D-1001' }));
@@ -398,7 +516,7 @@ describe('handleWebhook: disputes', () => {
 });
 
 describe('handleWebhook: PAYMENT.PAYOUTS-ITEM', () => {
-  it.each(['PAYMENT.PAYOUTS-ITEM.SUCCEEDED', 'PAYMENT.PAYOUTS-ITEM.FAILED'] as const)(
+  it.each(['PAYMENT.PAYOUTS-ITEM.SUCCEEDED', 'PAYMENT.PAYOUTS-ITEM.FAILED', 'PAYMENT.PAYOUTS-ITEM.RETURNED', 'PAYMENT.PAYOUTS-ITEM.UNCLAIMED'])(
     'queues one payout poll, due now, for the purchase whose payout holds the batch on %s, recording nothing itself',
     async (eventType) => {
       const s = await setUpPaid('accepted', 'PENDING');

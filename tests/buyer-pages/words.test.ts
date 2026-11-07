@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { purchaseStatus } from '@/lib/db/schema';
-import { aboutMandate, runRefusal, statusWords, toolStep } from '@/lib/buyer-pages/words';
+import { aboutMandate, runRefusal, statusWords, toolArgs, toolStep } from '@/lib/buyer-pages/words';
 
 describe('statusWords', () => {
   it('says paid for a captured purchase and every status after it that kept the money', () => {
@@ -104,5 +104,27 @@ describe('aboutMandate', () => {
     expect(aboutMandate('Your Mandate has ended. Sign a new one.')).toBe(true);
     expect(aboutMandate('Your agent stopped because something went wrong. Check your purchases, then try again.')).toBe(false);
     expect(aboutMandate('Mandated reporting is off.')).toBe(false);
+  });
+});
+
+describe('toolArgs', () => {
+  it('writes each argument the agent chose', () => {
+    expect(toolArgs({ query: 'turmeric', maxPriceCents: 2500 })).toBe('query: "turmeric", maxPriceCents: 2500');
+  });
+
+  it('writes the cart of a proposal as SKUs and quantities', () => {
+    const input = { sellerSlug: 'ravi-spices', items: [{ sku: 'TUR-100', quantity: 2 }, { sku: 'CUM-100', quantity: 1 }] };
+    expect(toolArgs(input)).toBe('sellerSlug: "ravi-spices", items: TUR-100 x2, CUM-100 x1');
+  });
+
+  it('cuts long text, flattens its lines and quotes it so it cannot pass for code', () => {
+    const args = toolArgs({ rationale: `The buyer asked for "spices"\nfor the whole month, so I picked the cheapest jars` });
+    expect(args).toBe(`rationale: "The buyer asked for \\"spices\\" for the whole mo..."`);
+  });
+
+  it('leaves out what it cannot write plainly', () => {
+    expect(toolArgs({ filter: { nested: true }, items: [1, 2], ok: true })).toBe('items: 2 items, ok: true');
+    expect(toolArgs('turmeric')).toBe('');
+    expect(toolArgs(null)).toBe('');
   });
 });

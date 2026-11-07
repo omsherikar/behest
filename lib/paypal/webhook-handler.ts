@@ -18,9 +18,10 @@ import { toCents } from './money';
 // logged and left alone. An event of a type Behest does not act on is quietly done.
 //
 // Handling the same event again changes nothing: every branch acts only from the state the first
-// handling left behind, and a job it asks for is queued once. Nothing here ever refunds or pays
-// anyone; a payout's status is recorded only by its poll. No database lock is held while PayPal is
-// asked. A verified event Behest cannot read throws, so its job ends visibly dead after its retries.
+// handling left behind, and a job it asks for is queued once. Money moves only through the purchase
+// flow's own capture and payout steps, which are idempotent; nothing here ever refunds, and a payout's
+// status is recorded only by its poll. No database lock is held while PayPal is asked. A verified
+// event Behest cannot read throws, so its job ends visibly dead after its retries.
 
 export type WebhookDeps = Pick<PurchaseDeps, 'db' | 'paypal' | 'signer' | 'sellers' | 'now'>;
 

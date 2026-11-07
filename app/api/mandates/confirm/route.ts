@@ -17,7 +17,7 @@ import { personaRefusal } from '@/lib/session';
 
 const ROUTE = 'mandate_confirm';
 
-const STATUS: Record<MandateConfirmErrorCode, number> = { invalid_policy: 400, expired: 400, unknown_buyer: 404 };
+const STATUS: Record<MandateConfirmErrorCode, number> = { invalid_policy: 400, expired: 400, unknown_buyer: 404, passkey: 400 };
 
 const error = (status: number, message: string) => Response.json({ error: { message } }, { status });
 

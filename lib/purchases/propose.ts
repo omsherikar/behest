@@ -1,4 +1,5 @@
 import { and, desc, eq, gt, gte, inArray, isNotNull, sum } from 'drizzle-orm';
+import { z } from 'zod';
 import type { Db } from '@/lib/db/client';
 import { mandates, products, purchases, sellers, wallets } from '@/lib/db/schema';
 import { MandatePolicy } from '@/lib/domain/policy';
@@ -38,8 +39,14 @@ type Reserved = { purchaseId: string; gateVerdict: Verdict; check: IntentInput |
 
 const HOUR_MS = 60 * 60 * 1000;
 
-/** The reason recorded when the intent check throws instead of answering. */
+/** The reason recorded when the intent check throws, or answers with something that is not a result. */
 const CHECK_FAILED = 'internal_error';
+
+/** An intent check result as the purchase stores it. Anything else the check answers with counts as a failed check. */
+const IntentAnswer = z.object({
+  verdict: z.enum(['consistent', 'needs_human', 'inconsistent', 'unavailable']),
+  reasons: z.array(z.string()),
+});
 
 const MANDATE_FIELDS = {
   id: mandates.id,
@@ -56,11 +63,12 @@ type LockedMandate = Pick<typeof mandates.$inferSelect, keyof typeof MANDATE_FIE
  * Decides a proposed purchase and carries it as far as it can go. The gate decides and the purchase
  * is reserved by reservePurchase; a purchase the gate blocked ends there, with no intent check and no
  * call to PayPal. Otherwise the intent check reads the buyer's own request and mandate beside the
- * cart, and its result can only tighten the gate's verdict: a check that throws counts as
- * unavailable, which sends the purchase to its buyer. The result and the final verdict are stored,
- * and the final verdict routed: BLOCK leaves the purchase `blocked`, ALLOW charges the buyer's saved
- * wallet with chargeAllowed, and ASK asks the buyer to approve at PayPal with startApproval. Returns
- * where the purchase then stands. Throws, recording nothing, for a buyer who never had a mandate.
+ * cart, and its result can only tighten the gate's verdict: a check that throws, or answers with
+ * something that is not a result, counts as unavailable, which sends the purchase to its buyer. The
+ * result and the final verdict are stored, and the final verdict routed: BLOCK leaves the purchase
+ * `blocked`, ALLOW charges the buyer's saved wallet with chargeAllowed, and ASK asks the buyer to
+ * approve at PayPal with startApproval. Returns where the purchase then stands. Throws, recording
+ * nothing, for a buyer who never had a mandate.
  */
 export async function proposePurchase(deps: PurchaseDeps, i: ProposalRequest): Promise<ProposalOutcome> {
   const { purchaseId, gateVerdict, check } = await reservePurchase(deps, i);
@@ -249,10 +257,13 @@ async function hasLinkedWallet(tx: Db, buyerId: string): Promise<boolean> {
   return wallet !== undefined;
 }
 
-/** The intent check's answer. A check that throws counts as unavailable, which sends the purchase to its buyer. */
+/**
+ * The intent check's answer. A check that throws, or answers with anything but a result, counts as
+ * unavailable, which sends the purchase to its buyer.
+ */
 async function runIntentCheck(intent: PurchaseDeps['intent'], input: IntentInput): Promise<IntentResult> {
   try {
-    return await intent(input);
+    return IntentAnswer.parse(await intent(input));
   } catch (error) {
     console.error('The intent check failed, so the purchase goes to its buyer:', error);
     return { verdict: 'unavailable', reasons: [CHECK_FAILED] };

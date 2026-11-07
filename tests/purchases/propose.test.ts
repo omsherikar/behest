@@ -336,6 +336,26 @@ it('sends the purchase to its buyer, never charging, when the intent check throw
   expect(errors).toHaveBeenCalledWith(expect.stringContaining('intent check failed'), failure);
 });
 
+it.each([
+  ['nothing', null],
+  ['reasons that are not a list', { verdict: 'consistent', reasons: 'Looks fine' }],
+])('sends the purchase to its buyer, never charging, when the intent check answers with %s', async (_, answer) => {
+  const s = await setUp();
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  s.intent.answer = answer as unknown as IntentResult;
+
+  const outcome = await propose(s, proposal(['TUR-100', 2]));
+
+  expect(outcome).toMatchObject({ verdict: 'ASK', status: 'awaiting_approval', reasons: ['internal_error'] });
+  expect(s.paypal.callsTo('chargeSavedWallet')).toEqual([]);
+  expect(await purchaseRow(s.db, outcome.purchaseId)).toMatchObject({
+    gateVerdict: 'ALLOW',
+    intent: { verdict: 'unavailable', reasons: ['internal_error'] },
+    finalVerdict: 'ASK',
+  });
+  expect(errors).toHaveBeenCalledWith(expect.stringContaining('intent check failed'), expect.anything());
+});
+
 it('blocks when intent says inconsistent', async () => {
   const s = await setUp();
   const concern = 'The buyer asked for turmeric and garam masala, not this.';

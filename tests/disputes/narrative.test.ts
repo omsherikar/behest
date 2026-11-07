@@ -582,6 +582,23 @@ describe('dropUncited', () => {
     expect(dropUncited(narrative, pack)).toEqual(NARRATIVE);
   });
 
+  it("keeps a claim citing the agent's decision when the pack has that item, and drops it when not", () => {
+    const decided: EvidencePack = {
+      ...pack,
+      items: [...pack.items, { id: 'decision', title: "The agent's decision", body: 'Decision record hash: abc.' }],
+    };
+    const claim = { text: 'The agent compared two listings and chose the cheaper one.', evidenceIds: ['decision', 'cart'] };
+    const narrative = { summary: NARRATIVE.summary, claims: [claim] };
+
+    expect(dropUncited(narrative, decided).claims).toEqual([claim]);
+    expect(dropUncited(narrative, pack).claims).toEqual([{ ...claim, evidenceIds: ['cart'] }]);
+  });
+
+  it('tells the evidence agent what the decision item holds and how its quotes are marked', () => {
+    expect(DISPUTE_SYSTEM_PROMPT).toContain('- decision:');
+    expect(DISPUTE_SYSTEM_PROMPT).toContain('quoted as shopping_agent');
+  });
+
   it('keeps the summary and every claim citing only items in the pack, in order', () => {
     expect(dropUncited(NARRATIVE, pack)).toEqual(NARRATIVE);
   });

@@ -6,8 +6,17 @@ import type { BadgeTone } from '@/components/ui/status-badge';
 
 export type StatusChip = { code: string; tone: BadgeTone; meaning: string };
 
-/** Vault v3: the setup token the buyer approves, then the payment token Behest keeps (lib/paypal/vault.ts). */
-export const VAULT_TOKENS = ['setup token', 'payment token'] as const;
+/**
+ * Vault v3, in order: confirming the mandate creates a setup token (app/api/mandates/confirm), the
+ * buyer approves it at PayPal, Behest exchanges it for a payment token (lib/paypal/vault.ts), and
+ * an allowed purchase is then charged to that token's `vault_id` (lib/paypal/orders.ts).
+ */
+export const VAULT_SEQUENCE = [
+  { step: 'Mandate signed', detail: 'setup token created' },
+  { step: 'Approved at PayPal', detail: 'by the buyer, once' },
+  { step: 'Wallet saved', detail: 'payment token' },
+  { step: 'Charged, no click', detail: 'vault_id' },
+] as const;
 
 /** Orders v2: the capture statuses captureStatus in lib/paypal/orders.ts acts on; any other is an error. */
 export const ORDER_CAPTURE_STATUSES: readonly StatusChip[] = [

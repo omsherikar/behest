@@ -34,10 +34,18 @@ describe('the PayPal values on the home page', () => {
     expect(FINAL_STATUSES.has(failed)).toBe(true);
   });
 
-  it('sends a refund under the purchase id and the refund suffix, from the Vault tokens', () => {
+  it('sends a refund under the purchase id and the refund suffix', () => {
     expect(source('lib/purchases/deliver.ts')).toContain(`requestId: \`\${purchaseId}${facts.REFUND_REQUEST_SUFFIX}\``);
+  });
+
+  it('saves a wallet in the order the Vault tile shows', () => {
+    expect(facts.VAULT_SEQUENCE.map(({ step }) => step)).toEqual(['Mandate signed', 'Approved at PayPal', 'Wallet saved', 'Charged, no click']);
+    // Confirming the mandate creates the setup token the buyer approves at PayPal.
+    expect(source('app/api/mandates/confirm/route.ts')).toContain('paypal.createSetupToken(');
     const vault = source('lib/paypal/vault.ts');
     expect(vault).toContain("'/v3/vault/setup-tokens'");
     expect(vault).toContain("'/v3/vault/payment-tokens'");
+    // An allowed purchase is charged to the saved token.
+    expect(source('lib/paypal/orders.ts')).toContain('payment_source: { paypal: { vault_id: i.paymentTokenId } }');
   });
 });

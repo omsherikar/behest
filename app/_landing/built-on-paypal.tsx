@@ -1,4 +1,4 @@
-import { ArrowRight, ArrowUUpLeft, Bank, Scales, ShoppingCartSimple, Toolbox, Vault, WebhooksLogo } from '@phosphor-icons/react/ssr';
+import { ArrowUUpLeft, Bank, Scales, ShoppingCartSimple, Toolbox, Vault, WebhooksLogo } from '@phosphor-icons/react/ssr';
 import type { ReactNode } from 'react';
 import { Money } from '@/components/ui/money';
 import { StatusBadge } from '@/components/ui/status-badge';
@@ -11,7 +11,7 @@ import {
   REFUND_REQUEST_SUFFIX,
   type StatusChip,
   TOOLKIT_TOOLS,
-  VAULT_TOKENS,
+  VAULT_SEQUENCE,
   WEBHOOK_EVENT_TYPES,
 } from './paypal-facts';
 import { SAMPLE } from './sample';
@@ -26,7 +26,7 @@ const chip = 'rounded-full border border-line bg-raised/70 px-2.5 py-0.5 font-mo
 
 function Chips({ items, label }: { items: readonly string[]; label: string }) {
   return (
-    <ul aria-label={label} className="flex flex-wrap justify-center gap-1.5">
+    <ul aria-label={label} className="flex flex-wrap gap-1.5">
       {items.map((item) => (
         <li key={item} className={chip}>
           {item}
@@ -38,7 +38,7 @@ function Chips({ items, label }: { items: readonly string[]; label: string }) {
 
 function Statuses({ items, label }: { items: readonly StatusChip[]; label: string }) {
   return (
-    <ul aria-label={label} className="grid w-full max-w-xs gap-2.5">
+    <ul aria-label={label} className="grid w-full gap-2.5">
       {items.map(({ code, tone, meaning }) => (
         <li key={code} className="flex items-center justify-between gap-3">
           <StatusBadge tone={tone}>
@@ -51,11 +51,35 @@ function Statuses({ items, label }: { items: readonly StatusChip[]; label: strin
   );
 }
 
+/** The saved wallet's life in four steps, across the tile, or down it where the tile is narrow. */
+function VaultSequence() {
+  return (
+    <div className="@container w-full">
+      <ol className="grid gap-4 @lg:grid-cols-4 @lg:gap-0">
+        {VAULT_SEQUENCE.map(({ step, detail }, index) => (
+          <li key={step} className="relative grid grid-cols-[1.25rem_minmax(0,1fr)] gap-x-3 @lg:grid-cols-1 @lg:gap-y-3 @lg:pr-4">
+            <span className="relative flex h-5 items-center">
+              <span aria-hidden className={`size-2.5 rounded-full ${index === VAULT_SEQUENCE.length - 1 ? 'bg-seal' : 'bg-text'}`} />
+              {index < VAULT_SEQUENCE.length - 1 && (
+                <span aria-hidden className="absolute left-4 hidden h-px w-[calc(100%+1rem)] bg-line-strong @lg:block" />
+              )}
+            </span>
+            <span className="grid gap-0.5">
+              <span className="text-body text-text">{step}</span>
+              <span className="font-mono text-[0.75rem] text-muted">{detail}</span>
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function RefundRequest() {
   const { payment, decision } = SAMPLE.receipt;
   return (
-    <div className="grid w-full max-w-xs gap-2.5 text-center">
-      <p className="flex flex-wrap items-center justify-center gap-1.5">
+    <div className="grid w-full gap-2.5">
+      <p className="flex flex-wrap items-center gap-1.5">
         <span className={chip}>
           refund <Money cents={payment.amountCents} />
         </span>
@@ -72,7 +96,7 @@ function RefundRequest() {
 
 function Webhooks() {
   return (
-    <div className="grid justify-items-center gap-3">
+    <div className="grid justify-items-start gap-3">
       <StatusBadge tone="seal">Signature verified</StatusBadge>
       <Chips items={WEBHOOK_EVENT_TYPES} label="The PayPal events Behest acts on" />
     </div>
@@ -86,13 +110,7 @@ const TILES: { name: string; path: string; use: string; icon: ReactNode; span?: 
     use: 'The buyer saves their PayPal wallet once, with no purchase, while signing the mandate. Allowed purchases charge it with no click.',
     icon: <Vault weight="regular" />,
     span: 'md:col-span-2',
-    visual: (
-      <div className="flex flex-wrap items-center justify-center gap-2">
-        <span className={chip}>{VAULT_TOKENS[0]}</span>
-        <ArrowRight aria-label="becomes a" className="size-4 text-muted" />
-        <span className={chip}>{VAULT_TOKENS[1]}</span>
-      </div>
-    ),
+    visual: <VaultSequence />,
   },
   {
     name: 'Orders v2',
@@ -159,7 +177,8 @@ export function BuiltOnPayPal() {
             meta={tile.path}
             description={tile.use}
             className={tile.span}
-            visualClassName="min-h-40 py-6"
+            // Every visual starts at the card's text edge, as its title and sentence do.
+            visualClassName="min-h-40 justify-start px-6 py-6"
           >
             {tile.visual}
           </FeatureCard>

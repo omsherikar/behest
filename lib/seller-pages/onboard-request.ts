@@ -3,8 +3,11 @@ import { dollarsToCents, formatUsd } from '@/lib/domain/money';
 // The body the seller onboarding page sends to POST /api/sellers/onboard, built from what the seller
 // entered. It refuses, with a message the seller can act on, anything the server would refuse for
 // the same reason, so the seller hears about a missing price before a long upload rather than after.
-// The photo limits are the catalog builder's (lib/catalog/build.ts), repeated here because this runs
-// in the browser, which must not load the builder; a test keeps the two in step.
+// The limits are the catalog builder's and the CSV reader's (lib/catalog/build.ts and csv.ts),
+// repeated here because this runs in the browser, which must not load them; a test keeps them in step.
+
+/** CSV data rows one onboarding reads; later rows are rejected. */
+export const CSV_ROW_LIMIT = 200;
 
 /** Photos one onboarding can list. */
 export const MAX_PHOTOS = 8;

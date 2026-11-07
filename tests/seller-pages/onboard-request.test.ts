@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import * as builder from '@/lib/catalog/build';
+import * as csv from '@/lib/catalog/csv';
 import {
+  CSV_ROW_LIMIT,
   MAX_PHOTOS,
   onboardRequest,
   PHOTO_BASE64_MAX,
@@ -131,6 +133,7 @@ describe('limits', () => {
     expect(MAX_PHOTOS).toBe(builder.MAX_PHOTOS);
     expect(PHOTO_BASE64_MAX).toBe(builder.PHOTO_BASE64_MAX);
     expect(PHOTOS_BASE64_MAX).toBe(builder.PHOTOS_BASE64_MAX);
+    expect(CSV_ROW_LIMIT).toBe(csv.ROW_LIMIT);
   });
 
   it('are given to sellers in MB of image', () => {

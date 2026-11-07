@@ -228,8 +228,8 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
     expect(createClaude).not.toHaveBeenCalled();
   });
 
-  it('refuses a request over a megabyte with 413', async () => {
-    const big = { ...turn, messages: [{ role: 'user', content: 'x'.repeat(1_000_001) }] };
+  it('refuses a turn over 256 KiB with 413', async () => {
+    const big = { ...turn, messages: [{ role: 'user', content: 'x'.repeat(256 * 1024) }] };
 
     const response = await POST(await request(big));
 
@@ -238,24 +238,24 @@ describe('POST /api/ai/studio', { timeout: 20_000 }, () => {
     expect(createClaude).not.toHaveBeenCalled();
   });
 
-  it('refuses a request that declares more than a megabyte without reading its body', async () => {
+  it('refuses a request that declares more than 256 KiB without reading its body', async () => {
     const body = endlessBody();
 
-    const response = await POST(await streamedRequest(body.stream, { 'content-length': '1000001' }));
+    const response = await POST(await streamedRequest(body.stream, { 'content-length': '262145' }));
 
     expect(response.status).toBe(413);
     expect(body.pulled()).toBe(0);
     expect(createClaude).not.toHaveBeenCalled();
   });
 
-  it('stops reading a body once it passes a megabyte, whatever its content-length says', async () => {
+  it('stops reading a body once it passes 256 KiB, whatever its content-length says', async () => {
     const body = endlessBody();
 
     const response = await POST(await streamedRequest(body.stream, { 'content-length': '200' }));
 
     expect(response.status).toBe(413);
-    // 64 KiB chunks: the 16th passes the limit.
-    expect(body.pulled()).toBe(16);
+    // 64 KiB chunks: the fifth passes the limit.
+    expect(body.pulled()).toBe(5);
     expect(body.cancelled()).toBe(true);
     expect(createClaude).not.toHaveBeenCalled();
   });

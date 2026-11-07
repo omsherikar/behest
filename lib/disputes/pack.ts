@@ -13,8 +13,10 @@ import { hashOf } from '@/lib/receipts/canonical';
 //
 // Text written by others is quoted where the pack writes it, with wrapUntrusted, so the evidence agent
 // reads it as data: the gate and intent reasons, which can hold seller-written titles, what a seller
-// answered, and errors PayPal sent back. Nothing in a pack names the buyer, their wallet's ids or the
-// seller's payout email: the log drops each such field and blanks out any such value it still finds.
+// answered, and errors PayPal sent back. The buyer's own words are written as they gave them, except
+// that any untrusted tag in them is escaped, so they can never look quoted. Nothing in a pack names
+// the buyer, their wallet's ids or the seller's payout email: the log drops each such field and blanks
+// out any such value it still finds, before it cuts any quote.
 
 export const EVIDENCE_IDS = ['mandate', 'readback', 'receipt', 'cart', 'purchase_log', 'approval', 'tracking'] as const;
 export type EvidenceId = (typeof EVIDENCE_IDS)[number];
@@ -102,7 +104,7 @@ function mandateBody(mandate: Mandate): string {
     `Policy hash: ${mandate.policyHash}`,
     '',
     "The mandate in the buyer's own words:",
-    mandate.sourceText,
+    unquotable(mandate.sourceText),
     '',
     'The signed mandate, a compact JWS:',
     mandate.jws,
@@ -142,6 +144,11 @@ function cartBody(cart: Cart): string {
   ].join('\n');
 }
 
+/** `text` with the less-than sign of every untrusted tag in it escaped, as wrapUntrusted escapes it, so it cannot pass for a quote. */
+function unquotable(text: string): string {
+  return text.replace(/<(?=\/?untrusted)/gi, '\\u003c');
+}
+
 function approverText(approver: Purchase['approver']): string {
   if (approver === 'human') return 'the buyer';
   if (approver === 'policy') return "the buyer's mandate";
@@ -166,24 +173,32 @@ function quoteSource(kind: string, field: string): string | null {
 function logBody(purchase: Purchase, events: PurchaseEvent[], privateValues: (string | null | undefined)[]): string {
   const hidden = new Set<string>();
   for (const value of privateValues) hide(value, hidden);
+  // Every event's private fields are gathered before any line is written, since a value one event
+  // holds privately can turn up in another event's text.
+  const shown = events.map((event) => publicFields(event.data, hidden));
+  // Longest first, so a value that contains another is blanked out whole.
+  const ordered = [...hidden].sort((a, b) => b.length - a.length);
+  const redact = (text: string) => ordered.reduce((out, value) => out.replaceAll(value, REDACTED), text);
+
   const steps = events.map((event, index) => {
-    const data = publicFields(event.data, hidden);
+    const data = shown[index];
     const quoted: string[] = [];
     for (const [field, value] of Object.entries(data)) {
       const source = quoteSource(event.kind, field);
       if (!source || typeof value !== 'string') continue;
       delete data[field];
-      quoted.push(` ${field}: ${wrapUntrusted(source, value, MAX_QUOTED_CHARS)}`);
+      // Blanked out before the quote is cut, or a value straddling the cut would leave its start behind.
+      quoted.push(` ${field}: ${wrapUntrusted(source, redact(value), MAX_QUOTED_CHARS)}`);
     }
-    const shown = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
-    return `${index + 1}. ${event.createdAt.toISOString()} ${event.kind}${shown}${quoted.join('')}`;
+    const fields = Object.keys(data).length > 0 ? ` ${JSON.stringify(data)}` : '';
+    return `${index + 1}. ${event.createdAt.toISOString()} ${event.kind}${fields}${quoted.join('')}`;
   });
   const payment = purchase.paypalCaptureId
     ? `PayPal order ${purchase.paypalOrderId}, capture ${purchase.paypalCaptureId}, captured at ${purchase.capturedAt?.toISOString() ?? 'an unrecorded time'}.`
     : 'No PayPal capture is recorded.';
   const text = [
     `Purchase ${purchase.id}, created at ${purchase.createdAt.toISOString()}.`,
-    `The buyer's request to the agent: ${purchase.request}`,
+    `The buyer's request to the agent: ${unquotable(purchase.request)}`,
     `Gate verdict: ${purchase.gateVerdict} under ruleset ${purchase.rulesetVersion}. Final verdict: ${purchase.finalVerdict ?? 'none'}, approved by ${approverText(purchase.approver)}.`,
     payment,
     `Status now: ${purchase.status}.`,
@@ -191,8 +206,8 @@ function logBody(purchase: Purchase, events: PurchaseEvent[], privateValues: (st
     'Every recorded step, in order:',
     ...steps,
   ].join('\n');
-  // Longest first, so a value that contains another is blanked out whole.
-  return [...hidden].sort((a, b) => b.length - a.length).reduce((out, value) => out.replaceAll(value, REDACTED), text);
+  // Again over the whole log, in case a private value turns up anywhere else.
+  return redact(text);
 }
 
 /** Adds every string in `value`, at any depth, to `hidden`, except those too short to blank out safely. */

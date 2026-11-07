@@ -16,6 +16,7 @@ const eslintConfig = defineConfig([
     ".worktrees/**",
     ".superpowers/**",
     ".data/**",
+    "demo-video/**",
   ]),
 ]);
 

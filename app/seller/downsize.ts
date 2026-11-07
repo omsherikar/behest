@@ -2,6 +2,8 @@
 // arrives as a JPEG of a few hundred kilobytes: well inside the upload limits, and no larger than the
 // model looks at anyway. The browser does the work with a canvas, so this runs only in the browser.
 
+import { downsizedSize } from '@/lib/seller-pages/photo-size';
+
 /** JPEG quality for the re-encoded photo: high enough that labels on a product stay legible. */
 const JPEG_QUALITY = 0.85;
 
@@ -10,7 +12,8 @@ export type DownsizedPhoto = { mediaType: 'image/jpeg'; base64: string };
 /**
  * `file` as a JPEG whose long edge is at most `longEdge` pixels, in base64 without a `data:` prefix.
  * A smaller photo keeps its size and is only re-encoded. Rejects when the browser cannot open the
- * file as an image.
+ * file as an image, or the image has no size of its own (an SVG without one), which would otherwise
+ * come out as a 1 by 1 pixel JPEG.
  */
 export async function downsizePhoto(file: File, longEdge: number): Promise<DownsizedPhoto> {
   const url = URL.createObjectURL(file);
@@ -19,9 +22,9 @@ export async function downsizePhoto(file: File, longEdge: number): Promise<Downs
     image.src = url;
     // Browsers decode with the photo's own orientation applied, so a phone photo stays upright.
     await image.decode();
-    const scale = Math.min(1, longEdge / Math.max(image.naturalWidth, image.naturalHeight));
-    const width = Math.max(1, Math.round(image.naturalWidth * scale));
-    const height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const size = downsizedSize(image.naturalWidth, image.naturalHeight, longEdge);
+    if (!size) throw new Error('The image has no size of its own');
+    const { width, height } = size;
 
     const canvas = document.createElement('canvas');
     canvas.width = width;

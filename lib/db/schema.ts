@@ -381,6 +381,15 @@ export const disputes = pgTable('disputes', {
   narrative: jsonb('narrative').$type<StoredNarrative>(),
   /** When the operator submitted the evidence to PayPal. Null until submitted. */
   submittedAt: timestamp('submitted_at', { withTimezone: true }),
+  /** PayPal's stage for the case, such as INQUIRY or CHARGEBACK, as the last sync read it. Null until then. */
+  stage: text('stage'),
+  /**
+   * What PayPal lets the seller do with the case now, from the dispute's links, such as
+   * provide_evidence or send_message, as the last sync read it. Null until then.
+   */
+  actions: jsonb('actions').$type<string[]>(),
+  /** When the operator last sent the answer to the buyer as a message at PayPal. Null until then. */
+  messagedAt: timestamp('messaged_at', { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

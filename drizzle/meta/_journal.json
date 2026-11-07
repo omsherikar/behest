@@ -15,6 +15,13 @@
       "when": 1794051351141,
       "tag": "0001_passkeys_and_decision_records",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1794087508918,
+      "tag": "0002_dispute_stage_and_actions",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import { disputes, purchases } from '@/lib/db/schema';
 import type { DisputeDetail, DisputeSummary, PaypalPort } from '@/lib/paypal/port';
 import { appendEvent, transition } from '@/lib/purchases/events';
 import { canTransition } from '@/lib/purchases/transitions';
+import { CLOSED_STATUS } from './answerable';
 
 // Bringing the disputes buyers open at PayPal into Behest (architecture section 5.5). Each dispute is
 // stored by PayPal's dispute id and matched to the purchase holding its capture. A matched purchase
@@ -17,9 +18,6 @@ import { canTransition } from '@/lib/purchases/transitions';
 // No database lock is held while PayPal is asked.
 
 type SyncDeps = { db: Db; paypal: PaypalPort };
-
-/** PayPal's status for a dispute it has closed. A closed dispute never opens one on its purchase. */
-const CLOSED = 'RESOLVED';
 
 /**
  * PayPal's outcome codes for a closed dispute that leaves the money with Behest: decided in the
@@ -97,7 +95,8 @@ async function storeDispute(db: Db, dispute: DisputeDetail): Promise<void> {
       .from(purchases)
       .where(eq(purchases.id, purchaseId))
       .for('update');
-    if (dispute.status !== CLOSED) {
+    // A closed dispute never opens one on its purchase.
+    if (dispute.status !== CLOSED_STATUS) {
       if (canTransition(purchase.status, 'disputed')) await transition(tx, purchaseId, purchase.status, 'disputed');
       return;
     }

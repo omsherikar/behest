@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { appDb, appJwks, appPaypal, appUrl } from '@/lib/app-deps';
 import { disputes } from '@/lib/db/schema';
 import type { Narrative } from '@/lib/disputes/narrative';
+import type { AnswerRefusalCode } from '@/lib/disputes/answerable';
 import { assembleEvidencePack, EVIDENCE_IDS, type EvidencePack } from '@/lib/disputes/pack';
 import { SubmitEvidenceError, type SubmitEvidenceErrorCode, submitEvidence } from '@/lib/disputes/submit';
 import { FORM_BODY_BYTES, readBody } from '@/lib/http/read-body';
@@ -12,7 +13,8 @@ import { personaRefusal } from '@/lib/session';
 // Submits the narrative the operator reviewed to PayPal as the dispute's evidence, exactly as the
 // operator sent it. The evidence pack is built again from Behest's records, and a narrative citing
 // an item the pack does not hold is refused, naming the claims to fix: submitting cannot be undone,
-// so nothing the operator approved is dropped on the way to PayPal.
+// so nothing the operator approved is dropped on the way to PayPal. A dispute PayPal takes no
+// evidence on yet, such as an inquiry, is refused with 422 and words saying what PayPal takes instead.
 
 /** `items` as a list in a sentence, such as `a, b and c`. */
 const inProse = (items: readonly string[], conjunction: 'and' | 'or') =>
@@ -43,8 +45,22 @@ const NarrativeRequest = z.strictObject(
   { error: SHAPE },
 );
 
+/**
+ * The status of each refusal submitEvidence words for the operator itself: notes too long, and a
+ * dispute PayPal takes no evidence on now or could not be read to check. Nothing PayPal sent is in them.
+ */
+const WORDED: Record<'notes_too_long' | AnswerRefusalCode, number> = {
+  notes_too_long: 400,
+  inquiry: 422,
+  claim: 422,
+  closed: 422,
+  not_taking_answers: 422,
+  check_failed: 502,
+};
+const isWorded = (code: SubmitEvidenceErrorCode): code is keyof typeof WORDED => Object.hasOwn(WORDED, code);
+
 /** The status and operator-facing message for each refusal with a fixed message. Nothing PayPal sent reaches the client. */
-const REFUSALS: Record<Exclude<SubmitEvidenceErrorCode, 'notes_too_long'>, [status: number, message: string]> = {
+const REFUSALS: Record<Exclude<SubmitEvidenceErrorCode, keyof typeof WORDED>, [status: number, message: string]> = {
   unknown_dispute: [404, 'There is no such dispute.'],
   unmatched: [409, 'This dispute is not matched to a purchase, so Behest has no evidence for it.'],
   already_submitted: [409, 'Evidence for this dispute was already submitted.'],
@@ -115,7 +131,7 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/dispute
   } catch (failure) {
     if (!(failure instanceof SubmitEvidenceError)) throw failure;
     // submitEvidence has logged PayPal's own error, which never reaches the client.
-    return failure.code === 'notes_too_long' ? error(400, failure.message) : refuse(failure.code);
+    return isWorded(failure.code) ? error(WORDED[failure.code], failure.message) : refuse(failure.code);
   }
   return Response.json({ narrative });
 }

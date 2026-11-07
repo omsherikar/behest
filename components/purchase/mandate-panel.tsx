@@ -41,8 +41,9 @@ const dateTime = new Intl.DateTimeFormat('en-GB', {
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 py-2.5">
-      <dt className="text-meta text-muted">{label}</dt>
+    // In a narrow panel the value drops under its label rather than breaking the label.
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
+      <dt className="shrink-0 text-meta whitespace-nowrap text-muted">{label}</dt>
       <dd className="min-w-0 text-right text-body text-text">{children}</dd>
     </div>
   );

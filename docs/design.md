@@ -73,7 +73,8 @@ AG Grid and AG Studio follow through the `--pp-*` variables, which point at thes
 - **Primary**: a white pill with black text, for the action the page is for. One per view.
 - **Secondary**: a dark glass pill (`overlay` fill, blur, `line-strong` border), beside the primary.
 - **Quiet**: text on no fill, for small actions in a row or a panel.
-- **Links** are text with an underline on hover. No blue fills anywhere.
+- **Links** are text. A link inside a sentence keeps a faint underline that brightens on hover (`textLink` in `components/ui/link.ts`), so it never rests on colour alone; a standalone link may show its underline on hover only. No blue fills anywhere.
+- **Fields** (input, textarea, search) use `fieldClass` in `components/ui/field.ts`: the surface fill, the `control` border, 12 px corners.
 - The focus ring is 2 px of `text`, offset 2 px, on everything focusable.
 
 ### Type
@@ -138,7 +139,7 @@ AG Grid and AG Studio follow through the `--pp-*` variables, which point at thes
 | Dispute | Evidence | Timeline |
 
 - **Empty states** sit centred in the content area: one line on why, and the next action. Never a blank half screen.
-- **Tables and grids**: no truncated headers or clipped columns at 1280 px. Columns get min widths and flex; long headers wrap. Numbers right-aligned in mono.
+- **Tables and grids**: no truncated headers or clipped columns at 1280 px. Every column is sized to its header and cells first; spare width then goes to the column marked to fill (`context: { fill: true }`, such as the ledger's reasons), or to all columns in proportion. A grid narrower than its content scrolls sideways rather than cut a header. Long text wraps in its cell. Numbers right-aligned in mono.
 - The AG Studio dashboard keeps its "best on a wider screen" notice under 1024 px.
 
 ## Landing page (`/`)

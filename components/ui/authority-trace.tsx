@@ -40,6 +40,11 @@ const RAIL: Record<StepState, string> = {
   not_reached: 'border-dashed border-line-strong',
 };
 
+/** A step's name up to and including the space before its last word, such as "Intent ". */
+const lead = (name: string) => name.slice(0, name.lastIndexOf(' ') + 1);
+/** A step's last word, such as "check". */
+const lastWord = (name: string) => name.slice(name.lastIndexOf(' ') + 1);
+
 /** The steps whose state differs between two traces. */
 function changedSteps(before: TraceStates, after: TraceStates): TraceStep[] {
   return TRACE_STEPS.filter((step) => before[step] !== after[step]);
@@ -114,17 +119,20 @@ export function AuthorityTrace({ states, proof = {}, label = 'Authority trace', 
                       hasProof ? 'decoration-line-strong underline-offset-4 group-hover:underline' : ''
                     }`}
                   >
-                    {STEP_NAMES[step]}
-                    {/* Inside the name, so a name that wraps keeps its chevron at its end. */}
-                    {hasProof && (
-                      <svg
-                        viewBox="0 0 16 16"
-                        aria-hidden
-                        className={`ml-1.5 inline size-3 align-[-1px] text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                      >
-                        <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
+                    {lead(STEP_NAMES[step])}
+                    {/* The last word and the chevron never part, so a name that wraps keeps its chevron at its end. */}
+                    <span className="whitespace-nowrap">
+                      {lastWord(STEP_NAMES[step])}
+                      {hasProof && (
+                        <svg
+                          viewBox="0 0 16 16"
+                          aria-hidden
+                          className={`ml-1.5 inline size-3 align-[-1px] text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                        >
+                          <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </span>
                   </span>
                 </span>
                 <span className={`block text-meta ${STATE_TEXT[state]}`}>{STATE_WORDS[state]}</span>

@@ -16,7 +16,8 @@
     "keys": "tsx scripts/gen-signing-key.ts",
     "seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
     "webhook:register": "tsx --env-file-if-exists=.env scripts/register-webhook.ts",
-    "attack:replay": "tsx --env-file-if-exists=.env scripts/attack-replay.ts"
+    "attack:replay": "tsx --env-file-if-exists=.env scripts/attack-replay.ts",
+    "demo:tamper": "tsx --env-file-if-exists=.env scripts/demo-tamper.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.6.0",

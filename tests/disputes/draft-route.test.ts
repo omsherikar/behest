@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { connection, NextRequest } from 'next/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/disputes/[id]/draft/route';
-import { appDb, appPaypal, llmDeps } from '@/lib/app-deps';
+import { appDb, appJwks, appPaypal, llmDeps } from '@/lib/app-deps';
 import type { Db } from '@/lib/db/client';
 import { disputes, receipts } from '@/lib/db/schema';
 import { assembleEvidencePack } from '@/lib/disputes/pack';
@@ -14,6 +14,7 @@ import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
 import stubReply from '@/tests/fixtures/llm/dispute_evidence/stub.json';
 import { fakeClaude, messageJson } from '@/tests/helpers/fake-claude';
 import { FakePaypal } from '@/tests/helpers/fake-paypal';
+import { jwks } from '@/tests/helpers/purchase-deps';
 import { seedPurchase } from '@/tests/helpers/seed-purchase';
 import { createTestDb } from '@/tests/helpers/test-db';
 
@@ -25,6 +26,7 @@ vi.mock('next/server', async (importOriginal) => ({
 vi.mock('@/lib/app-deps', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/app-deps')>()),
   appDb: vi.fn(),
+  appJwks: vi.fn(),
   appPaypal: vi.fn(),
   llmDeps: vi.fn(),
 }));
@@ -137,6 +139,7 @@ beforeEach(async () => {
   paypal.disputes = [DETAIL];
   vi.mocked(appDb).mockReturnValue(db);
   vi.mocked(appPaypal).mockReturnValue(paypal);
+  vi.mocked(appJwks).mockResolvedValue(jwks);
 });
 
 afterEach(() => {
@@ -154,7 +157,7 @@ describe('POST /api/disputes/[id]/draft', () => {
 
     expect(status).toBe(200);
     expect(connection).toHaveBeenCalled();
-    const pack = await assembleEvidencePack(db, disputeId, APP_URL);
+    const pack = await assembleEvidencePack(db, disputeId, APP_URL, jwks);
     expect(body).toEqual({ pack, narrative: NARRATIVE });
     expect(pack.items.find((item) => item.id === 'receipt')?.body).toContain(`${APP_URL}/api/receipts/verify`);
     expect(paypal.callsTo('getDispute')).toEqual([[PAYPAL_DISPUTE_ID]]);
@@ -239,7 +242,7 @@ describe('POST /api/disputes/[id]/draft', () => {
     expect(body).toEqual({ error: { code, message } });
     expect(JSON.stringify(body)).not.toContain(MODEL_TEXT);
     const row = await storedRow(disputeId);
-    expect(row.evidencePack).toEqual(await assembleEvidencePack(db, disputeId, APP_URL));
+    expect(row.evidencePack).toEqual(await assembleEvidencePack(db, disputeId, APP_URL, jwks));
     expect(row.narrative).toBeNull();
   });
 
@@ -260,7 +263,7 @@ describe('POST /api/disputes/[id]/draft', () => {
     });
     expect(fake.requests).toHaveLength(0);
     expect(logged).toHaveBeenCalledWith('[disputes] PayPal did not return the dispute:', expect.any(TypeError));
-    expect((await storedRow(disputeId)).evidencePack).toEqual(await assembleEvidencePack(db, disputeId, APP_URL));
+    expect((await storedRow(disputeId)).evidencePack).toEqual(await assembleEvidencePack(db, disputeId, APP_URL, jwks));
   });
 
   it.each([

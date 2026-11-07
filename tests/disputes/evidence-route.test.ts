@@ -2,13 +2,14 @@ import { eq } from 'drizzle-orm';
 import { connection, NextRequest } from 'next/server';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POST } from '@/app/api/disputes/[id]/evidence/route';
-import { appDb, appPaypal } from '@/lib/app-deps';
+import { appDb, appJwks, appPaypal } from '@/lib/app-deps';
 import type { Db } from '@/lib/db/client';
 import { disputes, receipts } from '@/lib/db/schema';
 import type { Narrative } from '@/lib/disputes/narrative';
 import { PayPalApiError } from '@/lib/paypal/http';
 import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
 import type { FakePaypal } from '@/tests/helpers/fake-paypal';
+import { jwks } from '@/tests/helpers/purchase-deps';
 import { chargedDispute, openDispute, PAYPAL_DISPUTE_ID } from '@/tests/helpers/seed-dispute';
 import { createTestDb } from '@/tests/helpers/test-db';
 
@@ -20,6 +21,7 @@ vi.mock('next/server', async (importOriginal) => ({
 vi.mock('@/lib/app-deps', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/app-deps')>()),
   appDb: vi.fn(),
+  appJwks: vi.fn(),
   appPaypal: vi.fn(),
 }));
 
@@ -71,6 +73,7 @@ beforeEach(async () => {
   ({ db, paypal, disputeId, purchaseId } = await chargedDispute());
   vi.mocked(appDb).mockReturnValue(db);
   vi.mocked(appPaypal).mockReturnValue(paypal);
+  vi.mocked(appJwks).mockResolvedValue(jwks);
 });
 
 afterEach(() => {

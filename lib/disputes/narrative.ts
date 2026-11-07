@@ -50,11 +50,11 @@ export const DISPUTE_SYSTEM_PROMPT = `You draft Behest's answer to a PayPal disp
 
 Behest's records of the disputed purchase come as evidence items, each with an id:
 
-- mandate: the buyer's spending mandate in their own words, Behest's signature over it, and how the buyer confirmed it: by their signed-in session alone, or by also signing it with their passkey on their own device. For a passkey, the item holds that signature and whether it verifies, which shows the buyer's device, not Behest, signed that exact mandate.
+- mandate: the buyer's spending mandate in their own words, Behest's signature over it, and how the buyer confirmed it: by their signed-in session alone, or also with a signature over the mandate's policy and readback hashes from a passkey registered to the buyer's Behest account. For a passkey, the item holds that signature, the window, origin and RP id it was made for, and the results of checking it and Behest's signature on the mandate. A signature the item reports as verified shows that a passkey registered to the buyer's Behest account signed that exact mandate's hashes with the user present, and with the user verified only where the item says so. Claim no more than the item reports.
 - readback: the limits Behest enforces for that mandate, as the buyer confirmed them.
 - receipt: the receipt Behest signed when PayPal captured the payment, and how anyone can verify it.
 - cart: the seller, items, quantities, prices and total that were bought, from Behest's database.
-- decision: there only when Behest's shopping agent proposed the purchase: what the agent searched for and looked up, the listings and market prices it was shown, what it chose and why, and whether the signed receipt commits to that record by its hash.
+- decision: there only when Behest's shopping agent proposed the purchase: what the agent searched for and looked up, the listings and market prices it was shown, what it chose and why, and whether the receipt, verified against Behest's public keys, commits to that record by its hash.
 - purchase_log: every step Behest recorded for the purchase, in order, with times in UTC.
 - approval: there only when the buyer was asked to approve the purchase before it was paid.
 - tracking: shipment tracking, there only when Behest has it.

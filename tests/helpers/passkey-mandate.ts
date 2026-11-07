@@ -14,7 +14,11 @@ import { demoPolicy } from '@/tests/helpers/fixtures';
 /** Registers a passkey for `buyerId` at `origin` and confirms `policy` with it, as the buyer's active mandate. */
 export async function confirmWithPasskey(
   i: { db: Db; signer: Signer; origin: string; now: Date; buyerId: string },
-  { text = '$60 a month on groceries and spices', policy = demoPolicy }: { text?: string; policy?: MandatePolicy } = {},
+  {
+    text = '$60 a month on groceries and spices',
+    policy = demoPolicy,
+    userVerified = true,
+  }: { text?: string; policy?: MandatePolicy; userVerified?: boolean } = {},
 ): Promise<{ mandateId: string; authenticator: TestAuthenticator }> {
   const deps = { db: i.db, origin: i.origin, now: () => i.now };
   const authenticator = new TestAuthenticator(i.origin);
@@ -23,7 +27,7 @@ export async function confirmWithPasskey(
 
   const signing = await signingOptions(deps, { buyerId: i.buyerId, policy });
   if (!signing.ok) throw new Error('the buyer has no passkey to sign with');
-  const assertion = authenticator.assert(signing.options);
+  const assertion = authenticator.assert(signing.options, { userVerified });
   const verified = await verifyMandateAssertion(deps, { buyerId: i.buyerId, policy, assertion, ticket: signing.ticket });
   if (!verified.ok) throw new Error('the passkey signature did not verify');
 

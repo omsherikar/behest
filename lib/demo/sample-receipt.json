@@ -1,0 +1,96 @@
+{
+  "note": "A sample for the landing page, signed with a throwaway key by scripts/sample-receipt.ts. Not a real purchase.",
+  "mandateJws": "eyJhbGciOiJFZERTQSIsImtpZCI6IjBmOGIxZTExZmJhMjg0ZWQiLCJ0eXAiOiJiZWhlc3QtbWFuZGF0ZStqd3MifQ.eyJidXllciI6eyJyZWYiOiI1OWY5YmM1MmY2N2I0YTAyYTgxZGNiMmMzMmYwMmFhODViNDRhMTg3NDUzNjc5YzNkNWY4YWM4N2UyNzYzYTg4In0sImNvbmZpcm1hdGlvbiI6InNlc3Npb24iLCJjb25maXJtZWRBdCI6IjIwMjYtMTEtMDFUMDk6MzA6MDAuMDAwWiIsImV4cGlyZXNBdCI6bnVsbCwiaWF0IjoxNzkzNTI1NDAwLCJpZCI6IjVjMWU5YTdkLTNiMmYtNGU2MS05ZDA4LTJhN2Y0YzZiMWUzMCIsImlzcyI6ImJlaGVzdCIsInBvbGljeUhhc2giOiJkMDQzNDNmN2Y3NjRkY2YxNmFjMWYyZmIwZDczMTBlN2JhOTUwZjNmZGNlYmFhMWRjZjkwODNiMTZjZGNiYzEwIiwicmVhZGJhY2tIYXNoIjoiODg3ZTFkODM3OGIzODYwYjcxNDMwNGQwN2FkYmI3ZTM1OTYwYjFjYjA0ZDU2NDBhYzVlNjMzMGEyZTkxNGIyMSIsInYiOjF9.qab8A1XSIZ78YRQklLoRoxh9c3H9Yh4CebxOcPy6Q-aRXmBBwKmD0kYUy8tIfGNB6o0DPTtEjX40GThA_OcTCQ",
+  "receiptJws": "eyJhbGciOiJFZERTQSIsImtpZCI6IjBmOGIxZTExZmJhMjg0ZWQiLCJ0eXAiOiJiZWhlc3QtcmVjZWlwdCtqd3MifQ.eyJjYXJ0Ijp7ImN1cnJlbmN5IjoiVVNEIiwiaGFzaCI6IjNlMWYzNmIyNTIwNTc2MmViZmJmNmNkOTdjZWM1Mjk0ODI5N2EzZDY1ZTRlOWRmNTZlZGFhMWMyMDU0YjhlNGMiLCJpdGVtQ291bnQiOjEsInRvdGFsQ2VudHMiOjQwMDB9LCJkZWNpc2lvbiI6eyJhcHByb3ZlciI6Imh1bWFuIiwib3V0Y29tZXMiOlt7InJlc3VsdCI6InBhc3MiLCJydWxlIjoibWFuZGF0ZV9hY3RpdmUifSx7InJlc3VsdCI6InBhc3MiLCJydWxlIjoiY2FydF92YWxpZCJ9LHsicmVzdWx0IjoicGFzcyIsInJ1bGUiOiJjYXRlZ29yeV9hbGxvd2VkIn0seyJyZXN1bHQiOiJwYXNzIiwicnVsZSI6InNlbGxlcl9hbGxvd2VkIn0seyJyZXN1bHQiOiJwYXNzIiwicnVsZSI6Imxpc3RpbmdfY2xlYW4ifSx7InJlc3VsdCI6InBhc3MiLCJydWxlIjoicGVyX3B1cmNoYXNlX21heCJ9LHsicmVzdWx0IjoicGFzcyIsInJ1bGUiOiJidWRnZXRfcmVtYWluaW5nIn0seyJyZXN1bHQiOiJwYXNzIiwicnVsZSI6InZlbG9jaXR5In0seyJyZXN1bHQiOiJhc2siLCJydWxlIjoiYXNrX3RocmVzaG9sZCJ9LHsicmVzdWx0Ijoic2tpcCIsInJ1bGUiOiJwcmljZV9iZW5jaG1hcmsifSx7InJlc3VsdCI6InBhc3MiLCJydWxlIjoicXVhbnRpdHkifSx7InJlc3VsdCI6InBhc3MiLCJydWxlIjoid2FsbGV0X2xpbmtlZCJ9XSwicHVyY2hhc2VJZCI6ImI3ZDJmMGM0LTFlMmEtNGM1NS04ZDBlLTZhOWYzYjFjMmQ0ZSIsInJ1bGVzZXRWZXJzaW9uIjoiZ2F0ZS12MSIsInZlcmRpY3QiOiJBU0sifSwiaWF0IjoxNzk0MDYwMTMxLCJpZCI6IjBmOGU2YTFjLTUyZDQtNGYyNy05YTNiLTdjMWRlMGI0ZTIxYiIsImlzcyI6ImJlaGVzdCIsIm1hbmRhdGUiOnsiaWQiOiI1YzFlOWE3ZC0zYjJmLTRlNjEtOWQwOC0yYTdmNGM2YjFlMzAiLCJqd3NIYXNoIjoiODljYWFhZTNkYjg1MDEwNDNiNTY2OGNjZDZlZTBmNzIwYTE5MjFhMmJiMWExYmZhYThmYWU2OGU0Y2FjMTQ3MiIsInBvbGljeUhhc2giOiJkMDQzNDNmN2Y3NjRkY2YxNmFjMWYyZmIwZDczMTBlN2JhOTUwZjNmZGNlYmFhMWRjZjkwODNiMTZjZGNiYzEwIn0sInBheW1lbnQiOnsiYW1vdW50Q2VudHMiOjQwMDAsImNhcHR1cmVJZCI6IjNHRzI3OTc1VVI3NjU0MzIxIiwiY2FwdHVyZWRBdCI6IjIwMjYtMTEtMDdUMTQ6MDI6MTEuMDAwWiIsIm9yZGVySWQiOiI4TUM1ODc0NVlLMTIzNDU2NyIsInByb2Nlc3NvciI6InBheXBhbCJ9LCJzZWxsZXIiOnsic2x1ZyI6InJhdmktc3BpY2VzIn0sInYiOjF9.mXZWo-FYq9uFx38v3-dMcBMrkVfLvF3e8Ii7LtS668ohcjNqJCKobkQ2X504Vu7c9KsUDMHemD6tmoZmfPu5CA",
+  "jwks": {
+    "keys": [
+      {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": "5g7h-4QOnschRrxlVZW1uj3on0fGjzaz6bNTTS7bzoQ",
+        "alg": "EdDSA",
+        "use": "sig",
+        "kid": "0f8b1e11fba284ed"
+      }
+    ]
+  },
+  "cart": {
+    "seller": {
+      "slug": "ravi-spices",
+      "name": "Ravi's Spice Co."
+    },
+    "currency": "USD",
+    "items": [
+      {
+        "sku": "GIFT-SET",
+        "title": "Spice gift box",
+        "category": "spices",
+        "unitPriceCents": 4000,
+        "quantity": 1
+      }
+    ],
+    "totalCents": 4000
+  },
+  "outcomes": [
+    {
+      "rule": "mandate_active",
+      "result": "pass",
+      "detail": "The mandate is active and has not expired"
+    },
+    {
+      "rule": "cart_valid",
+      "result": "pass",
+      "detail": "Every item is listed by Ravi's Spice Co. and in stock"
+    },
+    {
+      "rule": "category_allowed",
+      "result": "pass",
+      "detail": "Every item is in a category your mandate allows"
+    },
+    {
+      "rule": "seller_allowed",
+      "result": "pass",
+      "detail": "Ravi's Spice Co. is allowed by your mandate"
+    },
+    {
+      "rule": "listing_clean",
+      "result": "pass",
+      "detail": "No item in the cart was flagged by listing screening"
+    },
+    {
+      "rule": "per_purchase_max",
+      "result": "pass",
+      "detail": "$40.00 is within your $60.00 per-purchase limit"
+    },
+    {
+      "rule": "budget_remaining",
+      "result": "pass",
+      "detail": "$40.00 fits in the $41.25 left this month"
+    },
+    {
+      "rule": "velocity",
+      "result": "pass",
+      "detail": "Your mandate sets no limit on how often to buy"
+    },
+    {
+      "rule": "ask_threshold",
+      "result": "ask",
+      "detail": "$40.00 is over your $25.00 approval limit"
+    },
+    {
+      "rule": "price_benchmark",
+      "result": "skip",
+      "detail": "No market price benchmark exists for these items"
+    },
+    {
+      "rule": "quantity",
+      "result": "pass",
+      "detail": "No item has a quantity over 5"
+    },
+    {
+      "rule": "wallet_linked",
+      "result": "pass",
+      "detail": "A saved PayPal wallet is linked"
+    }
+  ]
+}

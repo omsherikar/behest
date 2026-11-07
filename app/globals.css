@@ -1,51 +1,111 @@
 @import "tailwindcss";
 
-@theme inline {
-  --font-mono: var(--font-geist-mono);
-}
+/*
+ * Behest design tokens (docs/design.md). One dark theme. Every text colour below keeps at least
+ * 4.5:1 against bg, panel, raised and the 12 percent state tints.
+ */
+:root {
+  color-scheme: dark;
 
-body {
-  background: var(--pp-canvas);
-  color: var(--pp-ink);
-  font-family: var(--pp-font);
+  --bg: #0a1220;
+  --panel: #0f192c;
+  --raised: #15223a;
+  --line: #22314c;
+  /* Borders that identify a control, such as an input or a secondary button: 3:1 on bg, panel and raised. */
+  --line-strong: #5a6e92;
+  --text: #e4ebf5;
+  --muted: #8e9db8;
+  --action: #5b9bff;
+  /* Hover on the action colour: lighter, as the theme is dark. */
+  --action-strong: #8ab8ff;
+  --seal: #3fd0a1;
+  --hold: #f4b95a;
+  --stop: #ff7a7a;
+  --jws-header: #9db4ff;
+  --jws-payload: #c9a7ff;
+  --jws-signature: #6fd6d0;
+
+  --font-sans-stack: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono-stack: var(--font-plex-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
 /*
- * PayPal design tokens: the single source of truth for the dashboard shell (through the
- * Tailwind colours below, e.g. bg-pp-blue), for AG Studio (app/dashboard/studio/theme.ts)
- * and for AG Grid (app/(endpoints)/data-grid.tsx), whose themes reference these variables directly.
+ * The PayPal tokens predate the Behest tokens. AG Studio (app/dashboard/studio/theme.ts), AG Grid
+ * (app/seller/seller-grid.tsx, app/(endpoints)/data-grid.tsx) and the pages not yet restyled read
+ * them, so each one points at its dark equivalent and everything follows one theme.
  */
 :root {
-  --pp-navy: #001c64;
-  --pp-blue: #0070e0;
-  --pp-blue-dark: #003087;
+  --pp-navy: var(--text);
+  --pp-blue: var(--action);
+  --pp-blue-dark: var(--action-strong);
   --pp-sky: #009cde;
-  --pp-highlight: #e6f0fc;
-  --pp-canvas: #f5f7fa;
-  --pp-surface: #ffffff;
-  --pp-border: #dbe1e8;
-  --pp-gridline: #e9edf2;
-  --pp-ink: #001435;
-  --pp-muted: #545d68;
-  --pp-success: #00875a;
-  --pp-warning: #b45309;
-  --pp-danger: #c4122f;
-  --pp-font: "PayPal Open", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --pp-highlight: var(--raised);
+  --pp-canvas: var(--bg);
+  --pp-surface: var(--panel);
+  --pp-border: var(--line);
+  --pp-gridline: #1a2740;
+  --pp-ink: var(--text);
+  --pp-muted: var(--muted);
+  --pp-success: var(--seal);
+  --pp-warning: var(--hold);
+  --pp-danger: var(--stop);
+  --pp-font: var(--font-sans-stack);
 
-  /* Chart series, PayPal blue and navy first. */
-  --pp-chart-1: #0070e0;
-  --pp-chart-2: #001c64;
-  --pp-chart-3: #00a8a8;
-  --pp-chart-4: #f5a623;
-  --pp-chart-5: #7b61ff;
-  --pp-chart-6: #e8615a;
-  --pp-chart-7: #60cdff;
-  --pp-chart-8: #2e9e6a;
-  --pp-chart-9: #b47cd8;
-  --pp-chart-10: #8a94a6;
+  /* Chart series, chosen to read on the dark panels. */
+  --pp-chart-1: #5b9bff;
+  --pp-chart-2: #c9a7ff;
+  --pp-chart-3: #3fc9c9;
+  --pp-chart-4: #f4b95a;
+  --pp-chart-5: #9d8cff;
+  --pp-chart-6: #ff8a80;
+  --pp-chart-7: #7fd3ff;
+  --pp-chart-8: #3fd0a1;
+  --pp-chart-9: #d49cf0;
+  --pp-chart-10: #8e9db8;
 }
 
 @theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-action: var(--action);
+  --color-action-strong: var(--action-strong);
+  --color-seal: var(--seal);
+  --color-hold: var(--hold);
+  --color-stop: var(--stop);
+  --color-jws-header: var(--jws-header);
+  --color-jws-payload: var(--jws-payload);
+  --color-jws-signature: var(--jws-signature);
+  /* Text on a filled action or state colour. */
+  --color-on-fill: var(--bg);
+
+  --font-sans: var(--font-sans-stack);
+  --font-mono: var(--font-mono-stack);
+
+  /* Type scale (rem): meta, body, lead, page title, home title. */
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1.125rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.375rem;
+  --text-lead: 1rem;
+  --text-lead--line-height: 1.5rem;
+  --text-title: 1.375rem;
+  --text-title--line-height: 1.875rem;
+  --text-display: 2rem;
+  --text-display--line-height: 2.5rem;
+
+  --radius-control: 4px;
+  --radius-panel: 8px;
+
+  /* A trace node arriving at a new state, and a node still in progress. */
+  --animate-trace-arrive: trace-arrive 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --animate-trace-pulse: trace-pulse 1.6s ease-in-out infinite;
+
+  /* The PayPal tokens as Tailwind colours, for the pages not yet restyled. */
   --color-pp-navy: var(--pp-navy);
   --color-pp-blue: var(--pp-blue);
   --color-pp-blue-dark: var(--pp-blue-dark);
@@ -60,4 +120,53 @@ body {
   --color-pp-warning: var(--pp-warning);
   --color-pp-danger: var(--pp-danger);
   --font-paypal: var(--pp-font);
+}
+
+@keyframes trace-arrive {
+  from {
+    opacity: 0.25;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes trace-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@layer base {
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans-stack);
+    font-size: 0.875rem;
+    line-height: 1.375rem;
+  }
+
+  /* One visible focus ring for everything focusable, in the action colour. */
+  :focus-visible {
+    outline: 2px solid var(--action);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--action) 35%, transparent);
+  }
+}
+
+/* Motion is decoration here: under reduced motion nothing animates or transitions. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

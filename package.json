@@ -21,6 +21,7 @@
     "@anthropic-ai/sdk": "1.6.0",
     "@electric-sql/pglite": "^0.5.15",
     "@paypal/agent-toolkit": "1.11.0",
+    "@phosphor-icons/react": "2.1.10",
     "@simplewebauthn/browser": "14.0.0",
     "@simplewebauthn/server": "14.0.3",
     "ag-grid-community": "36.2.0",
@@ -28,7 +29,9 @@
     "ag-studio": "3.0.0",
     "ag-studio-react": "3.0.0",
     "canonicalize": "5.1.0",
+    "clsx": "2.1.1",
     "drizzle-orm": "^0.45.4",
+    "framer-motion": "14.6.0",
     "jose": "6.2.15",
     "next": "16.3.6",
     "papaparse": "5.7.0",
@@ -36,6 +39,7 @@
     "qrcode": "1.5.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
+    "tailwind-merge": "3.7.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

@@ -10,9 +10,10 @@ import { canTransition } from '@/lib/purchases/transitions';
 // the lifecycle lets into a dispute moves to `disputed`, once, and on to `resolved` once PayPal closes
 // the dispute leaving the money with Behest. A dispute the buyer wins moves no purchase here: PayPal
 // returns the money with a refund or a reversal of the capture, whose webhook moves the purchase to
-// `refunded`. The sync runs from a job, again and again, so it is idempotent: a later run updates what
-// PayPal reports and moves nothing a second time. It writes only PayPal's side of a dispute and never the operator's: the evidence pack, the
-// narrative and the submission time stay as they are. No database lock is held while PayPal is asked.
+// `refunded`. The sync runs from a job, again and again, so it is idempotent: a later run updates
+// what PayPal reports and moves nothing a second time. It writes only PayPal's side of a dispute and
+// never the operator's: the evidence pack, the narrative and the submission time stay as they are.
+// No database lock is held while PayPal is asked.
 
 type SyncDeps = { db: Db; paypal: PaypalPort };
 
@@ -58,9 +59,9 @@ function withCapture(summary: DisputeSummary, detail: DisputeDetail): DisputeDet
  * purchase whose payout is still out is moved by a later sync, once the payout settles it. Once
  * PayPal has closed the dispute with an outcome that leaves the money with Behest, it logs
  * `dispute_resolved` and moves the purchase to `resolved` where ALLOWED allows it, which means a
- * `disputed` one; any other outcome moves nothing. The
- * dispute row stays locked from the upsert to the commit, so two syncs of one dispute take turns,
- * and the purchase row is locked while its status is read and moved.
+ * `disputed` one; any other outcome moves nothing. The dispute row stays locked from the upsert to
+ * the commit, so two syncs of one dispute take turns, and the purchase row is locked while its
+ * status is read and moved.
  */
 async function storeDispute(db: Db, dispute: DisputeDetail): Promise<void> {
   const reported = {

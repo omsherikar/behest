@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { POST } from '@/app/api/demo/reset/route';
 import { appDb } from '@/lib/app-deps';
 import type { Db } from '@/lib/db/client';
+import { purchases } from '@/lib/db/schema';
 import { seedDemo } from '@/lib/demo/seed';
 import { SESSION_COOKIE, sessionCookie, type Persona } from '@/lib/session';
 import { addDemoActivity, rowCounts } from '@/tests/helpers/demo-activity';
@@ -128,6 +129,17 @@ describe('POST /api/demo/reset', () => {
     expect(await answer(await POST(await request(body)))).toEqual({
       status: 413,
       body: { error: { message: 'This request is too large.' } },
+    });
+    expect(await rowCounts(db)).toEqual(before);
+  });
+
+  it('answers 409 while a payment is in progress, and removes nothing', async () => {
+    await db.update(purchases).set({ status: 'charging' });
+    const before = await rowCounts(db);
+
+    expect(await answer(await POST(await request({ confirm: 'reset' })))).toEqual({
+      status: 409,
+      body: { error: { message: 'A payment is in progress. Reset the demo between runs, not during one.' } },
     });
     expect(await rowCounts(db)).toEqual(before);
   });

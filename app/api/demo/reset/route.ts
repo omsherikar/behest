@@ -1,7 +1,7 @@
 import { connection, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { appDb } from '@/lib/app-deps';
-import { resetDemo } from '@/lib/demo/seed';
+import { DemoBusy, resetDemo } from '@/lib/demo/seed';
 import { readBody } from '@/lib/http/read-body';
 import { personaRefusal } from '@/lib/session';
 
@@ -14,6 +14,7 @@ const MAX_BODY_BYTES = 1024;
 
 const CONFIRM = 'Send {"confirm":"reset"} to reset the demo, with "full":true to remove the linked wallet too.';
 const FAILED = 'The demo could not be reset, and nothing was removed. Try again.';
+const BUSY = 'A payment is in progress. Reset the demo between runs, not during one.';
 
 const ResetRequest = z.strictObject({ confirm: z.literal('reset'), full: z.boolean().optional() });
 
@@ -22,7 +23,8 @@ const error = (status: number, message: string) => Response.json({ error: { mess
 /**
  * `POST {"confirm":"reset", "full"?: boolean}`: resets the demo and answers 200 with
  * `{ removed, seeded }`, how many rows of each kind it removed and what it seeded. A linked wallet is
- * kept, because linking again needs the buyer at PayPal, unless `full` is true.
+ * kept, because linking again needs the buyer at PayPal, unless `full` is true. Answers 409, removing
+ * nothing, while a payment is in progress.
  */
 export async function POST(request: NextRequest) {
   // Writes to the database on every request, never at build time.
@@ -46,6 +48,7 @@ export async function POST(request: NextRequest) {
     const result = await resetDemo(appDb(), { payeeEmail: process.env.PAYEE_EMAIL ?? '', full: parsed.data.full });
     return Response.json(result);
   } catch (failure) {
+    if (failure instanceof DemoBusy) return error(409, BUSY);
     // The reset runs in one transaction, so a failure leaves the demo as it was.
     console.error('[demo] Reset failed:', failure);
     return error(500, FAILED);

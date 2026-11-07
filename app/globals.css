@@ -292,9 +292,15 @@
   opacity: 1;
 }
 
-/* A grid as tall as its rows keeps no room for a sideways scrollbar it does not need. */
+/*
+ * A grid as tall as its rows keeps no room for a sideways scrollbar it does not need, and no minimum
+ * body height while it has rows (AG Grid keeps 150 px for its "no rows" message, which still gets it).
+ */
 .quiet-grid-headers .ag-body-horizontal-scroll.ag-invisible {
   display: none;
+}
+.quiet-grid-headers .ag-layout-auto-height:has(.ag-row) {
+  min-height: 0;
 }
 
 @layer base {

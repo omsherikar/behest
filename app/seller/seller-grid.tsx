@@ -54,6 +54,9 @@ const modules = [
 const theme = themeQuartz.withPart(colorSchemeDark).withParams({
   fontFamily: 'var(--font-sans-stack)',
   fontSize: 13,
+  // Set, not derived, so the height AG Grid reserves for a grid sized to its rows matches the rows drawn.
+  rowHeight: 44,
+  headerHeight: 48,
   backgroundColor: 'var(--panel)',
   foregroundColor: 'var(--text)',
   cellTextColor: 'var(--text)',

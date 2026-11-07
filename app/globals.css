@@ -17,7 +17,7 @@
    * Floating glass: the top bar, menus and popovers, always with a backdrop blur. Close to opaque, so
    * what scrolls under the bar never reads through it.
    */
-  --overlay: rgba(10, 10, 11, 0.82);
+  --overlay: rgba(10, 10, 11, 0.9);
   --line: rgba(255, 255, 255, 0.08);
   --line-strong: rgba(255, 255, 255, 0.14);
   /* The border of a form control (input, select, textarea, checkbox): about 3:1 on black, as WCAG asks. */

@@ -50,7 +50,7 @@ One theme, pure black. Grey carries the structure; colour appears only for state
 | `bg` | #000000 | Page background |
 | `surface` | #0A0A0B | Panels, cards, the console (`panel` is the old name, kept until every page uses `surface`) |
 | `raised` | #111113 | Hover, selected rows, an open trace step, inputs |
-| `overlay` | rgba(10,10,11,0.82) | Floating glass: the top bar, menus, popovers. Always with a 20 px backdrop blur, and close to opaque so content never reads through the bar. A 96 px fade from black sits behind the top bar |
+| `overlay` | rgba(10,10,11,0.9) | Floating glass: the top bar, menus, popovers. Always with a 20 px backdrop blur, and close to opaque so content never reads through the bar. A 96 px fade from black sits behind the top bar |
 | `line` | rgba(255,255,255,0.08) | Hairlines, dividers, panel borders |
 | `line-strong` | rgba(255,255,255,0.14) | Stronger dividers, the borders of glass pills and secondary buttons (their label identifies them) |
 | `control` | #5C5C66 | The border of a form control: input, select, textarea, checkbox. About 3:1 on black, so the control's edge passes WCAG 1.4.11 |

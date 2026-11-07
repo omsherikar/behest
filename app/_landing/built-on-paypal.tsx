@@ -61,7 +61,7 @@ function VaultSequence() {
             <span className="relative flex h-5 items-center">
               <span aria-hidden className={`size-2.5 rounded-full ${index === VAULT_SEQUENCE.length - 1 ? 'bg-seal' : 'bg-text'}`} />
               {index < VAULT_SEQUENCE.length - 1 && (
-                <span aria-hidden className="absolute left-4 hidden h-px w-[calc(100%+1rem)] bg-line-strong @lg:block" />
+                <span aria-hidden className="absolute left-4 hidden h-px w-[calc(100%-0.25rem)] bg-line-strong @lg:block" />
               )}
             </span>
             <span className="grid gap-0.5">

@@ -251,7 +251,7 @@ describe('handleWebhook: PAYMENT.CAPTURE.COMPLETED', () => {
 
     await handleWebhook(
       s.deps,
-      captureEvent('PAYMENT.CAPTURE.COMPLETED', { captureId: 'CAPTURE-77', orderId: s.orderId, invoiceId: s.purchaseId, ...changes }),
+      captureEvent('PAYMENT.CAPTURE.COMPLETED', { captureId: 'CAPTURE-77', orderId: s.orderId, ...changes }),
     );
 
     expect(await snapshot(s)).toEqual(before);

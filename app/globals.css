@@ -10,6 +10,8 @@
 
   --bg: #000000;
   --surface: #0a0a0b;
+  /* The first design's name for `surface`. AG Studio's theme and the seller grid still read it. */
+  --panel: var(--surface);
   --raised: #111113;
   /* Floating glass: the top bar, menus and popovers, always with a backdrop blur. */
   --overlay: rgba(17, 17, 19, 0.72);
@@ -87,7 +89,7 @@
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   /* The first design's name for `surface`, kept until every page uses the new name. */
-  --color-panel: var(--surface);
+  --color-panel: var(--panel);
   --color-raised: var(--raised);
   --color-overlay: var(--overlay);
   --color-line: var(--line);

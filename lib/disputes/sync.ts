@@ -11,8 +11,9 @@ import { canTransition } from '@/lib/purchases/transitions';
 // the dispute leaving the money with Behest. A dispute the buyer wins moves no purchase here: PayPal
 // returns the money with a refund or a reversal of the capture, whose webhook moves the purchase to
 // `refunded`. The sync runs from a job, again and again, so it is idempotent: a later run updates
-// what PayPal reports and moves nothing a second time. It writes only PayPal's side of a dispute and
-// never the operator's: the evidence pack, the narrative and the submission time stay as they are.
+// what PayPal reports and moves nothing a second time. It writes only PayPal's side of a dispute,
+// including its stage and the actions PayPal allows on it, and never the operator's: the evidence
+// pack, the narrative, the submission time and the time the buyer was messaged stay as they are.
 // No database lock is held while PayPal is asked.
 
 type SyncDeps = { db: Db; paypal: PaypalPort };
@@ -69,6 +70,9 @@ async function storeDispute(db: Db, dispute: DisputeDetail): Promise<void> {
     reason: dispute.reason,
     amountCents: dispute.amountCents,
     openedAt: instant(dispute.createTime),
+    // Read again on every sync, as the status is: an inquiry escalated to a claim changes both.
+    stage: dispute.stage,
+    actions: dispute.actions,
   };
   await db.transaction(async (tx) => {
     const [stored] = await tx

@@ -74,9 +74,12 @@ describe('syncDisputes', () => {
         currency: 'USD',
         buyerNotes: 'My agent bought turmeric and cumin and nothing has arrived.',
         openedAt: new Date('2026-11-04T16:22:41.000Z'),
+        stage: 'INQUIRY',
+        actions: ['accept_claim', 'send_message', 'escalate', 'make_offer'],
         evidencePack: null,
         narrative: null,
         submittedAt: null,
+        messagedAt: null,
       }),
     ]);
     expect(await statusOf(db, purchaseId)).toBe('disputed');
@@ -123,6 +126,23 @@ describe('syncDisputes', () => {
     expect(await eventsOf(db, purchaseId)).toEqual(logged);
   });
 
+  it("updates the dispute's stage and the actions PayPal allows with its status on every sync", async () => {
+    const { db, paypal } = await setUpDisputed('settled');
+    await syncDisputes({ db, paypal });
+    paypal.disputes = [openDispute({ stage: 'CHARGEBACK', actions: ['provide_evidence', 'accept_claim'] })];
+
+    await syncDisputes({ db, paypal });
+
+    expect(await disputeRows(db)).toEqual([
+      expect.objectContaining({ status: 'WAITING_FOR_SELLER_RESPONSE', stage: 'CHARGEBACK', actions: ['provide_evidence', 'accept_claim'] }),
+    ]);
+
+    paypal.disputes = [openDispute({ status: 'UNDER_REVIEW', stage: null, actions: [] })];
+    await syncDisputes({ db, paypal });
+
+    expect(await disputeRows(db)).toEqual([expect.objectContaining({ status: 'UNDER_REVIEW', stage: null, actions: [] })]);
+  });
+
   it('moves a purchase once when two syncs run at the same time', async () => {
     const { db, paypal, purchaseId } = await setUpDisputed('settled');
 
@@ -133,13 +153,14 @@ describe('syncDisputes', () => {
     expect((await eventsOf(db, purchaseId)).filter((e) => e.kind === 'dispute_opened')).toHaveLength(1);
   });
 
-  it("never changes the dispute's narrative, evidence pack or submission time", async () => {
+  it("never changes the dispute's narrative, evidence pack, submission time or message time", async () => {
     const { db, paypal } = await setUpDisputed('settled');
     await syncDisputes({ db, paypal });
     const operatorWork = {
       evidencePack: { disputeId: 'PP-D-1001', purchaseId: 'p', items: [{ id: 'receipt', title: 'Receipt', body: 'Signed.' }] },
       narrative: { summary: 'The buyer authorized this.', claims: [{ text: 'Signed mandate.', evidenceIds: ['mandate'] }] },
       submittedAt: new Date('2026-11-05T10:00:00Z'),
+      messagedAt: new Date('2026-11-04T18:00:00Z'),
     };
     await db.update(disputes).set(operatorWork);
     paypal.disputes = [openDispute({ status: 'RESOLVED', buyerNotes: 'Arrived after all.' })];

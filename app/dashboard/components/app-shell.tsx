@@ -33,7 +33,9 @@ function PayPalWordmark({ className = '' }: { className?: string }) {
 function BrandLockup() {
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <span className="text-2xl font-bold tracking-tight text-pp-navy">Behest</span>
+      <Link href="/" aria-label="behest home" className="rounded-control font-mono text-[1.0625rem] font-semibold tracking-tight text-text">
+        behest
+      </Link>
       <span className="hidden h-6 w-px bg-pp-border sm:block" aria-hidden />
       <AgStudioLogo className="-ml-3 hidden h-12 w-auto sm:block" />
       <span className="hidden h-6 w-px bg-pp-border lg:block" aria-hidden />

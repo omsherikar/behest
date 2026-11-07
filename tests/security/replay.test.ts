@@ -140,15 +140,15 @@ describe('lib/security/results.json', () => {
   });
 });
 
-describe('the limits the replay shows', () => {
-  it('loses the price benchmark for a listing priced over five times its median, so the gate allows it', async () => {
+describe('the price benchmark window', () => {
+  it('keeps the benchmark for a listing priced over five times its median, so the gate holds it for the buyer', async () => {
     const base = attack('price-anomaly');
     const sixTimes: Attack = { ...base, listing: { ...base.listing, priceCents: 2400 }, marketMedianCents: 400 };
 
     const [r] = await replayAttacks([sixTimes]);
 
-    expect(r.gate).toMatchObject({ state: 'passed', verdict: 'ALLOW' });
-    expect(notPassed(r)).toEqual(NO_BENCHMARK);
+    expect(r.gate).toMatchObject({ state: 'flagged', verdict: 'ASK' });
+    expect(notPassed(r)).toEqual({ price_benchmark: 'ask' });
   });
 });
 

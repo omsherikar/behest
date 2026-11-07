@@ -1,8 +1,9 @@
 import { z } from 'zod';
 
-// What a buyer's passkey signed when they confirmed a mandate with it, as Behest stores it with the
-// mandate. With the public key the signed mandate names, it is everything anyone needs to check that
-// the buyer's own device, not Behest, signed the mandate's hashes.
+// What a passkey registered to the buyer's account signed when they confirmed a mandate with it, as
+// Behest stores it with the mandate. With the public key the signed mandate names, it is everything
+// anyone needs to check that signature over the mandate's hashes, at the origin and RP id it was
+// made for.
 
 const base64url = z.string().regex(/^[A-Za-z0-9_-]+$/);
 
@@ -23,8 +24,12 @@ export const BuyerAssertion = z
     challenge: base64url,
     /** The nonce Behest issued for this signature. */
     nonce: base64url,
-    /** When the chance to sign ended, in whole seconds since the epoch. */
+    /** When the chance to sign ended, in whole seconds since the epoch. It opened five minutes before. */
     exp: z.number().int().nonnegative(),
+    /** The origin the assertion was made at, Behest's public origin then. Absent on assertions stored before it was kept. */
+    origin: z.string().min(1).optional(),
+    /** The relying party id the passkey is bound to, that origin's hostname. Absent on assertions stored before it was kept. */
+    rpID: z.string().min(1).optional(),
   })
   .strict();
 export type BuyerAssertion = z.infer<typeof BuyerAssertion>;

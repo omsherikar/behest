@@ -50,10 +50,11 @@ async function signing(policy: MandatePolicy = demoPolicy) {
 }
 
 /** The buyer's passkey-confirmed mandate row: registered, signed and confirmed through each step. */
-async function passkeyMandate() {
+async function passkeyMandate({ userVerified = true }: { userVerified?: boolean } = {}) {
   const authenticator = await registered();
   const { options, ticket } = await signing();
-  const verified = await verifyMandateAssertion(deps(), { buyerId, policy: demoPolicy, assertion: authenticator.assert(options), ticket });
+  const assertion = authenticator.assert(options, { userVerified });
+  const verified = await verifyMandateAssertion(deps(), { buyerId, policy: demoPolicy, assertion, ticket });
   if (!verified.ok) throw new Error('expected the assertion to verify');
   const { mandateId } = await confirmMandate({ db, signer, now: () => NOW }, { buyerId, text: TEXT, policy: demoPolicy, passkey: verified.signature });
   const [row] = await db.select().from(mandates).where(eq(mandates.id, mandateId));
@@ -156,9 +157,19 @@ describe('verifyMandateAssertion', () => {
           challenge: options.challenge,
           nonce: claims.nonce,
           exp: claims.exp,
+          origin: ORIGIN,
+          rpID: 'behest.test',
         },
       },
     });
+  });
+
+  it('accepts an assertion made with the user present but not verified, as the options only prefer verification', async () => {
+    const authenticator = await registered();
+    const { options, ticket } = await signing();
+    const assertion = authenticator.assert(options, { userVerified: false });
+
+    expect(await verifyMandateAssertion(deps(), { buyerId, policy: demoPolicy, assertion, ticket })).toMatchObject({ ok: true });
   });
 
   it('refuses the assertion for a policy other than the one it signed', async () => {
@@ -238,64 +249,109 @@ describe('verifyMandateAssertion', () => {
 });
 
 describe('verifyMandatePasskey', () => {
-  it("verifies a stored mandate's passkey signature from its own fields and the key in its JWS", async () => {
+  /** `jws` signed again by Behest's key with its claims changed, so only the claims differ. */
+  async function resigned(jws: string, change: (claims: Record<string, unknown>) => void): Promise<string> {
+    const claims = JSON.parse(Buffer.from(jws.split('.')[1], 'base64url').toString('utf8'));
+    change(claims);
+    return signer.sign(claims, 'behest-mandate+jws');
+  }
+
+  it("verifies a stored mandate's passkey signature at the origin and RP id stored with it, with the key in its JWS", async () => {
     const { row, authenticator } = await passkeyMandate();
 
-    expect(await verifyMandatePasskey(row, ORIGIN)).toEqual({ verified: true, credentialId: authenticator.credentialId });
+    expect(row.buyerAssertion).toMatchObject({ origin: ORIGIN, rpID: 'behest.test' });
+    expect(await verifyMandatePasskey(row)).toEqual({
+      verified: true,
+      credentialId: authenticator.credentialId,
+      origin: ORIGIN,
+      rpID: 'behest.test',
+      userVerified: true,
+    });
+  });
+
+  it('reports a signature made with the user present but not verified as just that', async () => {
+    const { row } = await passkeyMandate({ userVerified: false });
+
+    expect(await verifyMandatePasskey(row)).toMatchObject({ verified: true, userVerified: false });
   });
 
   it('says a mandate confirmed by session alone carries no passkey signature', async () => {
     const { mandateId } = await confirmMandate({ db, signer, now: () => NOW }, { buyerId, text: TEXT, policy: demoPolicy });
     const [row] = await db.select().from(mandates).where(eq(mandates.id, mandateId));
 
-    expect(await verifyMandatePasskey(row, ORIGIN)).toEqual({ verified: false, reason: 'session' });
+    expect(await verifyMandatePasskey(row)).toEqual({ verified: false, reason: 'session' });
   });
 
   it('fails a stored policy or readback that no longer hashes to what was signed', async () => {
     const { row } = await passkeyMandate();
 
-    expect(await verifyMandatePasskey({ ...row, policy: wider }, ORIGIN)).toEqual({ verified: false, reason: 'hash_mismatch' });
-    expect(await verifyMandatePasskey({ ...row, readback: ['Spend anything.'] }, ORIGIN)).toEqual({
-      verified: false,
-      reason: 'hash_mismatch',
-    });
-    expect(await verifyMandatePasskey({ ...row, policyHash: hashOf(wider) }, ORIGIN)).toEqual({
-      verified: false,
-      reason: 'hash_mismatch',
-    });
+    expect(await verifyMandatePasskey({ ...row, policy: wider })).toEqual({ verified: false, reason: 'hash_mismatch' });
+    expect(await verifyMandatePasskey({ ...row, readback: ['Spend anything.'] })).toEqual({ verified: false, reason: 'hash_mismatch' });
+    expect(await verifyMandatePasskey({ ...row, policyHash: hashOf(wider) })).toEqual({ verified: false, reason: 'hash_mismatch' });
   });
 
-  it('fails an assertion that was changed, or checked for another site', async () => {
+  it('counts a signature only for a mandate confirmed inside its signing window, so an old one cannot vouch for a later mandate', async () => {
+    const { row } = await passkeyMandate();
+    const { exp } = row.buyerAssertion!;
+    const confirmedAt = async (ms: number) =>
+      verifyMandatePasskey({
+        ...row,
+        jws: await resigned(row.jws, (claims) => {
+          claims.confirmedAt = new Date(ms).toISOString();
+        }),
+      });
+
+    expect(await confirmedAt((exp - 300) * 1000)).toMatchObject({ verified: true });
+    expect(await confirmedAt(exp * 1000 - 1)).toMatchObject({ verified: true });
+    const outside = { verified: false, reason: 'outside_window' };
+    expect(await confirmedAt((exp - 300) * 1000 - 1)).toEqual(outside);
+    expect(await confirmedAt(exp * 1000)).toEqual(outside);
+    expect(await confirmedAt(exp * 1000 + 24 * 60 * 60 * 1000)).toEqual(outside);
+  });
+
+  it('says the origin is unknown, never that the signature fails, for an assertion stored without its origin or RP id', async () => {
+    const { row } = await passkeyMandate();
+    const { origin, rpID, ...older } = row.buyerAssertion!;
+    expect([origin, rpID]).toEqual([ORIGIN, 'behest.test']);
+
+    const unknown = { verified: false, reason: 'origin_unknown' };
+    expect(await verifyMandatePasskey({ ...row, buyerAssertion: older })).toEqual(unknown);
+    expect(await verifyMandatePasskey({ ...row, buyerAssertion: { ...older, origin } })).toEqual(unknown);
+    expect(await verifyMandatePasskey({ ...row, buyerAssertion: { ...older, rpID } })).toEqual(unknown);
+  });
+
+  it('fails an assertion whose fields, origin or RP id were changed', async () => {
     const { row } = await passkeyMandate();
     const assertion = row.buyerAssertion!;
 
     for (const changed of [
       { ...assertion, nonce: 'b3RoZXI' },
-      { ...assertion, exp: assertion.exp + 1 },
+      // A second earlier, so the confirmation still falls in the window and only the challenge differs.
+      { ...assertion, exp: assertion.exp - 1 },
       { ...assertion, signature: Buffer.from('not a signature').toString('base64url') },
       { ...assertion, credentialId: 'b3RoZXI' },
+      { ...assertion, origin: 'https://behest.example' },
+      { ...assertion, rpID: 'behest.example' },
     ]) {
-      expect(await verifyMandatePasskey({ ...row, buyerAssertion: changed }, ORIGIN)).toEqual({ verified: false, reason: 'bad_signature' });
+      expect(await verifyMandatePasskey({ ...row, buyerAssertion: changed })).toEqual({ verified: false, reason: 'bad_signature' });
     }
-    expect(await verifyMandatePasskey(row, 'https://behest.example')).toEqual({ verified: false, reason: 'bad_signature' });
   });
 
   it('fails a mandate whose JWS names a key other than the one that signed', async () => {
     const { row } = await passkeyMandate();
     const impostor = new TestAuthenticator(ORIGIN);
-    const [header, payload, signature] = row.jws.split('.');
-    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    claims.passkey.publicKey = Buffer.from(impostor.cosePublicKey).toString('base64url');
-    const jws = [header, Buffer.from(JSON.stringify(claims)).toString('base64url'), signature].join('.');
+    const jws = await resigned(row.jws, (claims) => {
+      (claims.passkey as { publicKey: string }).publicKey = Buffer.from(impostor.cosePublicKey).toString('base64url');
+    });
 
-    expect(await verifyMandatePasskey({ ...row, jws }, ORIGIN)).toEqual({ verified: false, reason: 'bad_signature' });
+    expect(await verifyMandatePasskey({ ...row, jws })).toEqual({ verified: false, reason: 'bad_signature' });
   });
 
   it('fails a mandate whose JWS or assertion cannot be read', async () => {
     const { row } = await passkeyMandate();
 
-    expect(await verifyMandatePasskey({ ...row, jws: 'not-a-jws' }, ORIGIN)).toEqual({ verified: false, reason: 'malformed' });
-    expect(await verifyMandatePasskey({ ...row, buyerAssertion: null }, ORIGIN)).toEqual({ verified: false, reason: 'malformed' });
+    expect(await verifyMandatePasskey({ ...row, jws: 'not-a-jws' })).toEqual({ verified: false, reason: 'malformed' });
+    expect(await verifyMandatePasskey({ ...row, buyerAssertion: null })).toEqual({ verified: false, reason: 'malformed' });
   });
 });
 
@@ -346,6 +402,39 @@ describe('confirmMandate with a passkey signature', () => {
 
     await expect(attempt).rejects.toMatchObject({ code: 'passkey' });
     expect(await db.select().from(mandates)).toEqual([expect.objectContaining({ status: 'active' })]);
+  });
+
+  it('lets an authenticator that keeps no counter confirm again with a new signature, but never with the same one', async () => {
+    const authenticator = await registered();
+    const once = async () => {
+      const { options, ticket } = await signing();
+      return { assertion: authenticator.assert(options, { counter: 0 }), ticket };
+    };
+    const confirmWith = async ({ assertion, ticket }: Awaited<ReturnType<typeof once>>) => {
+      const verified = await verifyMandateAssertion(deps(), { buyerId, policy: demoPolicy, assertion, ticket });
+      if (!verified.ok) throw new Error('expected the assertion to verify');
+      return confirmMandate({ db, signer, now: () => NOW }, { buyerId, text: TEXT, policy: demoPolicy, passkey: verified.signature });
+    };
+    const first = await once();
+    await confirmWith(first);
+
+    // The counter stays at 0 and passes; the second confirm fails on the spent nonce alone.
+    await expect(confirmWith(first)).rejects.toMatchObject({ code: 'passkey' });
+    expect(await db.select().from(buyerPasskeys)).toEqual([expect.objectContaining({ counter: 0 })]);
+
+    await confirmWith(await once());
+    expect(await db.select({ status: mandates.status }).from(mandates)).toHaveLength(2);
+  });
+
+  it('refuses a signature once its window has closed, storing nothing', async () => {
+    const authenticator = await registered();
+    const signature = await signed(authenticator);
+    const closed = new Date(signature.assertion.exp * 1000);
+
+    const attempt = confirmMandate({ db, signer, now: () => closed }, { buyerId, text: TEXT, policy: demoPolicy, passkey: signature });
+
+    await expect(attempt).rejects.toMatchObject({ code: 'passkey' });
+    expect(await db.select().from(mandates)).toEqual([]);
   });
 
   it('refuses a signature when the passkey has signed something since, storing nothing', async () => {

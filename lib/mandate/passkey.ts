@@ -12,18 +12,38 @@ import { z } from 'zod';
 import { buyerPasskeys, type mandates } from '@/lib/db/schema';
 import { BuyerAssertion } from '@/lib/domain/passkey';
 import type { MandatePolicy } from '@/lib/domain/policy';
-import { MandatePayload } from '@/lib/domain/receipt';
+import { type MandatePasskey, MandatePayload } from '@/lib/domain/receipt';
 import { type PasskeyDeps, relyingParty } from '@/lib/passkeys/relying-party';
 import { issueTicket, readTicket, TICKET_SECONDS, ticketExpiry } from '@/lib/passkeys/ticket';
 import { hashOf, sha256Hex } from '@/lib/receipts/canonical';
 import { mandateChallenge } from './challenge';
-import { mandateHashes, type PasskeySignature } from './confirm';
+import { mandateHashes } from './confirm';
 
-// Confirming a mandate with the buyer's passkey, so that the buyer's own device signs the exact
-// mandate they confirm. Behest issues a challenge that commits to the mandate's policy and readback
-// hashes, a nonce and an expiry; the buyer's device signs it; Behest checks that signature against
-// the passkey it stored for that buyer before it signs the mandate itself. Afterwards anyone can
-// check the buyer's signature from the stored mandate alone, with verifyMandatePasskey.
+// Confirming a mandate with a passkey registered to the buyer's account, so that the passkey signs
+// the exact mandate the buyer confirms. Behest issues a challenge that commits to the mandate's policy
+// and readback hashes, a nonce and an expiry; the authenticator holding the passkey signs it; Behest
+// checks that signature against the public key it stored for that buyer before it signs the mandate
+// itself. Afterwards anyone can check the passkey signature from the stored mandate alone, with
+// verifyMandatePasskey.
+
+/** Marks a PasskeySignature as made by verifyMandateAssertion. Never exported, so nothing else can make one. */
+declare const verifiedHere: unique symbol;
+
+/**
+ * A signature over a mandate's hashes by a passkey registered to the buyer, verified against the
+ * public key Behest stored for it. Only verifyMandateAssertion makes one, so confirmMandate can never
+ * store a passkey mandate whose signature was not verified.
+ */
+export type PasskeySignature = {
+  /** The buyer's stored passkey that signed. */
+  passkeyId: string;
+  /** The signature counter the assertion reported, which becomes the passkey's. */
+  counter: number;
+  /** The passkey as the signed mandate names it. */
+  passkey: MandatePasskey;
+  assertion: BuyerAssertion;
+  readonly [verifiedHere]: true;
+};
 
 const base64url = z.string().regex(/^[A-Za-z0-9_-]+$/);
 
@@ -106,13 +126,14 @@ export async function verifyMandateAssertion(
   const { nonce, exp } = claims;
   const challenge = mandateChallenge({ policyHash, readbackHash, nonce, exp });
   const publicKey = isoBase64URL.toBuffer(passkey.publicKey);
+  const { rpID } = relyingParty(origin);
   let counter: number;
   try {
     const verified = await verifyAuthenticationResponse({
       response: { id, rawId, type: 'public-key', response, clientExtensionResults: {} },
       expectedChallenge: challenge,
       expectedOrigin: origin,
-      expectedRPID: relyingParty(origin).rpID,
+      expectedRPID: rpID,
       // The library refuses a counter that does not go up, unless both stay at zero.
       credential: { id: passkey.credentialId, publicKey, counter: passkey.counter, transports: passkey.transports },
       // The options prefer user verification without requiring it.
@@ -126,23 +147,25 @@ export async function verifyMandateAssertion(
   const alg = algorithmOf(publicKey);
   if (alg === null) return NOT_SIGNED;
 
-  return {
-    ok: true,
-    signature: {
-      passkeyId: passkey.id,
-      counter,
-      passkey: { credentialId: passkey.credentialId, publicKey: passkey.publicKey, alg },
-      assertion: {
-        credentialId: passkey.credentialId,
-        authenticatorData: response.authenticatorData,
-        clientDataJSON: response.clientDataJSON,
-        signature: response.signature,
-        challenge,
-        nonce,
-        exp,
-      },
+  const signature = {
+    passkeyId: passkey.id,
+    counter,
+    passkey: { credentialId: passkey.credentialId, publicKey: passkey.publicKey, alg },
+    assertion: {
+      credentialId: passkey.credentialId,
+      authenticatorData: response.authenticatorData,
+      clientDataJSON: response.clientDataJSON,
+      signature: response.signature,
+      challenge,
+      nonce,
+      exp,
+      // Kept, so the signature is later checked where it was made, whatever Behest's origin is then.
+      origin,
+      rpID,
     },
   };
+  // The one place a PasskeySignature is made: its signature has just verified.
+  return { ok: true, signature: signature as PasskeySignature };
 }
 
 /** The stored mandate fields verifyMandatePasskey reads. */
@@ -152,26 +175,37 @@ export type StoredMandate = Pick<
 >;
 
 /**
- * Whether a buyer's passkey signed the mandate, and if not, why not:
+ * Whether a passkey registered to the buyer signed the mandate, and if not, why not:
  * - `session`: the buyer confirmed it by session alone, so there is no passkey signature;
  * - `malformed`: the signed mandate or the stored assertion cannot be read;
  * - `hash_mismatch`: the stored policy or readback does not hash to what the signed mandate carries;
- * - `bad_signature`: the assertion does not sign this mandate's challenge, at `origin`, with the
- *   passkey the signed mandate names.
+ * - `origin_unknown`: the assertion was stored without the origin and RP id it was made for, so it
+ *   cannot be checked; this says nothing about whether it would verify;
+ * - `outside_window`: the signed mandate was not confirmed within the five minutes the signature
+ *   could be made in, so the signature does not vouch for it;
+ * - `bad_signature`: the assertion does not sign this mandate's challenge, at the stored origin and
+ *   RP id, with the passkey the signed mandate names.
+ *
+ * A verified signature was made with the user present, which verification requires, and
+ * `userVerified` says whether the authenticator also verified the user.
  */
 export type PasskeyCheck =
-  | { verified: true; credentialId: string }
-  | { verified: false; reason: 'session' | 'malformed' | 'hash_mismatch' | 'bad_signature' };
+  | { verified: true; credentialId: string; origin: string; rpID: string; userVerified: boolean }
+  | {
+      verified: false;
+      reason: 'session' | 'malformed' | 'hash_mismatch' | 'origin_unknown' | 'outside_window' | 'bad_signature';
+    };
 
 /**
  * Checks a stored mandate's passkey signature from the mandate alone: it recomputes the challenge
- * from the policy and readback hashes the signed mandate carries and the nonce and expiry stored
- * with the assertion, and verifies the assertion, made at Behest's `origin`, with the public key the
+ * from the policy and readback hashes the signed mandate carries and the nonce and expiry stored with
+ * the assertion, requires the signed confirmation time to fall in the signing window that expiry
+ * closes, and verifies the assertion at the origin and RP id stored with it, with the public key the
  * signed mandate names. It reads nothing else, so anyone holding the mandate can run the same check.
- * It does not check Behest's own signature on the mandate JWS, which binds that key to the buyer;
- * the mandate JWS verifies against Behest's public key set for that.
+ * It does not check Behest's own signature on the mandate JWS, which binds that key to the buyer's
+ * account; the mandate JWS verifies against Behest's public key set for that.
  */
-export async function verifyMandatePasskey(mandate: StoredMandate, origin: string): Promise<PasskeyCheck> {
+export async function verifyMandatePasskey(mandate: StoredMandate): Promise<PasskeyCheck> {
   if (mandate.confirmation !== 'passkey') return { verified: false, reason: 'session' };
   let payload: MandatePayload;
   try {
@@ -182,7 +216,7 @@ export async function verifyMandatePasskey(mandate: StoredMandate, origin: strin
   const stored = BuyerAssertion.safeParse(mandate.buyerAssertion);
   if (payload.confirmation !== 'passkey' || !stored.success) return { verified: false, reason: 'malformed' };
 
-  const { policyHash, readbackHash, passkey } = payload;
+  const { policyHash, readbackHash, passkey, confirmedAt } = payload;
   const hashesHold =
     mandate.policyHash === policyHash &&
     hashOf(mandate.policy) === policyHash &&
@@ -190,8 +224,12 @@ export async function verifyMandatePasskey(mandate: StoredMandate, origin: strin
     hashOf(mandate.readback) === readbackHash;
   if (!hashesHold) return { verified: false, reason: 'hash_mismatch' };
 
+  const { credentialId, authenticatorData, clientDataJSON, signature, nonce, exp, origin, rpID } = stored.data;
+  if (origin === undefined || rpID === undefined) return { verified: false, reason: 'origin_unknown' };
+  const at = Date.parse(confirmedAt);
+  if (!(at >= (exp - TICKET_SECONDS) * 1000 && at < exp * 1000)) return { verified: false, reason: 'outside_window' };
+
   const bad = { verified: false, reason: 'bad_signature' } as const;
-  const { credentialId, authenticatorData, clientDataJSON, signature, nonce, exp } = stored.data;
   const challenge = mandateChallenge({ policyHash, readbackHash, nonce, exp });
   if (credentialId !== passkey.credentialId || stored.data.challenge !== challenge) return bad;
   try {
@@ -204,16 +242,17 @@ export async function verifyMandatePasskey(mandate: StoredMandate, origin: strin
       response: { clientDataJSON, authenticatorData, signature },
       clientExtensionResults: {},
     };
-    const { verified } = await verifyAuthenticationResponse({
+    const { verified, authenticationInfo } = await verifyAuthenticationResponse({
       response,
       expectedChallenge: challenge,
       expectedOrigin: origin,
-      expectedRPID: relyingParty(origin).rpID,
+      expectedRPID: rpID,
       // A counter of zero passes any counter the assertion reported: this checks the signature, not its order.
       credential: { id: credentialId, publicKey, counter: 0 },
+      // User presence is still required; user verification is reported, not required.
       requireUserVerification: false,
     });
-    return verified ? { verified: true, credentialId } : bad;
+    return verified ? { verified: true, credentialId, origin, rpID, userVerified: authenticationInfo.userVerified } : bad;
   } catch {
     return bad;
   }

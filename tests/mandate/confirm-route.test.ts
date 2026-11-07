@@ -363,11 +363,17 @@ describe('POST /api/mandates/confirm with a passkey', () => {
     expect(mandate).toMatchObject({
       id: body.mandateId,
       confirmation: 'passkey',
-      buyerAssertion: { credentialId: authenticator.credentialId, challenge: options.challenge },
+      buyerAssertion: { credentialId: authenticator.credentialId, challenge: options.challenge, origin: APP_URL, rpID: 'behest.test' },
     });
     const payload = await verifyJws(mandate.jws, 'behest-mandate+jws', publicJwks([key]), MandatePayload);
     expect(payload).toMatchObject({ confirmation: 'passkey', passkey: { credentialId: authenticator.credentialId, alg: -7 } });
-    expect(await verifyMandatePasskey(mandate, APP_URL)).toEqual({ verified: true, credentialId: authenticator.credentialId });
+    expect(await verifyMandatePasskey(mandate)).toEqual({
+      verified: true,
+      credentialId: authenticator.credentialId,
+      origin: APP_URL,
+      rpID: 'behest.test',
+      userVerified: true,
+    });
     expect(await db.select().from(buyerPasskeys)).toEqual([expect.objectContaining({ counter: 1, lastUsedAt: expect.any(Date) })]);
   });
 

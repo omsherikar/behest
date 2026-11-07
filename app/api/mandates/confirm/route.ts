@@ -4,14 +4,9 @@ import { appDb, appPaypal, appSigner, appUrl, demoBuyerId } from '@/lib/app-deps
 import { wallets } from '@/lib/db/schema';
 import { FORM_BODY_BYTES, readBody } from '@/lib/http/read-body';
 import type { MandatePolicy } from '@/lib/domain/policy';
-import {
-  confirmMandate,
-  MandateConfirmError,
-  type MandateConfirmErrorCode,
-  type PasskeySignature,
-} from '@/lib/mandate/confirm';
+import { confirmMandate, MandateConfirmError, type MandateConfirmErrorCode } from '@/lib/mandate/confirm';
 import { isConfirmToken } from '@/lib/mandate/confirm-token';
-import { verifyMandateAssertion } from '@/lib/mandate/passkey';
+import { type PasskeySignature, verifyMandateAssertion } from '@/lib/mandate/passkey';
 import { clientAddress, MODEL_ROUTE_LIMIT, rateLimit } from '@/lib/ratelimit';
 import { personaRefusal } from '@/lib/session';
 
@@ -19,9 +14,9 @@ import { personaRefusal } from '@/lib/session';
 // creates a vault setup token for the buyer to approve at PayPal and keeps it on the buyer's one wallet
 // row, as pending, for the wallet return route to finish. A linked wallet stays linked and pays within
 // the new mandate. Only a policy from a compile that left no question open is signed, which the
-// confirm token from that compile proves. With the buyer's passkey signature over the mandate and the
-// ticket it answers, from the sign options route, the mandate is confirmed by passkey; without them,
-// by session alone.
+// confirm token from that compile proves. With a signature over the mandate from a passkey registered
+// to the buyer's account, and the ticket it answers from the sign options route, the mandate is
+// confirmed by passkey; without them, by session alone.
 
 const ROUTE = 'mandate_confirm';
 

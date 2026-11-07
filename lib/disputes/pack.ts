@@ -103,7 +103,7 @@ export async function assembleEvidencePack(db: Db, disputeId: string, appOrigin:
     .from(wallets)
     .where(eq(wallets.buyerId, purchase.buyerId));
 
-  const passkeyCheck = await verifyMandatePasskey(mandate, new URL(appOrigin).origin);
+  const passkeyCheck = await verifyMandatePasskey(mandate);
   const items: EvidenceItem[] = [
     { id: 'mandate', title: 'Signed mandate', body: mandateBody(mandate, passkeyCheck) },
     { id: 'readback', title: 'Readback the buyer confirmed', body: readbackBody(mandate) },
@@ -131,6 +131,8 @@ const PASSKEY_FAILURES: Record<Exclude<PasskeyCheck, { verified: true }>['reason
   session: 'the mandate was confirmed by session alone',
   malformed: 'the signed mandate or the stored signature could not be read',
   hash_mismatch: 'the stored policy or readback does not hash to what the signed mandate carries',
+  origin_unknown: 'the origin and RP id the signature was made for were not recorded with it',
+  outside_window: "the signed mandate's confirmation time is outside the signing window",
   bad_signature: 'the signature does not verify against the passkey the signed mandate names',
 };
 

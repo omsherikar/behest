@@ -96,14 +96,20 @@ export class TestAuthenticator {
 
   /**
    * The assertion answering `options`, signed over the authenticator data and the hash of the client
-   * data. The counter goes up by one, or is set to `counter` when given.
+   * data. The counter goes up by one, or is set to `counter` when given; an authenticator that keeps
+   * no counter always reports 0. The user is present, and verified unless `userVerified` is false.
    */
   assert(
     options: PublicKeyCredentialRequestOptionsJSON,
-    { counter = this.counter + 1, origin = this.origin }: { counter?: number; origin?: string } = {},
+    {
+      counter = this.counter + 1,
+      origin = this.origin,
+      userVerified = true,
+    }: { counter?: number; origin?: string; userVerified?: boolean } = {},
   ): AuthenticationResponseJSON {
     this.counter = counter;
-    const authData = Buffer.concat([this.rpIdHash(), Buffer.from([USER_PRESENT | USER_VERIFIED]), uint32(counter)]);
+    const flags = USER_PRESENT | (userVerified ? USER_VERIFIED : 0);
+    const authData = Buffer.concat([this.rpIdHash(), Buffer.from([flags]), uint32(counter)]);
     const clientDataJSON = this.clientData('webauthn.get', options.challenge, origin);
     // ES256 as WebAuthn uses it: ECDSA P-256 over SHA-256, the signature DER-encoded.
     const signature = sign('sha256', Buffer.concat([authData, sha256(Buffer.from(clientDataJSON, 'base64url'))]), this.privateKey);

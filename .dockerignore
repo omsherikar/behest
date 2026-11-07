@@ -1,0 +1,37 @@
+# What the image build never sees: secrets, local state, installed or built output it makes for
+# itself, and files the server does not need.
+
+# Secrets and local settings, including .env.production and the .env link to it.
+.env*
+
+# Local databases, agent worktrees and planning notes.
+.data
+.vault-proof
+.worktrees
+.superpowers
+docs/superpowers
+
+# Installed and built output: the build installs and builds its own.
+node_modules
+.next
+out
+build
+dist
+coverage
+*.tsbuildinfo
+next-env.d.ts
+
+# Tests, docs and repo tooling.
+tests
+docs
+*.md
+.git
+.github
+.DS_Store
+npm-debug.log*
+
+# The deployment files themselves, so editing them does not invalidate the build cache.
+Dockerfile
+.dockerignore
+docker-compose.yml
+Caddyfile

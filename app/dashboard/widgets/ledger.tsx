@@ -222,8 +222,8 @@ export function LedgerWidget(params: AgWidgetParams<LedgerDef>) {
       },
       ...mapped,
       ...(showReasons
-        ? // The reasons wrap inside whatever width the other columns leave, so they never run off the widget.
-          [{ colId: 'reasons', headerName: 'Why', cellRenderer: ReasonsCell, flex: 4, minWidth: 200, autoHeight: true, wrapText: true, sortable: false }]
+        ? // The reasons wrap inside whatever width the other columns leave (the cell sets its own wrapping), so they never run off the widget.
+          [{ colId: 'reasons', headerName: 'Why', cellRenderer: ReasonsCell, flex: 4, minWidth: 200, autoHeight: true, sortable: false }]
         : []),
     ];
   }, [ledger, showReasons, widgetApi]);

@@ -1,75 +1,40 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
-import { useState } from 'react';
-import type { Persona } from '@/lib/session';
+import { useSwitchPersona } from '@/components/shell/use-switch-persona';
+import { Notice } from '@/components/ui/notice';
+import { PERSONA_INFO } from '@/lib/ui/personas';
 
-const choices: { persona: Persona; label: string; detail: string; home: string }[] = [
-  {
-    persona: 'buyer',
-    label: "I'm the buyer",
-    detail: 'Write a mandate in plain words and let your agent shop inside it.',
-    home: '/buyer',
-  },
-  {
-    persona: 'seller',
-    label: "I'm the seller",
-    detail: 'List your products and accept orders that agents place for their buyers.',
-    home: '/seller',
-  },
-  {
-    persona: 'operator',
-    label: "I'm the operator",
-    detail: 'Handle disputes with evidence drawn from signed mandates and receipts.',
-    home: '/ops/disputes',
-  },
-];
+// The three personas of the demo, each with what a visitor can do as it and the pages it opens.
+// Choosing one starts its session and opens its home page.
 
 export function PersonaPicker() {
-  const router = useRouter();
-  const [pending, setPending] = useState<Persona | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  async function choose(persona: Persona, home: string) {
-    setPending(persona);
-    setFailed(false);
-    try {
-      const response = await fetch('/api/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ persona }),
-      });
-      if (!response.ok) throw new Error(`Session request failed with ${response.status}`);
-      router.push(home);
-    } catch {
-      setFailed(true);
-      setPending(null);
-    }
-  }
+  const { switchTo, pending, failed } = useSwitchPersona();
 
   return (
-    <div className="mt-8">
-      <ul className="flex flex-col gap-3">
-        {choices.map(({ persona, label, detail, home }) => (
+    <div>
+      <ul aria-label="Personas" className="divide-y divide-line overflow-hidden rounded-panel border border-line bg-panel">
+        {PERSONA_INFO.map(({ persona, name, does, home, nav }) => (
           <li key={persona}>
             <button
               type="button"
-              onClick={() => choose(persona, home)}
+              onClick={() => switchTo(persona, home)}
               disabled={pending !== null}
-              className="w-full rounded-xl border border-pp-border bg-pp-surface p-4 text-left transition-colors hover:border-pp-blue focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue disabled:cursor-wait disabled:opacity-60 sm:p-5"
+              className="flex w-full flex-col gap-1 px-4 py-4 text-left transition-colors hover:bg-raised focus-visible:outline-offset-[-2px] disabled:cursor-wait sm:px-5"
             >
-              <span className="block text-lg font-semibold text-pp-navy">
-                {pending === persona ? 'Opening...' : label}
+              <span className="flex items-baseline gap-2">
+                <span className="text-lead font-medium text-text">{name}</span>
+                {pending === persona && <span className="text-meta text-muted">Opening...</span>}
               </span>
-              <span className="mt-1 block text-sm text-pp-muted">{detail}</span>
+              <span className="text-body text-muted">{does}</span>
+              <span className="mt-1 font-mono text-meta text-muted">{nav.map((item) => item.label).join(', ')}</span>
             </button>
           </li>
         ))}
       </ul>
       {failed && (
-        <p role="alert" className="mt-4 text-sm text-pp-danger">
-          Could not start that session. Please try again.
-        </p>
+        <Notice kind="stop" className="mt-4">
+          Could not start that session. Try again.
+        </Notice>
       )}
     </div>
   );

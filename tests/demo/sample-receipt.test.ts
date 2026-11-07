@@ -8,6 +8,8 @@ import { sha256Hex } from '@/lib/receipts/canonical';
 import { verifyJws } from '@/lib/receipts/sign';
 import { cartClaims } from '@/lib/receipts/verify-receipt';
 import sample from '@/lib/demo/sample-receipt.json';
+import { forbiddenCartOutcome, SAMPLE_POLICY } from '@/app/_landing/sample';
+import { hashOf } from '@/lib/receipts/canonical';
 
 // The landing page's sample receipt must be the real thing in all but money: tokens the real
 // verifier accepts against the public key set beside them, and nothing secret in the file.
@@ -44,5 +46,18 @@ describe('the sample receipt', () => {
     const text = readFileSync(FILE, 'utf8');
     expect(text).not.toMatch(/PRIVATE KEY|"d"\s*:/);
     for (const key of sample.jwks.keys) expect(Object.keys(key).sort()).toEqual(['alg', 'crv', 'kid', 'kty', 'use', 'x']);
+  });
+
+  it('is signed under the policy the home page reads back', async () => {
+    const mandate = await verifyJws(sample.mandateJws, 'behest-mandate+jws', sample.jwks, MandatePayload);
+    expect(hashOf(SAMPLE_POLICY)).toBe(mandate.policyHash);
+  });
+
+  it('gives the home page a real block from the gate for a cart its mandate forbids', () => {
+    expect(forbiddenCartOutcome()).toEqual({
+      rule: 'category_allowed',
+      result: 'block',
+      detail: 'electronics is not allowed by your mandate',
+    });
   });
 });

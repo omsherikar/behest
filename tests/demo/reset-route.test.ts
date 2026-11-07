@@ -21,10 +21,17 @@ vi.mock('@/lib/app-deps', async (importOriginal) => ({
 
 const SECRET = 'test-session-secret-at-least-32-characters';
 const PAYEE = 'payee@business.example.com';
+const KEY = 'demo-reset-key-for-tests-0123456789';
+const DISABLED = 'Resetting the demo is turned off on this server.';
+const WRONG_KEY = 'Send the demo reset key in the x-demo-reset-key header.';
 const CONFIRM = 'Send {"confirm":"reset"} to reset the demo, with "full":true to remove the linked wallet too.';
 
-async function request(body: unknown, { persona = 'operator' }: { persona?: Persona | 'forged' | null } = {}) {
+async function request(
+  body: unknown,
+  { persona = 'operator', key = KEY }: { persona?: Persona | 'forged' | null; key?: string | null } = {},
+) {
   const headers = new Headers({ 'content-type': 'application/json' });
+  if (key !== null) headers.set('x-demo-reset-key', key);
   if (persona === 'forged') headers.set('cookie', `${SESSION_COOKIE}=not-a-signed-cookie`);
   else if (persona) headers.set('cookie', `${SESSION_COOKIE}=${await sessionCookie(persona)}`);
   return new NextRequest('http://localhost/api/demo/reset', {
@@ -46,6 +53,7 @@ beforeAll(() => createTestDb(), 60_000);
 beforeEach(async () => {
   vi.stubEnv('SESSION_SECRET', SECRET);
   vi.stubEnv('PAYEE_EMAIL', PAYEE);
+  vi.stubEnv('DEMO_RESET_KEY', KEY);
   db = await createTestDb();
   vi.mocked(appDb).mockReturnValue(db);
   await seedDemo(db, { payeeEmail: PAYEE });
@@ -103,6 +111,43 @@ describe('POST /api/demo/reset', () => {
       body: { error: { message } },
     });
     expect(await rowCounts(db)).toEqual(before);
+  });
+
+  it.each([
+    ['without the reset key', null],
+    ['with an empty reset key', ''],
+    ['with a wrong reset key', 'not-the-demo-reset-key-at-all'],
+    ['with the reset key cut short', KEY.slice(0, -1)],
+    ['with the reset key and more', `${KEY}x`],
+  ])('answers a request %s with 403, and removes nothing', async (_, key) => {
+    const before = await rowCounts(db);
+
+    expect(await answer(await POST(await request({ confirm: 'reset', full: true }, { key })))).toEqual({
+      status: 403,
+      body: { error: { message: WRONG_KEY } },
+    });
+    expect(await rowCounts(db)).toEqual(before);
+  });
+
+  it.each([
+    ['unset', undefined],
+    ['empty', ''],
+    ['shorter than 16 characters', 'fifteen-chars-x'],
+  ])('is turned off with 403 when DEMO_RESET_KEY is %s, and removes nothing', async (_, setting) => {
+    vi.stubEnv('DEMO_RESET_KEY', setting);
+    const before = await rowCounts(db);
+
+    expect(await answer(await POST(await request({ confirm: 'reset', full: true }, { key: setting ?? '' })))).toEqual({
+      status: 403,
+      body: { error: { message: DISABLED } },
+    });
+    expect(await rowCounts(db)).toEqual(before);
+  });
+
+  it('accepts a reset key of exactly 16 characters', async () => {
+    vi.stubEnv('DEMO_RESET_KEY', 'sixteen-chars-xx');
+
+    expect((await POST(await request({ confirm: 'reset' }, { key: 'sixteen-chars-xx' }))).status).toBe(200);
   });
 
   it.each([

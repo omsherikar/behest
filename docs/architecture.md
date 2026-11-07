@@ -147,6 +147,7 @@ stateDiagram-v2
   proposed --> blocked: gate or intent BLOCK
   proposed --> charging: ALLOW
   proposed --> awaiting_approval: ASK
+  proposed --> failed: abandoned before charging
   awaiting_approval --> charging: buyer approves at PayPal
   awaiting_approval --> cancelled: declined or expired
   charging --> captured: capture COMPLETED

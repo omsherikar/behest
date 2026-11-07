@@ -99,6 +99,18 @@ describe('JwsView', () => {
     expect(html).toContain('aria-label="Copy JWS"');
   });
 
+  it('clamps the token and shows a summary of the payload until the reader asks for all of it', () => {
+    const html = renderToStaticMarkup(
+      createElement(JwsView, { jws, token: 'clamp', decoded: 'summary', summary: [{ label: 'Amount', value: '$18.75' }] }),
+    );
+    const toggles = [...html.matchAll(/<button[^>]*aria-expanded="false"[^>]*>([\s\S]*?)<\/button>/g)].map(([, inner]) => text(inner));
+    expect(toggles).toEqual(['Show full token', 'Show full payload']);
+    expect(text(html)).toContain('Amount $18.75');
+    // The whole token and the decoded payload are in the page, clamped and hidden until asked for.
+    expect(html).toContain(`<span class="text-jws-payload">${jws.split('.')[1]}</span>`);
+    expect(html).toMatch(/hidden=""[^>]*>[\s\S]*&quot;totalCents&quot;/);
+  });
+
   it('says what is wrong with a token that is not a compact JWS', () => {
     const html = renderToStaticMarkup(createElement(JwsView, { jws: 'not-a-token' }));
     expect(text(html)).toContain('This is not a compact JWS');

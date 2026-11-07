@@ -8,6 +8,10 @@ import { CopyButton } from './copy-button';
 // (header, payload, signature), the header and payload decoded from base64url as indented JSON,
 // and the signature. It only decodes. The signature is never checked in the browser, and the view
 // says so; `actions` can hold a button that asks the server to verify it.
+//
+// Where space matters, the token can be clamped to four lines behind a "Show full token" toggle, and
+// the decoded view can start as a short summary of the claims a reader checks first, with the whole
+// header and payload behind a "Show full payload" toggle.
 
 const SEGMENTS = {
   header: { name: 'Header', text: 'text-jws-header', swatch: 'bg-jws-header' },
@@ -28,6 +32,19 @@ const TOKEN_CLASS: Record<JsonToken['kind'], string> = {
 const SHORT_PAYLOAD = 72;
 
 const block = 'rounded-control border border-line bg-bg p-3 font-mono text-meta whitespace-pre-wrap [overflow-wrap:anywhere]';
+
+const toggleClass = 'flex items-center gap-1.5 justify-self-start rounded-full text-meta font-medium text-text hover:underline hover:underline-offset-4';
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden className={`size-3 transition-transform ${open ? 'rotate-180' : ''}`}>
+      <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/** One claim of a summary, such as the amount or the capture id. */
+export type JwsSummaryRow = { label: string; value: ReactNode };
 
 function Caption({ segment, children }: { segment: Segment; children?: ReactNode }) {
   const { name, text, swatch } = SEGMENTS[segment];
@@ -76,23 +93,33 @@ export function JwsView({
   label = 'Signed receipt',
   actions,
   decoded = 'open',
+  summary,
   token = 'full',
 }: {
   jws: string;
   /** What the token is. */
   label?: string;
   actions?: ReactNode;
-  /** Whether the decoded header, payload and signature show at first, or wait behind a button. */
-  decoded?: 'open' | 'folded';
   /**
-   * The whole token, the payload cut to its start and end where space is short, or `auto`: cut on
-   * a phone and whole from 768 px. Copy always takes all of it.
+   * Whether the decoded header, payload and signature show at first, wait behind a button, or wait
+   * behind a button under a `summary` of the payload's key claims.
    */
-  token?: 'full' | 'short' | 'auto';
+  decoded?: 'open' | 'folded' | 'summary';
+  /** The key claims shown when `decoded` is `summary`, such as the amount, the verdict and the seller. */
+  summary?: readonly JwsSummaryRow[];
+  /**
+   * The whole token; the payload cut to its start and end where space is short; `auto`, cut on a
+   * phone and whole from 768 px; or `clamp`, the whole token shown four lines deep until the reader
+   * asks for the rest. Copy always takes all of it.
+   */
+  token?: 'full' | 'short' | 'auto' | 'clamp';
 }) {
   const parts = splitJws(jws);
   const [showDecoded, setShowDecoded] = useState(decoded === 'open');
+  const [showToken, setShowToken] = useState(false);
   const decodedId = useId();
+  const tokenId = useId();
+  const cut = token === 'short' || token === 'auto';
 
   return (
     <section aria-label={label} className="min-w-0 rounded-panel border border-line bg-panel">
@@ -109,38 +136,67 @@ export function JwsView({
 
       {parts ? (
         <div className="grid gap-4 p-3 sm:p-4">
-          <p className="font-mono text-meta leading-5 break-all">
+          <p
+            id={tokenId}
+            className={`font-mono text-meta leading-5 break-all ${
+              token === 'clamp' && !showToken ? 'max-h-20 overflow-hidden [mask-image:linear-gradient(to_bottom,black_45%,transparent)]' : ''
+            }`}
+          >
             <span className={SEGMENTS.header.text}>{parts.header}</span>
             <span className="text-muted">.</span>
-            {token !== 'full' && parts.payload.length > SHORT_PAYLOAD + 3 && (
+            {cut && parts.payload.length > SHORT_PAYLOAD + 3 && (
               <span className={token === 'auto' ? 'md:hidden' : undefined}>
                 <span className={SEGMENTS.payload.text}>{parts.payload.slice(0, SHORT_PAYLOAD - 16)}</span>
                 <span className="text-muted">...</span>
                 <span className={SEGMENTS.payload.text}>{parts.payload.slice(-16)}</span>
               </span>
             )}
-            {(token === 'full' || parts.payload.length <= SHORT_PAYLOAD + 3) && (
-              <span className={SEGMENTS.payload.text}>{parts.payload}</span>
-            )}
+            {(!cut || parts.payload.length <= SHORT_PAYLOAD + 3) && <span className={SEGMENTS.payload.text}>{parts.payload}</span>}
             {token === 'auto' && parts.payload.length > SHORT_PAYLOAD + 3 && (
               <span className={`hidden md:inline ${SEGMENTS.payload.text}`}>{parts.payload}</span>
             )}
             <span className="text-muted">.</span>
             <span className={SEGMENTS.signature.text}>{parts.signature}</span>
           </p>
+          {token === 'clamp' && (
+            <button type="button" aria-expanded={showToken} aria-controls={tokenId} onClick={() => setShowToken((shown) => !shown)} className={`-mt-2 ${toggleClass}`}>
+              {showToken ? 'Show less of the token' : 'Show full token'}
+              <Chevron open={showToken} />
+            </button>
+          )}
 
-          {decoded === 'folded' && (
+          {decoded === 'summary' && summary && (
+            <figure className="min-w-0">
+              <Caption segment="payload">
+                <span className="text-muted">key claims</span>
+              </Caption>
+              <dl className="divide-y divide-line rounded-control border border-line bg-bg">
+                {summary.map(({ label, value }) => (
+                  <div key={label} className="grid gap-x-4 gap-y-0.5 px-3 py-2.5 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-baseline">
+                    <dt className="text-meta text-muted">{label}</dt>
+                    <dd className="min-w-0 text-body break-words text-text">{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </figure>
+          )}
+
+          {decoded !== 'open' && (
             <button
               type="button"
               aria-expanded={showDecoded}
               aria-controls={decodedId}
               onClick={() => setShowDecoded((shown) => !shown)}
-              className="flex items-center gap-1.5 justify-self-start rounded-control text-meta font-medium text-action hover:text-action-strong"
+              className={toggleClass}
             >
-              {showDecoded ? 'Hide the decoded header and payload' : 'Show the decoded header and payload'}
-              <svg viewBox="0 0 16 16" aria-hidden className={`size-3 transition-transform ${showDecoded ? 'rotate-180' : ''}`}>
-                <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              {decoded === 'summary'
+                ? showDecoded
+                  ? 'Hide full payload'
+                  : 'Show full payload'
+                : showDecoded
+                  ? 'Hide the decoded header and payload'
+                  : 'Show the decoded header and payload'}
+              <Chevron open={showDecoded} />
             </button>
           )}
           <div

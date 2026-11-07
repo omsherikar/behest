@@ -44,7 +44,7 @@ export type AgentRequest = {
 export type AgentResult = { runId: string; outcomes: ProposalOutcome[]; summary: string };
 
 /** The most requests one run makes. */
-const MAX_TURNS = 12;
+export const MAX_TURNS = 12;
 
 const NO_MANDATE = 'Sign a mandate first.';
 const STARTED = 'Your agent is looking for what you asked for.';

@@ -3,7 +3,13 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { connection } from 'next/server';
 import { appDb } from '@/lib/app-deps';
-import { formatUsd } from '@/lib/domain/money';
+import { CitationChip } from '@/components/ops/evidence-style';
+import { buttonClass } from '@/components/ui/button';
+import { Money } from '@/components/ui/money';
+import { Notice } from '@/components/ui/notice';
+import { ProofFields } from '@/components/ui/proof-fields';
+import { ProofId } from '@/components/ui/proof-id';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { disputeView, type DisputeView } from '@/lib/ops-pages/disputes';
 import { requireOperator } from '../../require-operator';
 import { DisputeEvidence } from './dispute-evidence';
@@ -30,9 +36,6 @@ const dateTime = new Intl.DateTimeFormat('en-GB', {
 });
 const utc = (iso: string) => `${dateTime.format(new Date(iso))} UTC`;
 
-const backLink =
-  'text-sm font-semibold text-pp-blue hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pp-blue';
-
 export default async function DisputePage({ params }: PageProps<'/ops/disputes/[id]'>) {
   // Reads the database on every request, never at build time.
   await connection();
@@ -44,12 +47,22 @@ export default async function DisputePage({ params }: PageProps<'/ops/disputes/[
 
   return (
     <div className="w-full max-w-3xl">
-      <Link href="/ops/disputes" className={backLink}>
+      <Link href="/ops/disputes" className={buttonClass('quiet', 'small', '-ml-2.5')}>
         All disputes
       </Link>
-      <h1 className="mt-4 text-[28px] font-semibold break-words text-pp-navy">
-        Dispute <span className="font-mono text-2xl">{dispute.paypalDisputeId}</span>
-      </h1>
+      <header className="mt-3 mb-6">
+        <h1 className="text-title font-semibold text-text">Dispute</h1>
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
+          <ProofId value={dispute.paypalDisputeId} label="PayPal dispute id" full />
+          <StatusBadge tone={dispute.submitted ? 'seal' : 'hold'} label="Evidence">
+            {dispute.submitted ? 'Answered with evidence' : 'Not answered yet'}
+          </StatusBadge>
+        </div>
+        <p className="mt-2 max-w-[75ch] text-body text-muted">
+          Behest answers as the merchant of record, with evidence drawn from its signed records. Check every claim against
+          the evidence before you submit.
+        </p>
+      </header>
       <Facts dispute={dispute} />
       <BuyerNotes notes={dispute.buyerNotes} />
 
@@ -61,51 +74,46 @@ export default async function DisputePage({ params }: PageProps<'/ops/disputes/[
       ) : dispute.linked ? (
         <DisputeEvidence disputeId={dispute.id} items={dispute.items} startFrom={dispute.lastNarrative} />
       ) : (
-        <p className="mt-8 rounded-xl border border-pp-border bg-pp-surface p-4 text-sm text-pp-muted">
+        <Notice kind="info" className="mt-8">
           This dispute is not matched to a purchase yet, so Behest has no evidence to answer it with. Behest matches a
           dispute to a purchase by the PayPal capture it disputes.
-        </p>
+        </Notice>
       )}
     </div>
   );
 }
 
 function Facts({ dispute }: { dispute: DisputeView }) {
-  const facts: [label: string, value: string][] = [
-    ['Reason', dispute.reason],
-    ['Status at PayPal', dispute.status],
-    ['Amount', formatUsd(dispute.amountCents)],
-    ['Opened', dispute.openedAt ? utc(dispute.openedAt) : 'Not recorded'],
-    ['Purchase', dispute.linked ? 'Matched' : 'Not matched'],
-    ['Evidence', dispute.submitted ? 'Submitted' : 'Not submitted'],
-  ];
   return (
-    <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-pp-border bg-pp-surface p-4 sm:grid-cols-3 sm:p-5">
-      {facts.map(([label, value]) => (
-        <div key={label} className="min-w-0">
-          <dt className="text-sm text-pp-muted">{label}</dt>
-          <dd className="font-semibold break-words text-pp-navy">{value}</dd>
-        </div>
-      ))}
-    </dl>
+    <section aria-label="What PayPal reported" className="rounded-panel border border-line bg-panel p-4 sm:p-5">
+      <ProofFields
+        fields={[
+          { label: 'Reason', value: dispute.reason },
+          { label: 'Status at PayPal', value: dispute.status },
+          { label: 'Amount', value: <Money cents={dispute.amountCents} mono /> },
+          { label: 'Opened', value: dispute.openedAt ? <span className="font-mono text-meta">{utc(dispute.openedAt)}</span> : 'Not recorded' },
+          { label: 'Purchase', value: dispute.linked ? 'Matched' : 'Not matched' },
+        ]}
+      />
+    </section>
   );
 }
 
 function BuyerNotes({ notes }: { notes: string | null }) {
   return (
     <section aria-labelledby="notes-heading" className="mt-8">
-      <h2 id="notes-heading" className="text-lg font-semibold text-pp-navy">
+      <h2 id="notes-heading" className="text-lead font-medium text-text">
         The buyer&apos;s notes
       </h2>
       {notes ? (
         <>
-          <p className="mt-1 text-sm text-pp-muted">As PayPal passed them on. Weigh them against the evidence.</p>
-          <blockquote className="mt-3 border-l-4 border-pp-border pl-3 whitespace-pre-wrap text-pp-ink wrap-anywhere">
+          <p className="mt-1 text-body text-muted">As PayPal passed them on. Weigh them against the evidence.</p>
+          <blockquote className="mt-3 border-l-2 border-line-strong pl-3 text-body whitespace-pre-wrap text-text wrap-anywhere">
             {notes}
           </blockquote>
         </>
       ) : (
-        <p className="mt-1 text-sm text-pp-muted">The buyer wrote no notes at PayPal.</p>
+        <p className="mt-1 text-body text-muted">The buyer wrote no notes at PayPal.</p>
       )}
     </section>
   );
@@ -125,24 +133,26 @@ function SubmittedNarrative({
 }) {
   const { narrative } = submitted;
   return (
-    <section aria-labelledby="submitted-heading" className="mt-8 rounded-xl border border-pp-border bg-pp-surface p-4 sm:p-5">
-      <h2 id="submitted-heading" className="text-lg font-semibold text-pp-navy">
+    <section aria-labelledby="submitted-heading" className="mt-8 rounded-panel border border-line bg-panel p-4 sm:p-5">
+      <h2 id="submitted-heading" className="text-lead font-medium text-text">
         Submitted narrative
       </h2>
-      <p className="mt-1 text-sm text-pp-muted">Sent to PayPal on {utc(submitted.at)}. It can no longer be changed.</p>
+      <Notice kind="success" className="mt-3">
+        Sent to PayPal on {utc(submitted.at)}. It can no longer be changed.
+      </Notice>
       {narrative ? (
         <>
-          <h3 className="mt-5 font-semibold text-pp-navy">Summary</h3>
-          <p className="mt-1 whitespace-pre-wrap wrap-anywhere">{narrative.summary}</p>
-          <h3 className="mt-5 font-semibold text-pp-navy">Claims</h3>
-          <ol className="mt-2 flex list-decimal flex-col gap-3 pl-5">
+          <h3 className="mt-5 font-medium text-text">Summary</h3>
+          <p className="mt-1 text-body whitespace-pre-wrap text-text wrap-anywhere">{narrative.summary}</p>
+          <h3 className="mt-5 font-medium text-text">Claims</h3>
+          <ol className="mt-2 flex list-decimal flex-col gap-4 pl-5 marker:font-mono marker:text-meta marker:text-muted">
             {narrative.claims.map((claim, index) => (
               <li key={index}>
-                <p className="whitespace-pre-wrap wrap-anywhere">{claim.text}</p>
+                <p className="text-body whitespace-pre-wrap text-text wrap-anywhere">{claim.text}</p>
                 <ul aria-label={`Evidence cited by claim ${index + 1}`} className="mt-2 flex flex-wrap gap-2">
                   {claim.evidenceIds.map((evidenceId) => (
-                    <li key={evidenceId} className="rounded-full bg-pp-highlight px-3 py-1 text-sm text-pp-blue-dark">
-                      {titles.get(evidenceId) ?? evidenceId}
+                    <li key={evidenceId}>
+                      <CitationChip id={evidenceId} title={titles.get(evidenceId) ?? evidenceId} />
                     </li>
                   ))}
                 </ul>
@@ -151,7 +161,7 @@ function SubmittedNarrative({
           </ol>
         </>
       ) : (
-        <p className="mt-3 text-sm text-pp-muted">No narrative was recorded with the submission.</p>
+        <p className="mt-3 text-body text-muted">No narrative was recorded with the submission.</p>
       )}
     </section>
   );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { draftOutcome, submitOutcome } from '@/lib/ops-pages/dispute-outcomes';
+import { draftOutcome, messageOutcome, offeredAnswer, submitOutcome } from '@/lib/ops-pages/dispute-outcomes';
 
 const NARRATIVE = {
   summary: 'The buyer authorized this purchase.',
@@ -57,6 +57,21 @@ describe('submitOutcome', () => {
     const routeText = { error: { message: 'Text from the route that this status never shows.' } };
     expect(submitOutcome(status, routeText)).toEqual({ ok: false, message, refresh });
     expect(submitOutcome(status, null)).toEqual({ ok: false, message, refresh });
+  });
+
+  it("shows the route's words when PayPal takes no evidence on the dispute now, and reloads to offer what it takes", () => {
+    const message = 'PayPal takes evidence once this inquiry becomes a claim. Until then, send the buyer your answer as a message.';
+    expect(submitOutcome(422, { error: { message } })).toEqual({ ok: false, message, refresh: true });
+    expect(submitOutcome(422, null)).toEqual({
+      ok: false,
+      message: 'PayPal is not taking evidence on this dispute right now, so nothing was submitted. The page now shows what it takes.',
+      refresh: true,
+    });
+  });
+
+  it("shows the route's fixed words when the dispute could not be checked at PayPal", () => {
+    const message = 'Could not check the dispute at PayPal. Try again.';
+    expect(submitOutcome(502, { error: { message } })).toEqual({ ok: false, message, refresh: false });
   });
 
   it("shows the route's fixed words as given when PayPal did not take the evidence", () => {
@@ -162,5 +177,85 @@ describe('draftOutcome', () => {
       message,
       refresh,
     });
+  });
+});
+
+describe('messageOutcome', () => {
+  const SENT_AT = '2026-11-08T03:10:00.000Z';
+
+  it('reports a message PayPal took with the time it was sent, and reloads the page to show it', () => {
+    expect(messageOutcome(200, { narrative: NARRATIVE, messagedAt: SENT_AT })).toEqual({ ok: true, sentAt: SENT_AT, refresh: true });
+  });
+
+  it('still reports the message as sent when the time cannot be read, for the reload to show', () => {
+    for (const body of [null, {}, { messagedAt: 'yesterday' }, { messagedAt: 7 }]) {
+      expect(messageOutcome(200, body), JSON.stringify(body)).toEqual({ ok: true, sentAt: null, refresh: true });
+    }
+  });
+
+  it("shows the route's own words for a narrative it refused, as a sentence", () => {
+    const message = 'The message comes to 2,104 characters, and PayPal takes at most 2,000. Shorten the summary or the claims and send it again.';
+    expect(messageOutcome(400, { error: { message } })).toEqual({ ok: false, message, refresh: false });
+    expect(messageOutcome(400, null)).toEqual({
+      ok: false,
+      message: 'Behest could not accept this narrative. Check the summary and claims, then send it again.',
+      refresh: false,
+    });
+  });
+
+  it("shows the route's words when PayPal takes no message on the dispute now, and reloads to offer what it takes", () => {
+    const message = 'PayPal takes evidence on this dispute now, not a message. Submit the evidence to PayPal instead.';
+    expect(messageOutcome(422, { error: { message } })).toEqual({ ok: false, message, refresh: true });
+    expect(messageOutcome(422, null)).toEqual({
+      ok: false,
+      message: 'PayPal is not taking a message on this dispute right now, so nothing was sent. The page now shows what it takes.',
+      refresh: true,
+    });
+  });
+
+  it("shows the route's fixed words when PayPal did not take the message or could not be checked", () => {
+    for (const message of ['PayPal did not take the message. Send it again to retry.', 'Could not check the dispute at PayPal. Try again.']) {
+      expect(messageOutcome(502, { error: { message } })).toEqual({ ok: false, message, refresh: false });
+    }
+    expect(messageOutcome(502, null)).toEqual({
+      ok: false,
+      message: 'PayPal did not take the message, so nothing was sent. Check the dispute, then send it again.',
+      refresh: false,
+    });
+  });
+
+  it.each([
+    [401, 'Your session has ended. Pick the operator persona on the home page, then send it again.', false],
+    [403, 'Only the operator persona can answer a dispute. Pick it on the home page.', false],
+    [404, 'Behest has no record of this dispute, so nothing was sent.', false],
+    [
+      409,
+      'Nothing was sent. This dispute is not matched to a purchase, or its evidence was already submitted. The page now shows where it stands.',
+      true,
+    ],
+    [413, 'This narrative is too large to send. Shorten the summary or the claims, then send it again.', false],
+    [429, 'Too many messages in a short time. Wait a minute, then send it again.', false],
+    [500, "Something went wrong on Behest's side. The page now shows whether the message was sent; check it before you send it again.", true],
+    [null, 'Could not reach Behest, so the message may not have been sent. Reload the page to check before you send it again.', false],
+  ])('words a %s in its own plain words, whatever the route sent', (status, message, refresh) => {
+    const routeText = { error: { message: 'Text from the route that this status never shows.' } };
+    expect(messageOutcome(status, routeText)).toEqual({ ok: false, message, refresh });
+  });
+});
+
+describe('offeredAnswer', () => {
+  it('offers evidence when PayPal takes it, and before PayPal has said what it allows', () => {
+    expect(offeredAnswer(['provide_evidence', 'accept_claim'])).toBe('evidence');
+    expect(offeredAnswer(['provide_evidence', 'send_message'])).toBe('evidence');
+    expect(offeredAnswer(null)).toBe('evidence');
+  });
+
+  it('offers a message to the buyer when PayPal takes a message but no evidence', () => {
+    expect(offeredAnswer(['accept_claim', 'send_message', 'escalate', 'make_offer'])).toBe('message');
+  });
+
+  it('offers nothing when PayPal takes neither', () => {
+    expect(offeredAnswer([])).toBe('none');
+    expect(offeredAnswer(['accept_claim', 'make_offer'])).toBe('none');
   });
 });

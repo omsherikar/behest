@@ -1,9 +1,23 @@
-// What a dispute's page tells the operator after the draft or submit route answers. Each status a
-// route can return gets its own plain words. Only three answers carry a message meant for the
-// operator, so only their text from the route is shown: the submit route's 400, such as notes too
-// long for PayPal or a claim citing an item the dispute has no evidence for; its 502, one of two
-// fixed messages saying whether to check the dispute or simply retry; and the draft route's 502, a
+// What a dispute's page tells the operator after the draft, submit or message route answers, and
+// which answer the page offers. Each status a route can return gets its own plain words. Only some
+// answers carry a message meant for the operator, so only their text from the route is shown: the
+// submit and message routes' 400, such as text too long for PayPal or a claim citing an item the
+// dispute has no evidence for; their 422, saying what PayPal takes on the dispute now; their 502, a
+// fixed message saying whether to check the dispute or simply retry; and the draft route's 502, a
 // fixed message naming why the model or PayPal made no draft.
+
+/** The answer the page offers: evidence for PayPal, a message to the buyer, or none while PayPal takes neither. */
+export type OfferedAnswer = 'evidence' | 'message' | 'none';
+
+/**
+ * The answer to offer for what PayPal last said Behest may do with the dispute. Evidence while PayPal
+ * takes it, and also before the dispute was read with its actions, as the page always offered; a
+ * message while PayPal takes one but no evidence, as on an inquiry; otherwise none.
+ */
+export function offeredAnswer(actions: readonly string[] | null): OfferedAnswer {
+  if (actions === null || actions.includes('provide_evidence')) return 'evidence';
+  return actions.includes('send_message') ? 'message' : 'none';
+}
 
 export type SubmitOutcome = {
   ok: boolean;
@@ -33,6 +47,8 @@ const SUBMIT_FAILURES = new Map<number | null, [message: string, refresh: boolea
   [429, ['Too many requests in a short time. Wait a minute, then submit again.', false]],
 ]);
 const PAYPAL_REFUSED = 'PayPal did not take the evidence, so nothing was submitted. Check the dispute, then submit again.';
+const EVIDENCE_NOT_TAKEN =
+  'PayPal is not taking evidence on this dispute right now, so nothing was submitted. The page now shows what it takes.';
 const SUBMIT_FAULT =
   "Something went wrong on Behest's side. The page now shows whether the evidence was submitted; check it before you submit again.";
 
@@ -46,9 +62,61 @@ export function submitOutcome(status: number | null, body: unknown): SubmitOutco
     const message = routeText(body);
     return { ok: false, message: message === null ? NARRATIVE_REFUSED : sentence(message), refresh: false };
   }
+  // The route read the dispute at PayPal and stored what it allows, so a reload offers that instead.
+  if (status === 422) return { ok: false, message: routeText(body) ?? EVIDENCE_NOT_TAKEN, refresh: true };
   // Shown as the route gives it: its wording says whether to look into the dispute or just retry.
   if (status === 502) return { ok: false, message: routeText(body) ?? PAYPAL_REFUSED, refresh: false };
   const [message, refresh] = SUBMIT_FAILURES.get(status) ?? [SUBMIT_FAULT, true];
+  return { ok: false, message, refresh };
+}
+
+export type MessageOutcome =
+  /** `sentAt` is when PayPal took the message, as an ISO timestamp, or null when the route's answer did not say. */
+  | { ok: true; sentAt: string | null; refresh: true }
+  | { ok: false; message: string; refresh: boolean };
+
+const MESSAGE_FAILURES = new Map<number | null, [message: string, refresh: boolean]>([
+  [
+    null,
+    ['Could not reach Behest, so the message may not have been sent. Reload the page to check before you send it again.', false],
+  ],
+  [401, ['Your session has ended. Pick the operator persona on the home page, then send it again.', false]],
+  [403, ['Only the operator persona can answer a dispute. Pick it on the home page.', false]],
+  [404, ['Behest has no record of this dispute, so nothing was sent.', false]],
+  [
+    409,
+    [
+      'Nothing was sent. This dispute is not matched to a purchase, or its evidence was already submitted. The page now shows where it stands.',
+      true,
+    ],
+  ],
+  [413, ['This narrative is too large to send. Shorten the summary or the claims, then send it again.', false]],
+  [429, ['Too many messages in a short time. Wait a minute, then send it again.', false]],
+]);
+const MESSAGE_REFUSED = 'Behest could not accept this narrative. Check the summary and claims, then send it again.';
+const MESSAGE_NOT_TAKEN =
+  'PayPal is not taking a message on this dispute right now, so nothing was sent. The page now shows what it takes.';
+const MESSAGE_PAYPAL_FAILED = 'PayPal did not take the message, so nothing was sent. Check the dispute, then send it again.';
+const MESSAGE_FAULT =
+  "Something went wrong on Behest's side. The page now shows whether the message was sent; check it before you send it again.";
+
+/**
+ * The outcome to show for the message route's HTTP status and parsed JSON body. Any 2xx is success,
+ * and the page reloads to show the message's time and the narrative it keeps. `status` is null when
+ * the request never got an answer.
+ */
+export function messageOutcome(status: number | null, body: unknown): MessageOutcome {
+  if (status !== null && status >= 200 && status < 300) {
+    const sentAt = isRecord(body) && isText(body.messagedAt) && !Number.isNaN(Date.parse(body.messagedAt)) ? body.messagedAt : null;
+    return { ok: true, sentAt, refresh: true };
+  }
+  if (status === 400) {
+    const message = routeText(body);
+    return { ok: false, message: message === null ? MESSAGE_REFUSED : sentence(message), refresh: false };
+  }
+  if (status === 422) return { ok: false, message: routeText(body) ?? MESSAGE_NOT_TAKEN, refresh: true };
+  if (status === 502) return { ok: false, message: routeText(body) ?? MESSAGE_PAYPAL_FAILED, refresh: false };
+  const [message, refresh] = MESSAGE_FAILURES.get(status) ?? [MESSAGE_FAULT, true];
   return { ok: false, message, refresh };
 }
 

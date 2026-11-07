@@ -111,8 +111,12 @@ export async function assembleEvidencePack(db: Db, disputeId: string, appOrigin:
   if (receipt) items.push({ id: 'receipt', title: 'Signed receipt', body: receiptBody(receipt, verifyUrl) });
   items.push({ id: 'cart', title: 'Cart', body: cartBody(purchase.cart) });
   if (purchase.decisionRecord) {
-    const titles = await currentTitles(db, purchase.decisionRecord);
-    items.push({ id: 'decision', title: "The agent's decision", body: decisionBody(purchase.decisionRecord, titles, receipt) });
+    // The receipt hashed the record as stored, so the hash is of that, whether or not it parses.
+    const hash = hashOf(purchase.decisionRecord);
+    const parsed = DecisionRecord.safeParse(purchase.decisionRecord);
+    const record = parsed.success ? parsed.data : null;
+    const titles = record ? await currentTitles(db, record) : new Map<string, string>();
+    items.push({ id: 'decision', title: "The agent's decision", body: decisionBody(record, hash, titles, receipt) });
   }
   const privateValues = [purchase.buyerId, wallet?.paymentTokenId, wallet?.setupTokenId, wallet?.customerId, payoutEmail];
   items.push({ id: 'purchase_log', title: 'Purchase log', body: logBody(purchase, events, privateValues) });
@@ -229,10 +233,8 @@ const plural = (count: number, one: string, many: string) => `${count} ${count =
  * The titles the listings in a decision record have now, by seller slug and SKU. A record keeps only
  * each title's hash, so the item can show a title only where the listing still has it.
  */
-async function currentTitles(db: Db, stored: unknown): Promise<Map<string, string>> {
-  const parsed = DecisionRecord.safeParse(stored);
-  if (!parsed.success) return new Map();
-  const listings = parsed.data.steps.flatMap(listingsOf);
+async function currentTitles(db: Db, record: DecisionRecord): Promise<Map<string, string>> {
+  const listings = record.steps.flatMap(listingsOf);
   if (listings.length === 0) return new Map();
   const rows = await db
     .select({ sellerSlug: sellers.slug, sku: products.sku, title: products.title })
@@ -256,15 +258,18 @@ function listingsOf(step: DecisionStep): DecisionListing[] {
 const listingKey = ({ sellerSlug, sku }: { sellerSlug: string; sku: string }) => JSON.stringify([sellerSlug, sku]);
 
 /**
- * What the shopping agent looked at, chose and why, from the purchase's decision record, then the
- * record's hash and whether the signed receipt commits to it. Seller titles are quoted where the
- * listing still has the title the record hashed; the agent's searches, choice and rationale are
- * quoted as its own words. Prices, stock, SKUs and slugs are the tools' answers, written plainly.
+ * What the shopping agent looked at, chose and why, from the purchase's decision record (null when
+ * the stored record does not parse), then the record's `hash` and whether the signed receipt commits
+ * to it. Seller titles are quoted where the listing still has the title the record hashed; the
+ * agent's searches, choice and rationale are quoted as its own words. Prices, stock, SKUs and slugs
+ * are the tools' answers, written plainly.
  */
-function decisionBody(stored: DecisionRecord, titles: Map<string, string>, receipt: Receipt | null): string {
-  const hash = hashOf(stored);
-  const parsed = DecisionRecord.safeParse(stored);
-  const record = parsed.success ? parsed.data : null;
+function decisionBody(
+  record: DecisionRecord | null,
+  hash: string,
+  titles: Map<string, string>,
+  receipt: Receipt | null,
+): string {
   const listingLine = (listing: DecisionListing) => {
     const stock = listing.stock === null ? 'stock not tracked' : `${listing.stock} in stock`;
     const title = titles.get(listingKey(listing));

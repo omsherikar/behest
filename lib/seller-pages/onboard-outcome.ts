@@ -41,8 +41,8 @@ const SERVER_FAULT = "Something went wrong on Behest's side. Reload the page to 
 type Listed = { created: number; flagged: number; rejected: { line: number; reason: string }[] };
 
 /**
- * The outcome to show for the route's HTTP status and parsed JSON body. `status` is null when the
- * request never got an answer.
+ * The outcome to show for the route's HTTP status and parsed JSON body. Any 2xx is success (the
+ * route answers 201). `status` is null when the request never got an answer.
  */
 export function onboardOutcome(status: number | null, body: unknown): OnboardOutcome {
   if (status !== null && status >= 200 && status < 300) {

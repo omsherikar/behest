@@ -11,7 +11,7 @@ const listed = (overrides: Record<string, unknown> = {}) => ({
 
 describe('a shop that was onboarded', () => {
   it('says how many listings were made and how many are hidden from agents', () => {
-    expect(onboardOutcome(200, listed())).toEqual({
+    expect(onboardOutcome(201, listed())).toEqual({
       ok: true,
       headline: 'Your shop is onboarded with 6 listings.',
       flaggedNote:
@@ -21,9 +21,9 @@ describe('a shop that was onboarded', () => {
   });
 
   it('words one listing and several hidden listings', () => {
-    const outcome = onboardOutcome(200, listed({ created: 1, flagged: 0 }));
+    const outcome = onboardOutcome(201, listed({ created: 1, flagged: 0 }));
     expect(outcome).toMatchObject({ ok: true, headline: 'Your shop is onboarded with 1 listing.', flaggedNote: null });
-    expect(onboardOutcome(200, listed({ created: 4, flagged: 3 }))).toMatchObject({
+    expect(onboardOutcome(201, listed({ created: 4, flagged: 3 }))).toMatchObject({
       flaggedNote:
         '3 listings are hidden from agents because their text speaks to AI agents. Shopping agents cannot see or buy them.',
     });
@@ -45,6 +45,11 @@ describe('a shop that was onboarded', () => {
     });
   });
 
+  it('takes any 2xx status as success, as the route answers 201', () => {
+    expect(onboardOutcome(200, listed())).toEqual(onboardOutcome(201, listed()));
+    expect(onboardOutcome(299, listed())).toMatchObject({ ok: true });
+  });
+
   it('asks for a reload when the answer cannot be read, since the shop may well exist', () => {
     const message = 'Behest sent an answer this page could not read. Reload the page to see whether your shop was onboarded.';
     for (const body of [
@@ -57,8 +62,9 @@ describe('a shop that was onboarded', () => {
       listed({ rejected: [{ line: '4', reason: 'x' }] }),
       listed({ rejected: [{ line: 4 }] }),
     ]) {
-      expect(onboardOutcome(200, body), JSON.stringify(body)).toEqual({ ok: false, message, refresh: true });
+      expect(onboardOutcome(201, body), JSON.stringify(body)).toEqual({ ok: false, message, refresh: true });
     }
+    expect(onboardOutcome(204, null)).toEqual({ ok: false, message, refresh: true });
   });
 });
 

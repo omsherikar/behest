@@ -32,7 +32,7 @@ export type AgentRequest = {
   buyerId: string;
   /** What the buyer asked for, in their own words. */
   request: string;
-  /** Never throws. */
+  /** Must not throw: the tools call it, and a tool that throws reports a failure to the agent. */
   onEvent: (event: AgentEvent) => void;
   /** Aborted when the buyer goes away: the run then stops at the next turn boundary, quietly. */
   signal?: AbortSignal;

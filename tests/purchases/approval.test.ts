@@ -4,7 +4,7 @@ import { jobs, mandates, purchases, receipts } from '@/lib/db/schema';
 import { runDueJobs, type JobOutcome } from '@/lib/jobs/queue';
 import { evaluateGate, type CatalogEntry } from '@/lib/gate/evaluate';
 import { completeApproval, expireApproval, startApproval } from '@/lib/purchases/approval';
-import { retryCharge } from '@/lib/purchases/charge';
+import { retryCharge, takePayment } from '@/lib/purchases/charge';
 import type { PurchaseDeps } from '@/lib/purchases/deps';
 import { COUNTS_AGAINST_BUDGET } from '@/lib/purchases/transitions';
 import { hashOf } from '@/lib/receipts/canonical';
@@ -789,5 +789,82 @@ describe('expireApproval', () => {
     const { deps } = await setUpAwaiting();
 
     await expect(expireApproval(deps, crypto.randomUUID())).rejects.toThrow('there is no purchase');
+  });
+});
+
+describe('a capture reported for an approval it does not fit', () => {
+  /** Another order at PayPal, approved by its buyer, that is not the purchase's. */
+  async function otherOrder(paypal: FakePaypal): Promise<string> {
+    const { orderId } = await paypal.createApprovalOrder({
+      amountCents: 999,
+      description: 'Another order',
+      invoiceId: 'another-purchase',
+      returnUrl: `${APP_URL}/api/purchases/return`,
+      cancelUrl: `${APP_URL}/buyer/approvals`,
+      requestId: 'another-purchase:approval',
+    });
+    paypal.approve(orderId);
+    return orderId;
+  }
+
+  /** A purchase PayPal sent back for approval and its expiry then cancelled; the buyer approves its order only afterwards. */
+  async function setUpCancelledAfterReopen() {
+    const s = await setUpAwaiting({ approve: false });
+    await completeApproval(s.deps, s.orderId);
+    await expireApproval(s.deps, s.purchaseId);
+    s.paypal.approve(s.orderId);
+    return s;
+  }
+
+  it.each(['COMPLETED', 'PENDING'] as const)(
+    'logs a %s capture of another order on a purchase awaiting approval, recording nothing',
+    async (status) => {
+      const s = await setUpAwaiting({ approve: false });
+      const other = await otherOrder(s.paypal);
+      if (status === 'PENDING') s.paypal.failNext('captureOrder', { status });
+      const before = await purchaseRow(s.db, s.purchaseId);
+
+      const outcome = await takePayment(s.deps, s.purchaseId, { orderId: other, requestId: 'another-purchase:capture' });
+
+      const [{ captureId }] = s.paypal.captures;
+      expect(outcome).toMatchObject({ status: 'awaiting_approval', receiptId: null });
+      expect(await purchaseRow(s.db, s.purchaseId)).toEqual(before);
+      expect((await eventsOf(s.db, s.purchaseId)).at(-1)).toEqual({ kind: 'capture_unmatched', data: { captureId } });
+      expect(await s.db.select().from(receipts)).toEqual([]);
+    },
+  );
+
+  it.each(['COMPLETED', 'PENDING'] as const)(
+    'logs a %s capture of its own order on a purchase cancelled after going back for approval, recording nothing',
+    async (status) => {
+      const s = await setUpCancelledAfterReopen();
+      if (status === 'PENDING') s.paypal.failNext('captureOrder', { status });
+      const before = await purchaseRow(s.db, s.purchaseId);
+
+      const outcome = await takePayment(s.deps, s.purchaseId, { orderId: s.orderId, requestId: captureRequestId(s.purchaseId) });
+
+      const [{ captureId, orderId }] = s.paypal.captures;
+      expect(orderId).toBe(s.orderId);
+      expect(outcome).toMatchObject({ status: 'cancelled', receiptId: null });
+      expect(await purchaseRow(s.db, s.purchaseId)).toEqual(before);
+      expect((await eventsOf(s.db, s.purchaseId)).at(-1)).toEqual({ kind: 'capture_unmatched', data: { captureId } });
+      expect(await s.db.select().from(receipts)).toEqual([]);
+      expect(s.seller.orders).toEqual([]);
+    },
+  );
+
+  it('ignores a repeat of a pending capture already stored', async () => {
+    const s = await setUpAwaiting();
+    s.paypal.failNext('captureOrder', { status: 'PENDING' });
+    await completeApproval(s.deps, s.orderId);
+    const events = await eventsOf(s.db, s.purchaseId);
+    const row = await purchaseRow(s.db, s.purchaseId);
+
+    const outcome = await takePayment(s.deps, s.purchaseId, { orderId: s.orderId, requestId: captureRequestId(s.purchaseId) });
+
+    expect(outcome).toMatchObject({ status: 'charging', receiptId: null });
+    expect(s.paypal.captures).toHaveLength(1);
+    expect(await purchaseRow(s.db, s.purchaseId)).toEqual(row);
+    expect(await eventsOf(s.db, s.purchaseId)).toEqual(events);
   });
 });

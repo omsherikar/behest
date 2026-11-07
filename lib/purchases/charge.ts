@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '@/lib/db/client';
 import { purchaseEvents, purchases, receipts, wallets, type PurchaseStatus } from '@/lib/db/schema';
@@ -348,7 +348,10 @@ async function applyAnswer(deps: ChargeDeps, purchaseId: string, requestId: stri
  * Stores the ids of a capture PayPal is holding and logs `capture_pending`, leaving the purchase
  * `charging`. Only the first report is stored, and only while the purchase is still `charging`, or
  * `awaiting_approval` for a capture of its own approval order (see approvedSinceReopen), which first
- * moves it back to `charging` with the buyer as its approver.
+ * moves it back to `charging` with the buyer as its approver. The purchase row is locked while the
+ * report is checked and stored. The capture already stored, reported again, is a quiet no-op. Any
+ * other capture that does not fit, such as one for a cancelled purchase or for another order, is
+ * logged as `capture_unmatched` for an operator, since PayPal may yet complete it.
  */
 async function recordPendingCapture(db: Db, purchaseId: string, { orderId, captureId }: Capture): Promise<void> {
   await db.transaction(async (tx) => {
@@ -357,15 +360,16 @@ async function recordPendingCapture(db: Db, purchaseId: string, { orderId, captu
       .from(purchases)
       .where(eq(purchases.id, purchaseId))
       .for('update');
-    if (purchase && approvedSinceReopen(purchase, orderId)) {
-      await transition(tx, purchaseId, 'awaiting_approval', 'charging', { approver: 'human' });
+    if (!purchase) throw new Error(`there is no purchase ${purchaseId}`);
+    if (purchase.captureId === captureId) return;
+    const approvedSince = approvedSinceReopen(purchase, orderId);
+    if (!approvedSince && !(purchase.status === 'charging' && purchase.captureId === null)) {
+      await appendEvent(tx, purchaseId, 'capture_unmatched', { captureId });
+      return;
     }
-    const stored = await tx
-      .update(purchases)
-      .set({ paypalOrderId: orderId, paypalCaptureId: captureId })
-      .where(and(eq(purchases.id, purchaseId), eq(purchases.status, 'charging'), isNull(purchases.paypalCaptureId)))
-      .returning({ id: purchases.id });
-    if (stored.length > 0) await appendEvent(tx, purchaseId, 'capture_pending', { orderId, captureId });
+    if (approvedSince) await transition(tx, purchaseId, 'awaiting_approval', 'charging', { approver: 'human' });
+    await tx.update(purchases).set({ paypalOrderId: orderId, paypalCaptureId: captureId }).where(eq(purchases.id, purchaseId));
+    await appendEvent(tx, purchaseId, 'capture_pending', { orderId, captureId });
   });
 }
 

@@ -62,10 +62,11 @@ const decisions: PageState = {
     'kpi-blocked': kpi('Blocked', sum('purchases.blocked')),
     verdict: {
       type: 'button-filter',
-      dataMapping: { value: [{ id: 'purchases.verdict' }] },
+      // Allowed, Needs approval and Blocked, as the ledger's badges say them, rather than the codes.
+      dataMapping: { value: [{ id: 'purchases.verdictWords' }] },
       format: {
         ...title('Verdict'),
-        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 64 } },
+        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 96 } },
       },
     },
     ledger: {
@@ -241,10 +242,11 @@ const sellerOrders: PageState = {
     'kpi-blocked': kpi('Blocked', sum('purchases.blocked')),
     verdict: {
       type: 'button-filter',
-      dataMapping: { value: [{ id: 'purchases.verdict' }] },
+      // Allowed, Needs approval and Blocked, as the ledger's badges say them, rather than the codes.
+      dataMapping: { value: [{ id: 'purchases.verdictWords' }] },
       format: {
         ...title('Verdict'),
-        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 64 } },
+        style: { selection: { type: 'multiple' }, dimensions: { height: 28, minWidth: 96 } },
       },
     },
     ledger: {

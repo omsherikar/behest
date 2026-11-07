@@ -16,6 +16,7 @@ import { budgetEffect, burnDown, periodBounds, type BudgetEffect } from '@/lib/d
 import { decisionOutcomes } from '@/lib/dashboard/reasons';
 import type { DashboardData, DashboardPurchase, SellerPurchase } from '@/lib/dashboard/scope';
 import type { TransactionMatch } from '@/lib/dashboard/transactions';
+import { verdictWords } from '@/lib/ui/verdict';
 import type { BehestRegistry } from './widgets';
 
 // --- Helpers ----------------------------------------------------------------------
@@ -95,6 +96,8 @@ const purchaseRow = (p: SellerPurchase) => ({
   createdAt: p.createdAt,
   sellerId: p.sellerId,
   verdict: p.verdict,
+  // The verdict as the app's badges word it, for the page's verdict filter.
+  verdictWords: verdictWords(p.verdict, false),
   status: words(p.status),
   itemCount: p.cart?.items.reduce((sum, item) => sum + item.quantity, 0) ?? null,
   total: dollars(p.totalCents),
@@ -257,6 +260,7 @@ export function buildStudioData(data: DashboardData): AgDataSourcesDefinition<Be
           ['createdAt', 'Proposed at', 'dateTimeFormat'],
           ['sellerId', 'Seller ID', 'textFormat', true],
           ['verdict', 'Verdict', 'textFormat'],
+          ['verdictWords', 'Verdict in words', 'textFormat'],
           ['status', 'Status', 'textFormat'],
           ['itemCount', 'Items', 'integerFormat'],
           ['total', 'Total', 'currencyFormat'],

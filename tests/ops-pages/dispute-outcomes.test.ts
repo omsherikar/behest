@@ -53,11 +53,29 @@ describe('submitOutcome', () => {
     ],
     [413, 'This narrative is too large to send. Shorten the summary or the claims, then submit again.', false],
     [429, 'Too many requests in a short time. Wait a minute, then submit again.', false],
-    [502, 'PayPal did not take the evidence, so nothing was submitted. Submit again to retry.', false],
   ])('words a %i in its own plain words, whatever the route sent', (status, message, refresh) => {
     const routeText = { error: { message: 'Text from the route that this status never shows.' } };
     expect(submitOutcome(status, routeText)).toEqual({ ok: false, message, refresh });
     expect(submitOutcome(status, null)).toEqual({ ok: false, message, refresh });
+  });
+
+  it("shows the route's fixed words as given when PayPal did not take the evidence", () => {
+    for (const message of ['PayPal refused the evidence; check the dispute before trying again', 'Submit it again to retry']) {
+      expect(submitOutcome(502, { error: { message } })).toEqual({ ok: false, message, refresh: false });
+    }
+    expect(submitOutcome(502, { error: { message: '  Submit it again to retry\n' } })).toMatchObject({
+      message: 'Submit it again to retry',
+    });
+  });
+
+  it('words a 502 itself when the route sent no message', () => {
+    for (const body of [null, {}, { error: { message: '' } }]) {
+      expect(submitOutcome(502, body), JSON.stringify(body)).toEqual({
+        ok: false,
+        message: 'PayPal did not take the evidence, so nothing was submitted. Check the dispute, then submit again.',
+        refresh: false,
+      });
+    }
   });
 
   it('says the evidence may have gone when Behest could not be reached', () => {

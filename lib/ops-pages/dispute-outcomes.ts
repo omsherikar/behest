@@ -1,8 +1,9 @@
 // What a dispute's page tells the operator after the draft or submit route answers. Each status a
-// route can return gets its own plain words. Only two answers carry a message meant for the
+// route can return gets its own plain words. Only three answers carry a message meant for the
 // operator, so only their text from the route is shown: the submit route's 400, such as notes too
-// long for PayPal or a citation of an item the dispute has no evidence for, and the draft route's
-// 502, a fixed message naming why the model or PayPal made no draft.
+// long for PayPal or a claim citing an item the dispute has no evidence for; its 502, one of two
+// fixed messages saying whether to check the dispute or simply retry; and the draft route's 502, a
+// fixed message naming why the model or PayPal made no draft.
 
 export type SubmitOutcome = {
   ok: boolean;
@@ -30,8 +31,8 @@ const SUBMIT_FAILURES = new Map<number | null, [message: string, refresh: boolea
   [409, [ALREADY_DECIDED, true]],
   [413, ['This narrative is too large to send. Shorten the summary or the claims, then submit again.', false]],
   [429, ['Too many requests in a short time. Wait a minute, then submit again.', false]],
-  [502, ['PayPal did not take the evidence, so nothing was submitted. Submit again to retry.', false]],
 ]);
+const PAYPAL_REFUSED = 'PayPal did not take the evidence, so nothing was submitted. Check the dispute, then submit again.';
 const SUBMIT_FAULT =
   "Something went wrong on Behest's side. The page now shows whether the evidence was submitted; check it before you submit again.";
 
@@ -41,7 +42,12 @@ const SUBMIT_FAULT =
  */
 export function submitOutcome(status: number | null, body: unknown): SubmitOutcome {
   if (status !== null && status >= 200 && status < 300) return { ok: true, message: SUBMITTED, refresh: true };
-  if (status === 400) return { ok: false, message: routeMessage(body) ?? NARRATIVE_REFUSED, refresh: false };
+  if (status === 400) {
+    const message = routeText(body);
+    return { ok: false, message: message === null ? NARRATIVE_REFUSED : sentence(message), refresh: false };
+  }
+  // Shown as the route gives it: its wording says whether to look into the dispute or just retry.
+  if (status === 502) return { ok: false, message: routeText(body) ?? PAYPAL_REFUSED, refresh: false };
   const [message, refresh] = SUBMIT_FAILURES.get(status) ?? [SUBMIT_FAULT, true];
   return { ok: false, message, refresh };
 }
@@ -83,7 +89,10 @@ export function draftOutcome(status: number | null, body: unknown): DraftOutcome
   }
   // The route stores the pack before it asks PayPal or the model, so after a failed draft a reload
   // shows the evidence items the operator can write the narrative from.
-  if (status === 502) return { ok: false, message: routeMessage(body) ?? DRAFT_FAILED, refresh: true };
+  if (status === 502) {
+    const message = routeText(body);
+    return { ok: false, message: message === null ? DRAFT_FAILED : sentence(message), refresh: true };
+  }
   const [message, refresh] = DRAFT_FAILURES.get(status) ?? [DRAFT_FAULT, true];
   return { ok: false, message, refresh };
 }
@@ -113,10 +122,10 @@ function readDraft(body: unknown): Draft | null {
   return { items: readItems, narrative: { summary, claims: readClaims } };
 }
 
-/** The `{ error: { message } }` a route sends, as a sentence, or null when there is none. */
-function routeMessage(body: unknown): string | null {
+/** The trimmed message of the `{ error: { message } }` a route sends, or null when there is none. */
+function routeText(body: unknown): string | null {
   const message = (body as { error?: { message?: unknown } } | null)?.error?.message;
-  return typeof message === 'string' && message.trim() !== '' ? sentence(message.trim()) : null;
+  return typeof message === 'string' && message.trim() !== '' ? message.trim() : null;
 }
 
 /** Text as a sentence: capitalized, with a full stop unless it already ends a sentence. */

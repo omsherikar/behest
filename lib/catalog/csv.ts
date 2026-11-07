@@ -246,7 +246,7 @@ export function multiLine(text: string, max: number): string {
 }
 
 /** The first `max` code points of well-formed `text`, so a cut never splits a surrogate pair. */
-function firstCodePoints(text: string, max: number): string {
+export function firstCodePoints(text: string, max: number): string {
   let end = 0;
   for (let count = 0; count < max && end < text.length; count += 1) {
     end += (text.codePointAt(end) ?? 0) > 0xffff ? 2 : 1;

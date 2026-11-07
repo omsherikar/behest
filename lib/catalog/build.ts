@@ -4,9 +4,9 @@ import { type Category, isCategory } from '@/lib/domain/categories';
 import type { LlmDeps, LlmResult } from '@/lib/llm/client';
 import { callStructured } from '@/lib/llm/structured';
 import { wrapUntrusted } from '@/lib/llm/untrusted';
-import { type CatalogRow, multiLine, oneLine, SKU_PATTERN } from './csv';
+import { type CatalogRow, firstCodePoints, multiLine, oneLine, SKU_PATTERN } from './csv';
 import { CATALOG_SYSTEM_PROMPT } from './prompts';
-import { screenText } from './screen';
+import { type Screening, screenText } from './screen';
 
 // The catalog builder: turns a seller's CSV rows or photos into listing drafts in the fixed category
 // list, each screened for text aimed at AI agents. The model writes the title, description,
@@ -294,7 +294,7 @@ function rowDraft(row: CatalogRow, item: CatalogItem): ListingDraft {
     category: categoryOf(item.category) ?? 'other',
     priceCents: row.priceCents,
     stock: row.stock,
-    screening: screening(item.screening, [sourceText(row), skuWords(row.sku), `${title}\n${description}`]),
+    screening: screening(item.screening, screenRow(row) ?? firstFlagged([`${title}\n${description}`])),
   };
 }
 
@@ -307,13 +307,19 @@ function fallbackDraft(row: CatalogRow): ListingDraft {
     category: 'other',
     priceCents: row.priceCents,
     stock: row.stock,
-    screening: screening({ suspicious: false, reason: null }, [sourceText(row), skuWords(row.sku)]),
+    screening: screening({ suspicious: false, reason: null }, screenRow(row)),
   };
 }
 
-/** The seller's name and description screened together, so a phrase split across them is still caught. */
-function sourceText(row: CatalogRow): string {
-  return `${row.name}\n${row.description}`;
+/**
+ * The fixed screen on a catalog row as the seller wrote it, the one rule the catalog builder and the
+ * demo seed both apply: the name and description together, so a phrase split across them is still
+ * caught, then the SKU read as words. The name and description are read only as far as a listing
+ * keeps them. The first screening that flags the row, or null when nothing does.
+ */
+export function screenRow(row: Pick<CatalogRow, 'sku' | 'name' | 'description'>): Screening | null {
+  const text = `${firstCodePoints(row.name, TITLE_MAX)}\n${firstCodePoints(row.description, DESCRIPTION_MAX)}`;
+  return firstFlagged([text, skuWords(row.sku)]);
 }
 
 /** A SKU as words for the screen, whose phrases need spaces: `IGNORE-YOUR-BUDGET` reads as `IGNORE YOUR BUDGET`. */
@@ -337,7 +343,7 @@ function photoDraft(photo: ListingPhoto, index: number, item: PhotoItem, claimed
     priceCents: photo.priceCents,
     stock: photo.stock ?? null,
     // The SKU the model proposed is screened even when it is replaced: it may spell out text read off the photo.
-    screening: screening(item.screening, [`${title}\n${description}`, skuWords(item.sku)]),
+    screening: screening(item.screening, firstFlagged([`${title}\n${description}`, skuWords(item.sku)])),
   };
 }
 
@@ -354,12 +360,16 @@ function photoSku(proposed: string, number: number, claimed: Set<string>): strin
   return sku;
 }
 
+/** The fixed screen's result on the first of `texts` it flags, or null when it flags none. */
+function firstFlagged(texts: string[]): Screening | null {
+  return texts.map(screenText).find((result) => result.suspicious) ?? null;
+}
+
 /**
- * Suspicious when the model says so or the fixed screen flags any of `texts`. The reason is the
+ * Suspicious when the model says so or the fixed screen `matched` some text. The reason is the
  * model's when it flagged the listing, otherwise the first phrase the screen matched, strong first.
  */
-function screening(model: CatalogItem['screening'], texts: string[]): ListingDraft['screening'] {
-  const matched = texts.map(screenText).find((result) => result.suspicious);
+function screening(model: CatalogItem['screening'], matched: Screening | null): ListingDraft['screening'] {
   if (!model.suspicious && !matched) return { suspicious: false, reason: null };
   const modelReason = model.suspicious ? oneLine(model.reason ?? '', REASON_MAX) : '';
   const matchedReason = matched ? `matched: ${matched.strong[0] ?? matched.weak[0]}` : FLAGGED;

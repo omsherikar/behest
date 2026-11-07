@@ -177,6 +177,31 @@ describe('deliverToSeller', () => {
     ]);
   });
 
+  it("marks Behest's own refund row with the exact note it sends the buyer, which is how it is told from any other refund", async () => {
+    const { db, deps, seller, purchaseId } = await setUpReceipted();
+    seller.mode = 'reject';
+
+    await deliverToSeller(deps, purchaseId);
+
+    expect(await db.select({ reason: refunds.reason }).from(refunds)).toEqual([
+      { reason: `The seller did not accept Behest order ${purchaseId}.` },
+    ]);
+  });
+
+  it('treats a refund row with any other note as not its own, and refunds nothing', async () => {
+    const { db, deps, paypal, seller, purchaseId } = await setUpReceipted();
+    seller.mode = 'reject';
+    await db.insert(refunds).values({ purchaseId, amountCents: 1875, reason: 'Refunded at PayPal by an operator.' });
+
+    await deliverToSeller(deps, purchaseId);
+
+    expect(paypal.callsTo('refundCapture')).toEqual([]);
+    expect((await eventsAfterReceipt(db, purchaseId)).at(-1)).toEqual({
+      kind: 'refund_skipped',
+      data: { reason: 'the capture has another refund on record' },
+    });
+  });
+
   it('refunds nothing when the purchase has moved on by the time the seller rejects it', async () => {
     const { db, deps, paypal, seller, purchaseId } = await setUpReceipted();
     seller.mode = 'reject';

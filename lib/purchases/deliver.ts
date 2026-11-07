@@ -169,7 +169,12 @@ export async function retryLostRefund({ db, paypal }: Pick<DeliverDeps, 'db' | '
   return true;
 }
 
-/** What Behest tells the buyer when it refunds an order its seller rejected. */
+/**
+ * What Behest tells the buyer when it refunds an order its seller rejected. It is also stored as the
+ * `reason` of Behest's own refunds row, and that exact text is how refundRejectedOrder and
+ * retryLostRefund tell their row from any other refund of the capture. Changing it would leave rows
+ * already written looking like someone else's refund, so they would be skipped, never refunded twice.
+ */
 function refundNote(purchaseId: string): string {
   return `The seller did not accept Behest order ${purchaseId}.`;
 }

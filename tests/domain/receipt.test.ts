@@ -42,6 +42,10 @@ const mandate = {
 
 it('accepts a receipt payload', () => expect(ReceiptPayload.safeParse(receipt).success).toBe(true));
 
+it("accepts a receipt that carries the hash of the agent's decision record", () => {
+  expect(ReceiptPayload.safeParse({ ...receipt, agent: { decisionHash: hash } }).success).toBe(true);
+});
+
 it.each([
   ['a BLOCK verdict', { ...receipt, decision: { ...receipt.decision, verdict: 'BLOCK' } }],
   ['a receipt id that is not a uuid', { ...receipt, id: 'r1' }],
@@ -50,6 +54,8 @@ it.each([
   ['an outcome with extra fields', { ...receipt, decision: { ...receipt.decision, outcomes: [{ rule: 'velocity', result: 'pass', detail: 'x' }] } }],
   ['no rule outcomes', { ...receipt, decision: { ...receipt.decision, outcomes: [] } }],
   ['unknown keys', { ...receipt, note: 'x' }],
+  ['a decision hash that is not sha256 hex', { ...receipt, agent: { decisionHash: 'abc' } }],
+  ['an agent claim with unknown keys', { ...receipt, agent: { decisionHash: hash, model: 'x' } }],
 ])('rejects a receipt with %s', (_, input) => expect(ReceiptPayload.safeParse(input).success).toBe(false));
 
 it('accepts a mandate payload with or without an expiry', () => {

@@ -78,6 +78,11 @@ it('accepts a valid receipt and returns its payload, checking the payload id for
   expect(seen).toHaveBeenCalledExactlyOnceWith(payload.id);
 });
 
+it("accepts a receipt carrying the hash of the agent's decision record, which a seller need not read", async () => {
+  const payload: ReceiptPayload = { ...receiptFor(cart), agent: { decisionHash: hashOf({ steps: [] }) } };
+  expect(await verify(await sign(payload))).toEqual({ ok: true, payload });
+});
+
 it('rejects a receipt signed by a key outside the public key set as bad_signature', async () => {
   const payload = receiptFor(cart);
   const underItsOwnKid = await createSigner(foreignKey).sign(payload, 'behest-receipt+jws');

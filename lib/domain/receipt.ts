@@ -61,6 +61,11 @@ export const ReceiptPayload = z
         capturedAt: z.iso.datetime(),
       })
       .strict(),
+    /**
+     * Present when a shopping agent proposed the purchase: the hash of its decision record, what it
+     * looked at, chose and why. Sellers need not read it.
+     */
+    agent: z.object({ decisionHash: sha256Hex }).strict().optional(),
   })
   .strict();
 export type ReceiptPayload = z.infer<typeof ReceiptPayload>;

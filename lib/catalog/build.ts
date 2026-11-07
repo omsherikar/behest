@@ -9,10 +9,12 @@ import { CATALOG_SYSTEM_PROMPT } from './prompts';
 import { screenText } from './screen';
 
 // The catalog builder: turns a seller's CSV rows or photos into listing drafts in the fixed category
-// list, each screened for text aimed at AI agents. The model writes only the title, description,
-// category and its own screening. SKUs, prices and stock come from the seller, so nothing the model
-// writes can change what a buyer is charged, and the fixed screen runs on the seller's text and on
-// the model's output whatever the model says about them.
+// list, each screened for text aimed at AI agents. The model writes the title, description,
+// category and its own screening. It also proposes the SKU of a photo listing, which is kept only
+// when it matches SKU_PATTERN and no other listing uses it (otherwise it becomes PHOTO-<number>), and
+// is screened either way; a row keeps its own SKU. Prices and stock always come from the seller, so
+// nothing the model writes can change what a buyer is charged, and the fixed screen runs on the
+// seller's text and on the model's output whatever the model says about them.
 
 export type ListingDraft = {
   sku: string;

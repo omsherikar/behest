@@ -5,7 +5,7 @@ import approvalOrder from '@/tests/fixtures/paypal/approval-order.json';
 import captureCompleted from '@/tests/fixtures/paypal/capture-completed.json';
 import chargeCompleted from '@/tests/fixtures/paypal/charge-completed.json';
 import { PayPalApiError, resetPaypalTokenCacheForTests, setPaypalRetrySleepForTests } from '@/lib/paypal/http';
-import { captureOrder, chargeSavedWallet, createApprovalOrder } from '@/lib/paypal/orders';
+import { captureOrder, chargeSavedWallet, createApprovalOrder, isOrderNotApproved } from '@/lib/paypal/orders';
 
 const ORDERS = '/v2/checkout/orders';
 
@@ -182,6 +182,15 @@ describe('captureOrder', () => {
 
     expect(error).toBeInstanceOf(PayPalApiError);
     expect(error).toMatchObject({ status: 422, body: expect.stringContaining('ORDER_ALREADY_CAPTURED') });
+  });
+
+  it('rethrows the refusal of an order the buyer has not approved, as an error that says so', async () => {
+    stubFetch([unprocessable(APPROVAL_CAPTURE, 'ORDER_NOT_APPROVED')]);
+
+    const error = await captureOrder(APPROVAL_ORDER_ID, requestId).catch((e) => e);
+
+    expect(error).toBeInstanceOf(PayPalApiError);
+    expect(isOrderNotApproved(error)).toBe(true);
   });
 
   it('fails, naming the order it was asked to capture, when the response has no capture', async () => {
@@ -363,5 +372,26 @@ describe('chargeSavedWallet', () => {
     ]);
     expect(posts[2].body).toBe(posts[0].body);
     expect(posts[3].body).toBe(posts[1].body);
+  });
+});
+
+describe('isOrderNotApproved', () => {
+  const notApproved = new PayPalApiError(
+    422,
+    APPROVAL_CAPTURE,
+    JSON.stringify({ name: 'UNPROCESSABLE_ENTITY', details: [{ issue: 'ORDER_NOT_APPROVED' }] }),
+  );
+
+  it.each([
+    ['another 422 issue', new PayPalApiError(422, APPROVAL_CAPTURE, JSON.stringify({ details: [{ issue: 'ORDER_ALREADY_CAPTURED' }] }))],
+    ['the issue under another status', new PayPalApiError(400, APPROVAL_CAPTURE, notApproved.body)],
+    ['a body that is not JSON', new PayPalApiError(422, APPROVAL_CAPTURE, '422 ORDER_NOT_APPROVED')],
+    ['an error that is not from PayPal', new Error(notApproved.body)],
+  ])('is false for %s, since money may have moved', (_, error) => {
+    expect(isOrderNotApproved(error)).toBe(false);
+  });
+
+  it('is true for a 422 naming ORDER_NOT_APPROVED', () => {
+    expect(isOrderNotApproved(notApproved)).toBe(true);
   });
 });

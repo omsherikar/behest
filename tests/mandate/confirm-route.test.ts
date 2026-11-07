@@ -39,7 +39,7 @@ const APPROVE_URL = 'https://www.sandbox.paypal.com/agreements/approve?approval_
 const key = await loadSigningKey({ RECEIPT_SIGNING_KEY: (await generateSigningKey()).pem });
 
 async function request(body: unknown, { persona = 'buyer' }: { persona?: Persona | 'forged' | null } = {}) {
-  const headers = new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.7, 10.0.0.1' });
+  const headers = new Headers({ 'content-type': 'application/json', 'x-forwarded-for': '10.0.0.1, 203.0.113.7' });
   if (persona === 'forged') headers.set('cookie', `${SESSION_COOKIE}=not-a-signed-cookie`);
   else if (persona) headers.set('cookie', `${SESSION_COOKIE}=${await sessionCookie(persona)}`);
   return new NextRequest('http://localhost/api/mandates/confirm', {

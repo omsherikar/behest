@@ -11,8 +11,11 @@ import type { PaypalPort } from '@/lib/paypal/port';
 import { refundCapture } from '@/lib/paypal/refunds';
 import { createPaymentToken, createSetupToken } from '@/lib/paypal/vault';
 import { verifyWebhook } from '@/lib/paypal/webhooks';
+import type { SellerPort } from '@/lib/purchases/deps';
 import { loadSigningKey, publicJwks } from '@/lib/receipts/keys';
 import { createSigner, type Signer } from '@/lib/receipts/sign';
+import type { IntakeDeps } from '@/lib/sellers/intake';
+import { sellerPort } from '@/lib/sellers/port';
 
 // The app's live dependencies, built from the environment. Routes and pages take them from here and
 // hand them to library code, which tests call with fakes instead.
@@ -72,6 +75,16 @@ export function appPaypal(): PaypalPort {
     provideEvidence,
     verifyWebhook,
   };
+}
+
+/** What seller order intake needs: the app's database, the public key set and the system clock. */
+export function sellerDeps(): IntakeDeps {
+  return { db: appDb(), jwks: appJwks, now: () => new Date() };
+}
+
+/** Hands agent orders to the sellers Behest hosts, through their own order intake. */
+export function appSellerPort(): SellerPort {
+  return sellerPort(sellerDeps());
 }
 
 /** What a model call needs: the app's database, the Claude client and the system clock. */

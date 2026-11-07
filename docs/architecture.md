@@ -151,6 +151,7 @@ stateDiagram-v2
   awaiting_approval --> cancelled: declined or expired
   charging --> captured: capture COMPLETED
   charging --> failed: PayPal error
+  charging --> awaiting_approval: PayPal finds the order not yet approved
   captured --> accepted: seller verifies receipt
   captured --> refunded: seller rejects receipt
   accepted --> settled: payout SUCCESS

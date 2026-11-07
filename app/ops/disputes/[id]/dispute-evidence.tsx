@@ -8,6 +8,8 @@ import { Notice } from '@/components/ui/notice';
 import { type Draft, type DraftItem, draftOutcome, submitOutcome } from '@/lib/ops-pages/dispute-outcomes';
 import { narrativeProblem, submittableNarrative, toggleCitation } from '@/lib/ops-pages/narrative-edit';
 import { EvidenceItems } from './evidence-items';
+import { fieldClass } from '@/components/ui/field';
+import { textLink } from '@/components/ui/link';
 
 // The operator drafts a dispute's narrative, edits it and submits it to PayPal. A draft is a paid
 // model call, so the button says so, and a second draft asks first. The route stores the evidence
@@ -20,12 +22,12 @@ type Outcome = { tone: 'success' | 'danger'; text: string };
 
 const primaryButton = buttonClass('primary');
 const secondaryButton = buttonClass('secondary');
-const linkButton = 'text-meta font-medium text-action hover:text-action-strong hover:underline disabled:opacity-60';
-const textArea = 'mt-2 w-full rounded-control border border-line-strong bg-bg p-3 text-body text-text disabled:opacity-60';
+const linkButton = `text-meta ${textLink} disabled:opacity-60`;
+const textArea = `mt-2 ${fieldClass} p-3`;
 /** A toggle that cites an evidence item, in the item's colour once it is cited. */
 const chip = (cited: boolean, id: string) =>
   `inline-flex min-h-8 items-center gap-1.5 rounded-control border px-2.5 text-body transition-colors disabled:opacity-60 ${
-    cited ? `${evidenceStyle(id).chip} text-text` : 'border-line-strong bg-panel text-muted hover:bg-raised hover:text-text'
+    cited ? `${evidenceStyle(id).chip} text-text` : 'border-control bg-surface text-muted hover:bg-raised hover:text-text'
   }`;
 
 /** A narrative as the editor holds it, each claim keyed by its position. */

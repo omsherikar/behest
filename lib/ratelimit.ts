@@ -20,7 +20,7 @@ export const PUBLIC_READ_LIMIT: Readonly<RateLimitOptions> = { capacity: 60, ref
 export const PUBLIC_WRITE_LIMIT: Readonly<RateLimitOptions> = { capacity: 20, refillPerMinute: 20 };
 
 /**
- * The most keys a limiter tracks. Past it, the least recently seen key is forgotten; forgetting a
+ * The most keys a limiter tracks. Past it, the keys seen least recently are forgotten; forgetting a
  * key only hands it a full bucket again, which an idle key would have refilled to anyway.
  */
 export const MAX_TRACKED_KEYS = 10_000;
@@ -32,24 +32,28 @@ type Bucket = { tokens: number; at: number };
  * their own clock and bound. `tracked()` is how many keys it holds.
  */
 export function createRateLimiter(now: () => number = () => Date.now(), maxKeys: number = MAX_TRACKED_KEYS) {
-  // A Map keeps insertion order, and every call moves its key to the end, so the first key is the
-  // one seen least recently.
-  const buckets = new Map<string, Bucket>();
+  // Keys live in two generations. Each call keeps its key in the current one, moving it out of the
+  // previous one if it was there. When the current generation fills, it becomes the previous one
+  // and the old previous one, every key not seen since, is dropped whole. Each call costs a few Map
+  // operations, and the two together never hold more than `maxKeys`.
+  const generation = Math.max(1, Math.ceil(maxKeys / 2));
+  let current = new Map<string, Bucket>();
+  let previous = new Map<string, Bucket>();
 
-  /** Keeps `bucket` for `key` as the most recently seen key, forgetting the least recent past the bound. */
+  /** Keeps `bucket` for `key` as just seen. */
   function keep(key: string, bucket: Bucket): void {
-    buckets.delete(key);
-    buckets.set(key, bucket);
-    for (const oldest of buckets.keys()) {
-      if (buckets.size <= maxKeys) break;
-      buckets.delete(oldest);
+    previous.delete(key);
+    current.set(key, bucket);
+    if (current.size >= generation) {
+      previous = current;
+      current = new Map();
     }
   }
 
   /** Spends a token for `key` and returns true, or returns false when the bucket is empty. */
   function rateLimit(key: string, { capacity, refillPerMinute }: RateLimitOptions): boolean {
     const at = now();
-    const last = buckets.get(key);
+    const last = current.get(key) ?? previous.get(key);
     const tokens = last ? Math.min(capacity, last.tokens + ((at - last.at) * refillPerMinute) / 60_000) : capacity;
     // A refusal leaves the bucket as it was, so the refill is always measured from the last spent
     // token. That keeps a clock that steps backwards from crediting the same time twice. The key
@@ -62,7 +66,7 @@ export function createRateLimiter(now: () => number = () => Date.now(), maxKeys:
     return true;
   }
 
-  return Object.assign(rateLimit, { tracked: () => buckets.size });
+  return Object.assign(rateLimit, { tracked: () => current.size + previous.size });
 }
 
 /** The app's rate limiter, on the system clock. */

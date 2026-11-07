@@ -80,39 +80,51 @@ describe('rate limiter', () => {
     expect(limit('visitor', MODEL_ROUTE_LIMIT)).toBe(true);
   });
 
-  it('tracks at most 10,000 keys however many it sees', () => {
+  it('tracks at most 10,000 keys however many it sees, and forgets the oldest first', () => {
     const { limit } = limiterAt();
-    for (let i = 0; i < 25_000; i += 1) limit(`visitor-${i}`, MODEL_ROUTE_LIMIT);
+    const once = { capacity: 1, refillPerMinute: 1 };
+    let most = 0;
+    for (let i = 0; i < 25_000; i += 1) {
+      limit(`visitor-${i}`, once);
+      most = Math.max(most, limit.tracked());
+    }
 
     expect(MAX_TRACKED_KEYS).toBe(10_000);
-    expect(limit.tracked()).toBe(10_000);
+    expect(most).toBeLessThanOrEqual(10_000);
+    // It uses the room it has: more than one generation of keys at its fullest.
+    expect(most).toBeGreaterThan(5_000);
+    expect(limit('visitor-24999', once)).toBe(false);
+    expect(limit('visitor-0', once)).toBe(true);
   });
 
   it('forgets the least recently seen key first, which then starts again with a full bucket', () => {
-    const limit = createRateLimiter(() => 0, 3);
+    const limit = createRateLimiter(() => 0, 4);
     const once = { capacity: 1, refillPerMinute: 1 };
     expect(limit('a', once)).toBe(true);
     expect(limit('a', once)).toBe(false);
     limit('b', once);
     limit('c', once);
-    expect(limit.tracked()).toBe(3);
+    // Seen again, so b is now more recent than a.
+    limit('b', once);
 
-    limit('d', once);
-
-    expect(limit.tracked()).toBe(3);
+    expect(limit.tracked()).toBeLessThanOrEqual(4);
+    expect(limit('c', once)).toBe(false);
+    expect(limit('b', once)).toBe(false);
     expect(limit('a', once)).toBe(true);
   });
 
   it('keeps a key that is still being refused, so asking again never resets its bucket', () => {
-    const limit = createRateLimiter(() => 0, 2);
+    const limit = createRateLimiter(() => 0, 4);
     const once = { capacity: 1, refillPerMinute: 1 };
     limit('a', once);
     limit('b', once);
-    expect(limit('a', once)).toBe(false);
 
-    limit('c', once);
-
-    expect(limit('a', once)).toBe(false);
+    for (let i = 0; i < 20; i += 1) {
+      limit(`visitor-${i}`, once);
+      expect(limit('a', once)).toBe(false);
+      expect(limit.tracked()).toBeLessThanOrEqual(4);
+    }
+    // b was seen only once, so it has long been forgotten.
     expect(limit('b', once)).toBe(true);
   });
 

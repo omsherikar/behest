@@ -259,7 +259,11 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
             Resizing your photos...
           </p>
         )}
-        {photoNote && <p className="text-sm text-pp-warning">{photoNote}</p>}
+        {photoNote && (
+          <p role="status" className="text-sm text-pp-warning">
+            {photoNote}
+          </p>
+        )}
         {photos.length > 0 && (
           <>
             <ul className="mt-2 flex flex-col gap-3">
@@ -279,7 +283,12 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
                       <p className="truncate text-sm text-pp-muted">{photo.fileName}</p>
                       <p className="text-sm text-pp-muted">{mb(photo.base64.length)} MB after resizing</p>
                     </div>
-                    <button type="button" onClick={() => removePhoto(photo.key)} className={linkButton}>
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(photo.key)}
+                      aria-label={`Remove photo ${index + 1}`}
+                      className={linkButton}
+                    >
                       Remove
                     </button>
                   </div>
@@ -289,6 +298,7 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
                       <input
                         value={photo.price}
                         onChange={(event) => editPhoto(photo.key, 'price', event.target.value)}
+                        aria-label={`Photo ${index + 1} price in dollars`}
                         inputMode="decimal"
                         placeholder="4.50"
                         maxLength={16}
@@ -300,6 +310,7 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
                       <input
                         value={photo.stock}
                         onChange={(event) => editPhoto(photo.key, 'stock', event.target.value)}
+                        aria-label={`Photo ${index + 1} stock, if you count it`}
                         inputMode="numeric"
                         placeholder="12"
                         maxLength={10}

@@ -1,7 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { jobs, mandates, purchases, receipts } from '@/lib/db/schema';
-import { runDueJobs } from '@/lib/jobs/queue';
+import { runDueJobs, type JobOutcome } from '@/lib/jobs/queue';
 import { evaluateGate, type CatalogEntry } from '@/lib/gate/evaluate';
 import { completeApproval, expireApproval, startApproval } from '@/lib/purchases/approval';
 import { retryCharge } from '@/lib/purchases/charge';
@@ -77,6 +77,15 @@ async function budgetCheckOfNextProposal(db: PurchaseDeps['db'], buyerId: string
   return outcomes.find((o) => o.rule === 'budget_remaining');
 }
 
+/** A promise the test resolves when it chooses, to order two calls that overlap. */
+function signal() {
+  let fire = () => {};
+  const fired = new Promise<void>((resolve) => {
+    fire = resolve;
+  });
+  return { fire, fired };
+}
+
 /** When each `approval_expiry` job still queued is due, in order. */
 async function expiryTimes(db: PurchaseDeps['db']): Promise<Date[]> {
   const queued = await db
@@ -84,6 +93,48 @@ async function expiryTimes(db: PurchaseDeps['db']): Promise<Date[]> {
     .from(jobs)
     .where(and(eq(jobs.kind, 'approval_expiry'), eq(jobs.status, 'queued')));
   return queued.map((j) => j.runAt).sort((a, b) => a.getTime() - b.getTime());
+}
+
+/**
+ * Overlaps a replay of the capture with the first call that PayPal tells the order is not
+ * approved. The replay reaches PayPal while the purchase is still `charging`, and the buyer approves
+ * the order before the replay's capture. With `captures: 'before the reopen'`, PayPal captures for
+ * the replay before the first call sends the purchase back for approval, and the replay's answer
+ * arrives after; with `'after the reopen'`, the replay is captured only once the purchase is back
+ * awaiting approval. Resolves with the first call's outcome and the replay's.
+ */
+async function raceReplayWithReopen(
+  s: Awaited<ReturnType<typeof setUpAwaiting>>,
+  captures: 'before the reopen' | 'after the reopen',
+) {
+  const { deps, paypal, purchaseId, orderId } = s;
+  const capture = paypal.captureOrder.bind(paypal);
+  const replayAtPaypal = signal();
+  const firstDone = signal();
+  let replay: Promise<JobOutcome> | undefined;
+  paypal.captureOrder = async (id, requestId) => {
+    if (!replay) {
+      // The first call: PayPal refuses, since the buyer has not approved yet.
+      const refusal = await capture(id, requestId).catch((error: unknown) => error);
+      if (captures === 'before the reopen') paypal.approve(id);
+      replay = retryCharge(deps, purchaseId);
+      await replayAtPaypal.fired;
+      throw refusal;
+    }
+    // The replay, which found the purchase charging.
+    if (captures === 'before the reopen') {
+      const answer = await capture(id, requestId);
+      replayAtPaypal.fire();
+      await firstDone.fired;
+      return answer;
+    }
+    replayAtPaypal.fire();
+    await firstDone.fired;
+    paypal.approve(id);
+    return capture(id, requestId);
+  };
+  const first = await completeApproval(deps, orderId).finally(firstDone.fire);
+  return { first, replay: await replay };
 }
 
 /**
@@ -534,6 +585,34 @@ describe('retrying the capture of an approved order', () => {
     expect(captureCalls(paypal)).toHaveLength(1);
   });
 
+  it.each(['before the reopen', 'after the reopen'] as const)(
+    'records a capture PayPal makes for a replay %s, delivering and paying once',
+    async (captures) => {
+      const s = await setUpAwaiting({ approve: false });
+      const { db, paypal, seller, purchaseId } = s;
+
+      const { first, replay } = await raceReplayWithReopen(s, captures);
+
+      expect(first).toMatchObject({ status: 'awaiting_approval' });
+      expect(replay).toBe('done');
+      expect(paypal.captures).toHaveLength(1);
+      const [{ captureId }] = paypal.captures;
+      expect(await purchaseRow(db, purchaseId)).toMatchObject({ status: 'accepted', approver: 'human', paypalCaptureId: captureId });
+      expect(await db.select().from(receipts)).toHaveLength(1);
+      expect(seller.orders).toHaveLength(1);
+      expect(paypal.payouts).toHaveLength(1);
+      expect(await stepsOf(db, purchaseId)).toEqual(['approval_order', 'charge', 'approval_pending', 'capture', 'receipt', 'seller_accepted']);
+      expect((await eventsOf(db, purchaseId)).filter((e) => e.kind === 'status').map((e) => e.data)).toEqual([
+        { from: 'proposed', to: 'awaiting_approval' },
+        { from: 'awaiting_approval', to: 'charging' },
+        { from: 'charging', to: 'awaiting_approval' },
+        { from: 'awaiting_approval', to: 'charging' },
+        { from: 'charging', to: 'captured' },
+        { from: 'captured', to: 'accepted' },
+      ]);
+    },
+  );
+
   it('does not send the purchase back for approval once a replay has completed its capture', async () => {
     const s = await setUpAwaiting({ approve: false });
 
@@ -554,6 +633,28 @@ describe('retrying the capture of an approved order', () => {
     expect(outcome).toMatchObject({ status: 'charging', receiptId: null });
     expect(await purchaseRow(s.db, s.purchaseId)).toMatchObject({ status: 'charging', paypalCaptureId: captureId });
     expect(await stepsOf(s.db, s.purchaseId)).toEqual(['approval_order', 'charge', 'capture_pending']);
+  });
+
+  it('stores a pending capture PayPal reports for a replay after the purchase went back for approval', async () => {
+    const s = await setUpAwaiting({ approve: false });
+    const { db, paypal, purchaseId, clock } = s;
+    const capture = paypal.captureOrder.bind(paypal);
+    let calls = 0;
+    paypal.captureOrder = async (id, requestId) => {
+      calls += 1;
+      if (calls === 2) paypal.failNext('captureOrder', { status: 'PENDING' });
+      return capture(id, requestId);
+    };
+    const { first } = await raceReplayWithReopen(s, 'after the reopen');
+    clock.now = EXPIRES_AT;
+
+    expect(first).toMatchObject({ status: 'awaiting_approval' });
+    const [{ captureId }] = paypal.captures;
+    expect(await purchaseRow(db, purchaseId)).toMatchObject({ status: 'charging', approver: 'human', paypalCaptureId: captureId });
+    expect(await stepsOf(db, purchaseId)).toEqual(['approval_order', 'charge', 'approval_pending', 'capture_pending']);
+    // The queued replay and both expiries leave it to the webhook that reports the capture.
+    expect(await runJobs(s.deps, clock)).toBe(3);
+    expect(await statusOf(db, purchaseId)).toBe('charging');
   });
 
   it('refuses to replay a capture older than the replay window', async () => {

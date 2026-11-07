@@ -1,7 +1,7 @@
 import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Db } from '@/lib/db/client';
-import { purchaseEvents, purchases, receipts, wallets } from '@/lib/db/schema';
+import { purchaseEvents, purchases, receipts, wallets, type PurchaseStatus } from '@/lib/db/schema';
 import { enqueue, type JobOutcome } from '@/lib/jobs/queue';
 import { isOrderNotApproved } from '@/lib/paypal/orders';
 import type { PaypalPort } from '@/lib/paypal/port';
@@ -190,10 +190,12 @@ export async function takePayment(deps: ChargeDeps, purchaseId: string, request:
  * then issues the receipt and hands the order to the seller. Used by the charge, its retry, and
  * PayPal's webhook for a capture that was pending. The purchase row is locked while the capture is
  * checked and recorded, so only one call records it and goes on; a capture reported again is a
- * quiet no-op. A capture that does not fit the purchase, because the purchase is not `charging` or
- * already holds other PayPal ids, is never recorded over them: it is logged as `capture_unmatched`
- * for an operator, since PayPal holds money the purchase does not account for. Either way the
- * purchase is returned as it stands.
+ * quiet no-op. A capture of the purchase's own approval order is recorded the same way while the
+ * purchase is `awaiting_approval` (see approvedSinceReopen), first moving it back to `charging`
+ * with the buyer as its approver. Any other capture that does not fit the purchase, because the
+ * purchase is not `charging` or already holds other PayPal ids, is never recorded over them: it is
+ * logged as `capture_unmatched` for an operator, since PayPal holds money the purchase does not
+ * account for. Either way the purchase is returned as it stands.
  */
 export async function completeCapture(deps: ChargeDeps, purchaseId: string, capture: Capture): Promise<ProposalOutcome> {
   const { db } = deps;
@@ -206,14 +208,17 @@ export async function completeCapture(deps: ChargeDeps, purchaseId: string, capt
       .for('update');
     if (!purchase) throw new Error(`there is no purchase ${purchaseId}`);
     if (purchase.status !== 'charging' && purchase.captureId === captureId) return false;
+    const approvedSince = approvedSinceReopen(purchase, orderId);
     const fits =
-      purchase.status === 'charging' &&
-      (purchase.captureId ?? captureId) === captureId &&
-      (purchase.orderId ?? orderId) === orderId;
+      approvedSince ||
+      (purchase.status === 'charging' &&
+        (purchase.captureId ?? captureId) === captureId &&
+        (purchase.orderId ?? orderId) === orderId);
     if (!fits) {
       await appendEvent(tx, purchaseId, 'capture_unmatched', { captureId });
       return false;
     }
+    if (approvedSince) await transition(tx, purchaseId, 'awaiting_approval', 'charging', { approver: 'human' });
     await appendEvent(tx, purchaseId, 'capture', { orderId, captureId });
     await transition(tx, purchaseId, 'charging', 'captured', {
       paypalOrderId: orderId,
@@ -341,10 +346,20 @@ async function applyAnswer(deps: ChargeDeps, purchaseId: string, requestId: stri
 
 /**
  * Stores the ids of a capture PayPal is holding and logs `capture_pending`, leaving the purchase
- * `charging`. Only the first report is stored, and only while the purchase is still `charging`.
+ * `charging`. Only the first report is stored, and only while the purchase is still `charging`, or
+ * `awaiting_approval` for a capture of its own approval order (see approvedSinceReopen), which first
+ * moves it back to `charging` with the buyer as its approver.
  */
 async function recordPendingCapture(db: Db, purchaseId: string, { orderId, captureId }: Capture): Promise<void> {
   await db.transaction(async (tx) => {
+    const [purchase] = await tx
+      .select({ status: purchases.status, orderId: purchases.paypalOrderId, captureId: purchases.paypalCaptureId })
+      .from(purchases)
+      .where(eq(purchases.id, purchaseId))
+      .for('update');
+    if (purchase && approvedSinceReopen(purchase, orderId)) {
+      await transition(tx, purchaseId, 'awaiting_approval', 'charging', { approver: 'human' });
+    }
     const stored = await tx
       .update(purchases)
       .set({ paypalOrderId: orderId, paypalCaptureId: captureId })
@@ -365,6 +380,19 @@ async function recordDecline(db: Db, purchaseId: string, requestId: string): Pro
     // Another call has already acted on PayPal's answer.
     if (!(error instanceof StaleTransition)) throw error;
   }
+}
+
+/**
+ * Whether a capture of `orderId` reported for a purchase `awaiting_approval` is of the purchase's own
+ * approval order, with no capture recorded yet. That happens when a replay of the capture overlapped
+ * the call PayPal told the order was not approved: the replay found the purchase `charging`, and the
+ * buyer approved before PayPal captured for it, so the money is the purchase's own.
+ */
+function approvedSinceReopen(
+  purchase: { status: PurchaseStatus; orderId: string | null; captureId: string | null },
+  orderId: string,
+): boolean {
+  return purchase.status === 'awaiting_approval' && purchase.orderId === orderId && purchase.captureId === null;
 }
 
 /** The `approval_order` event's record of when the purchase's approval window closes, if any. */

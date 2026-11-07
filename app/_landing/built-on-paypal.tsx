@@ -19,7 +19,8 @@ import { Section } from './section';
 
 // What Behest uses PayPal for, as a bento grid: one tile per API, with its path, a small view of the
 // values Behest handles there and one line on what it does with them. The values come from the code
-// (./paypal-facts.ts, held to it by a test) or from the sample purchase's signed receipt.
+// (./paypal-facts.ts, held to it by a test) or from the sample purchase's signed receipt. The two wide
+// tiles are the saved wallet and the webhooks, whose ten events need the room.
 
 const chip = 'rounded-full border border-line bg-raised/70 px-2.5 py-0.5 font-mono text-[0.75rem] text-text';
 
@@ -69,15 +70,11 @@ function RefundRequest() {
   );
 }
 
-const SHOWN_EVENTS = ['CHECKOUT.ORDER.APPROVED', 'PAYMENT.CAPTURE.COMPLETED', 'CUSTOMER.DISPUTE.CREATED', 'PAYMENT.PAYOUTS-ITEM.SUCCEEDED'];
-
 function Webhooks() {
-  const more = WEBHOOK_EVENT_TYPES.length - SHOWN_EVENTS.length;
   return (
     <div className="grid justify-items-center gap-3">
       <StatusBadge tone="seal">Signature verified</StatusBadge>
-      <Chips items={SHOWN_EVENTS} label="Some of the events Behest acts on" />
-      <p className="text-meta text-muted">and {more} more events</p>
+      <Chips items={WEBHOOK_EVENT_TYPES} label="The PayPal events Behest acts on" />
     </div>
   );
 }
@@ -130,6 +127,8 @@ const TILES: { name: string; path: string; use: string; icon: ReactNode; span?: 
     path: '/v1/notifications/verify-webhook-signature',
     use: 'Acts on an order, capture, refund, payout or dispute event only after PayPal confirms its signature.',
     icon: <WebhooksLogo weight="regular" />,
+    // Wide only in three columns, where its ten events need the room; in two, it pairs with the toolkit.
+    span: 'lg:col-span-2',
     visual: <Webhooks />,
   },
   {
@@ -137,8 +136,6 @@ const TILES: { name: string; path: string; use: string; icon: ReactNode; span?: 
     path: '@paypal/agent-toolkit',
     use: 'Gives the dispute evidence agent these four tools and no other.',
     icon: <Toolbox weight="regular" />,
-    // Wide only in three columns: in two, it pairs with Webhooks.
-    span: 'lg:col-span-2',
     visual: <Chips items={TOOLKIT_TOOLS} label="The toolkit tools the agent can call" />,
   },
 ];

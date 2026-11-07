@@ -20,9 +20,10 @@ function Parts({ parts }: { parts: readonly EvidenceInline[] }) {
     ) : (
       <span
         key={index}
-        className="mx-0.5 inline rounded-md border border-line-strong bg-raised px-1.5 py-px font-mono text-[0.8125rem] whitespace-pre-wrap text-text"
+        // A chip that wraps keeps its border and padding on every line it spans.
+        className="mx-0.5 box-decoration-clone rounded-md border border-line-strong bg-raised px-1.5 py-px font-mono text-[0.8125rem] whitespace-pre-wrap text-text"
       >
-        <span className="mr-1.5 font-sans text-[0.6875rem] text-muted">{SOURCES[part.source] ?? 'quoted'}</span>
+        <span className="mr-1.5 font-sans text-[0.6875rem] whitespace-nowrap text-muted">{SOURCES[part.source] ?? 'quoted'}</span>
         &ldquo;{part.text}&rdquo;
       </span>
     ),

@@ -29,12 +29,25 @@ type FieldSpec = [id: string, name: string, format: AgFormat, hide?: boolean];
 // Every amount is in US dollars, so money shows with its symbol.
 const USD = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
+// Every moment as the rest of the app writes it, in UTC: "7 Nov 2026, 19:14 UTC".
+const UTC_MINUTE = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+  timeZone: 'UTC',
+  timeZoneName: 'short',
+});
+
 const fields = (specs: FieldSpec[]): AgFieldDefinition[] =>
   specs.map(([id, name, format, hide]) => ({
     id,
     name,
     format,
     ...(format === 'currencyFormat' && { formatOptions: { format: USD } }),
+    ...(format === 'dateTimeFormat' && { formatOptions: { format: UTC_MINUTE } }),
     ...(hide && { hide }),
   }));
 

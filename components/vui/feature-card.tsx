@@ -48,7 +48,7 @@ export function FeatureCard({
             {String(index).padStart(2, '0')}
           </span>
         )}
-        <h3 className={cn('flex items-center gap-2.5 text-heading font-medium text-text', index !== undefined && 'mt-5')}>
+        <h3 className={cn('flex items-center gap-2.5 text-heading font-medium text-text sm:text-[1.625rem] sm:leading-8', index !== undefined && 'mt-5')}>
           {icon && <span className="flex size-5 shrink-0 items-center justify-center text-muted [&>svg]:size-5">{icon}</span>}
           {title}
         </h3>

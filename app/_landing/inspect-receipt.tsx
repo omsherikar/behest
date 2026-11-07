@@ -33,7 +33,8 @@ export function InspectReceipt() {
       lead="This is the sample purchase's receipt, decoded. A seller checks it before accepting the order; so can anyone else."
     >
       <div className="grid gap-12 lg:grid-cols-12 lg:gap-8">
-        <div className="lg:col-span-4">
+        {/* Sticks beside the decoded receipt, which runs far longer, so the column never sits empty. */}
+        <div className="lg:sticky lg:top-28 lg:col-span-4 lg:self-start">
           <h3 className="text-heading font-medium text-text">How a seller verifies it</h3>
           <ol className="mt-6 grid gap-5">
             {STEPS.map((step, index) => (

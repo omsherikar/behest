@@ -6,7 +6,7 @@ import { LightLines } from '@/components/vui/light-lines';
 
 export function Hero() {
   return (
-    <section aria-labelledby="hero-title" className="relative pt-36 pb-14 sm:pt-44 lg:pb-16">
+    <section aria-labelledby="hero-title" className="relative pt-36 pb-16 sm:pt-44 lg:pb-24">
       <div className="container-page flex flex-col items-center text-center">
         <p className="glass rounded-full px-3.5 py-1.5 text-meta font-medium text-muted">Built on PayPal</p>
         <h1 id="hero-title" className="mt-8 text-display font-medium text-balance text-text">
@@ -43,8 +43,8 @@ export function Hero() {
 export function HeroBackdrop() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[min(100dvh,60rem)] min-h-[44rem] overflow-hidden">
-      <LightLines className="text-white [mask-image:linear-gradient(to_bottom,black_55%,transparent)]" />
-      <div className="absolute inset-x-0 top-24 mx-auto h-[34rem] max-w-5xl bg-[radial-gradient(closest-side,rgba(0,0,0,0.88),transparent)]" />
+      <LightLines lightsOpacity={0.45} className="text-white [mask-image:linear-gradient(to_bottom,black_55%,transparent)]" />
+      <div className="absolute inset-x-0 top-20 mx-auto h-[38rem] max-w-6xl bg-[radial-gradient(closest-side,rgba(0,0,0,0.92)_55%,transparent)]" />
     </div>
   );
 }

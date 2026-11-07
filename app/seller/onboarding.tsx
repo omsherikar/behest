@@ -88,8 +88,9 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
 
     const chosen = files.slice(0, Math.max(0, MAX_PHOTOS - photos.length));
     const notes: string[] = [];
-    if (chosen.length < files.length) {
-      notes.push(`Only ${MAX_PHOTOS} photos can be listed at once, so ${plural(files.length - chosen.length, 'photo')} were left out.`);
+    const left = files.length - chosen.length;
+    if (left > 0) {
+      notes.push(`Only ${MAX_PHOTOS} photos can be listed at once, so ${plural(left, 'photo')} ${left === 1 ? 'was' : 'were'} left out.`);
     }
     setBusy('resizing');
     setError(null);

@@ -1,4 +1,5 @@
 import { jwtVerify, SignJWT } from 'jose';
+import type { NextRequest } from 'next/server';
 
 // Demo sessions. A visitor picks a persona on the home page and gets it back as a signed,
 // HTTP-only cookie. Anyone may pick any persona: the signature only guarantees that the persona
@@ -40,6 +41,19 @@ export async function getPersona(cookieValue: string | undefined): Promise<Perso
   } catch {
     return null;
   }
+}
+
+/**
+ * The response refusing an API request whose session does not hold `required`: 401 with no
+ * persona, 403 with another one. Null when the request may go on. The proxy guards pages only, so
+ * each API route checks its persona with this itself.
+ */
+export async function personaRefusal(request: NextRequest, required: Persona): Promise<Response | null> {
+  const persona = await getPersona(request.cookies.get(SESSION_COOKIE)?.value);
+  if (persona === required) return null;
+  const [status, message] =
+    persona === null ? [401, 'Pick a persona on the home page first.'] : [403, `Only the ${required} persona can do this.`];
+  return Response.json({ error: { message } }, { status });
 }
 
 /** Attributes for the session cookie. Secure only in production, so it also works on http://localhost. */

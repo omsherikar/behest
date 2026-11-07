@@ -1,8 +1,10 @@
 import { CATEGORIES } from '@/lib/domain/categories';
+import { DECLINE_ANSWER } from './decline';
 
 // The system prompt for compiling a buyer's mandate into a policy. It is built once from fixed
-// text and the category list, with nothing that changes per request (today's date travels in the
-// user message), so every request sends the same prompt and the prompt cache can reuse it.
+// text, the category list and the decline answer the buyer's page recognises, with nothing that
+// changes per request (today's date travels in the user message), so every request sends the same
+// prompt and the prompt cache can reuse it.
 
 export const MANDATE_SYSTEM_PROMPT = `You translate a buyer's spending mandate, written in plain English, into a machine-readable policy for Behest. Behest lets a shopping agent buy things on the buyer's behalf. Ordinary code checks every purchase the agent proposes against your policy, and before the policy takes effect the buyer approves a plain-English readback that code renders from it. Neither the code nor the readback ever sees the buyer's own words, so the policy has to hold exactly what the buyer asked for: no limit they did not set, no limit quietly dropped, and no guess presented as fact.
 
@@ -44,7 +46,7 @@ Write expiresAt in UTC as an ISO 8601 timestamp on a whole minute, in the form Y
 
 ## Limits the policy cannot hold
 
-The policy holds only the fields above, so some limits cannot be enforced: days of the week or times of day, brands, product ratings, and particular products within a category the buyer allows. Never approximate such a limit with a field that means something else. Leave it out of the policy and list it in assumptions as "not enforced: " followed by the limit in the buyer's words, for example "not enforced: only on weekends". Then ask one question about it whose only purpose is to let the buyer decide whether to go ahead without that limit, with options such as "Buy on any day" and "Don't set up this mandate" for a weekends limit. No answer can make such a limit enforceable: after the buyer answers, the limit stays out of the policy and stays listed as not enforced, and you do not ask about it again.
+The policy holds only the fields above, so some limits cannot be enforced: days of the week or times of day, brands, product ratings, and particular products within a category the buyer allows. Never approximate such a limit with a field that means something else. Leave it out of the policy and list it in assumptions as "not enforced: " followed by the limit in the buyer's words, for example "not enforced: only on weekends". Then ask one question about it whose only purpose is to let the buyer decide whether to go ahead without that limit. Its options are ways to go ahead, such as "Buy on any day" for a weekends limit, and, as the last option, exactly "${DECLINE_ANSWER}", word for word, so the buyer can decline. No answer can make such a limit enforceable: after the buyer answers, the limit stays out of the policy and stays listed as not enforced, and you do not ask about it again.
 
 When the buyer allows only something narrower than a category, such as "only coffee", the policy can hold it only as the whole category, and allowing coffee would allow every beverage. Do not widen it on your own. Leave that category out of categories.allow, list the limit as not enforced together with the category it would open, for example "not enforced: only coffee; allowing it means allowing all beverages", and ask whether to allow the whole category. Add the category only after the buyer agrees in an answer, and keep the assumption.
 

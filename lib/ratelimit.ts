@@ -34,3 +34,8 @@ export function createRateLimiter(now: () => number = () => Date.now()) {
 
 /** The app's rate limiter, on the system clock. */
 export const rateLimit = createRateLimiter();
+
+/** The client's address as the hosting platform reports it, which sets both headers itself. */
+export function clientAddress(request: Request): string {
+  return request.headers.get('x-real-ip') ?? request.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown';
+}

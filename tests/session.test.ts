@@ -1,6 +1,17 @@
 import { SignJWT } from 'jose';
+import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getPersona, isPersona, mayOpen, PERSONAS, requiredPersona, sessionCookie, sessionCookieOptions } from '@/lib/session';
+import {
+  getPersona,
+  isPersona,
+  mayOpen,
+  PERSONAS,
+  personaRefusal,
+  requiredPersona,
+  SESSION_COOKIE,
+  sessionCookie,
+  sessionCookieOptions,
+} from '@/lib/session';
 
 const SECRET = 'test-session-secret-at-least-32-characters';
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -143,5 +154,28 @@ describe('mayOpen', () => {
     expect(mayOpen('seller', 'buyer')).toBe(false);
     expect(mayOpen('seller', 'operator')).toBe(false);
     expect(mayOpen('seller', null)).toBe(false);
+  });
+});
+
+describe('personaRefusal', () => {
+  const requestWith = (cookie?: string) =>
+    new NextRequest('http://localhost/api/mandates/compile', {
+      headers: cookie === undefined ? {} : { cookie: `${SESSION_COOKIE}=${cookie}` },
+    });
+
+  it('lets a request through when its session holds the required persona', async () => {
+    expect(await personaRefusal(requestWith(await sessionCookie('buyer')), 'buyer')).toBeNull();
+  });
+
+  it.each([undefined, 'not-a-signed-cookie'])('answers 401 to a request with cookie %s', async (cookie) => {
+    const refusal = await personaRefusal(requestWith(cookie), 'buyer');
+    expect(refusal?.status).toBe(401);
+    expect(await refusal?.json()).toEqual({ error: { message: 'Pick a persona on the home page first.' } });
+  });
+
+  it.each(['seller', 'operator'] as const)('answers 403 to the %s on a buyer route', async (persona) => {
+    const refusal = await personaRefusal(requestWith(await sessionCookie(persona)), 'buyer');
+    expect(refusal?.status).toBe(403);
+    expect(await refusal?.json()).toEqual({ error: { message: 'Only the buyer persona can do this.' } });
   });
 });

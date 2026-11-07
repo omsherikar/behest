@@ -5,8 +5,8 @@ import { createClaude, dailyCapUsd } from '../lib/llm/client';
 import { ATTACKS, REPLAY_MANDATE } from '../lib/security/attacks';
 import { INTENT_CHECKS_PER_ATTACK, liveRefusal, maxModelCalls, replayLiveAll } from '../lib/security/live';
 import { replayAttacks } from '../lib/security/replay';
-import type { LiveRun, ResultsFile } from '../lib/security/results';
-import { attackRows, readResults, replaceResultsBlock, resultsBlock } from '../lib/security/view';
+import { LiveRun, type ResultsFile } from '../lib/security/results';
+import { attackRows, replaceResultsBlock, resultsBlock } from '../lib/security/view';
 
 // Replays the attacks in lib/security/attacks.ts against Behest and records the results in
 // lib/security/results.json and in the results table of docs/security.md. The deterministic layers
@@ -18,7 +18,11 @@ import { attackRows, readResults, replaceResultsBlock, resultsBlock } from '../l
 const RESULTS = path.join('lib', 'security', 'results.json');
 const DOC = path.join('docs', 'security.md');
 
-/** The live results the file already holds, or null when there is no file yet. A file that does not read throws, so nothing is lost. */
+/**
+ * The live results the file already holds, or null when there is no file or no live run yet. Only the
+ * live section is read, since the rest is replayed afresh and may be in an older shape; a live section
+ * that does not read throws, so no paid result is lost.
+ */
 async function previousLive(): Promise<LiveRun | null> {
   let text: string;
   try {
@@ -27,7 +31,8 @@ async function previousLive(): Promise<LiveRun | null> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw error;
   }
-  return readResults(JSON.parse(text)).live;
+  const live: unknown = (JSON.parse(text) as { live?: unknown }).live ?? null;
+  return LiveRun.nullable().parse(live);
 }
 
 /** Whether the live run was asked for: ATTACK_LIVE set to anything but empty or 0. */

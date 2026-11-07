@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { submitOutcome } from '@/lib/ops-pages/dispute-outcomes';
+import { draftOutcome, submitOutcome } from '@/lib/ops-pages/dispute-outcomes';
 
 const NARRATIVE = {
   summary: 'The buyer authorized this purchase.',
@@ -76,5 +76,73 @@ describe('submitOutcome', () => {
         refresh: true,
       });
     }
+  });
+});
+
+describe('draftOutcome', () => {
+  const ITEMS = [
+    { id: 'mandate', title: 'Signed mandate', body: 'Mandate m-1.' },
+    { id: 'cart', title: 'Cart', body: '- 2 x Turmeric, 100 g' },
+  ];
+  const drafted = { pack: { disputeId: 'd-1', purchaseId: 'p-1', items: ITEMS }, narrative: NARRATIVE };
+
+  it("reads the pack's items and the narrative from a draft", () => {
+    expect(draftOutcome(200, drafted)).toEqual({ ok: true, draft: { items: ITEMS, narrative: NARRATIVE } });
+  });
+
+  it('keeps only the fields the page shows', () => {
+    const extra = {
+      pack: { ...drafted.pack, items: [{ ...ITEMS[0], extra: 1 }] },
+      narrative: { ...NARRATIVE, claims: [{ ...NARRATIVE.claims[0], extra: 2 }], extra: 3 },
+    };
+    expect(draftOutcome(200, extra)).toEqual({ ok: true, draft: { items: [ITEMS[0]], narrative: NARRATIVE } });
+  });
+
+  it('asks for a reload when a draft cannot be read, since its pack may be stored', () => {
+    const message = 'Behest sent a draft this page could not read. Reload the page, then draft again.';
+    for (const body of [
+      null,
+      'ok',
+      { narrative: NARRATIVE },
+      { pack: drafted.pack },
+      { ...drafted, pack: { items: [{ id: 'mandate', title: 'Signed mandate' }] } },
+      { ...drafted, pack: { items: 'mandate' } },
+      { ...drafted, narrative: { summary: 4, claims: [] } },
+      { ...drafted, narrative: { summary: 'S', claims: [{ text: 'T', evidenceIds: 'mandate' }] } },
+      { ...drafted, narrative: { summary: 'S', claims: [{ text: 'T', evidenceIds: [1] }] } },
+      { ...drafted, narrative: { summary: 'S', claims: [{ evidenceIds: ['mandate'] }] } },
+    ]) {
+      expect(draftOutcome(200, body), JSON.stringify(body)).toEqual({ ok: false, message, refresh: true });
+    }
+  });
+
+  it("shows the route's fixed words for a draft the model or PayPal could not make, and reloads the stored evidence", () => {
+    const message = 'The model refused to draft a narrative. Write it yourself from the evidence items, or draft again.';
+    expect(draftOutcome(502, { error: { code: 'refusal', message } })).toEqual({ ok: false, message, refresh: true });
+    expect(draftOutcome(502, null)).toEqual({
+      ok: false,
+      message: 'The draft failed. Write the narrative yourself, or draft again in a minute.',
+      refresh: true,
+    });
+  });
+
+  it.each([
+    [401, 'Your session has ended. Pick the operator persona on the home page, then draft again.', false],
+    [403, 'Only the operator persona can draft dispute evidence. Pick it on the home page.', false],
+    [404, 'Behest has no record of this dispute, so nothing was drafted.', false],
+    [
+      409,
+      'Nothing was drafted. This dispute is not matched to a purchase, or its evidence was already submitted. The page now shows where it stands.',
+      true,
+    ],
+    [429, 'Too many drafts in a short time. Wait a minute, then draft again.', false],
+    [500, "Something went wrong on Behest's side, so no draft came back. Draft again in a minute.", true],
+    [null, 'Could not reach Behest. Check your connection, then draft again.', false],
+  ])('words a %s in its own plain words, whatever the route sent', (status, message, refresh) => {
+    expect(draftOutcome(status, { error: { message: 'Text from the route that this status never shows.' } })).toEqual({
+      ok: false,
+      message,
+      refresh,
+    });
   });
 });

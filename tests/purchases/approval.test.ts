@@ -1,5 +1,5 @@
 import { and, eq, inArray } from 'drizzle-orm';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { jobs, mandates, purchases, receipts } from '@/lib/db/schema';
 import { runDueJobs } from '@/lib/jobs/queue';
 import { evaluateGate, type CatalogEntry } from '@/lib/gate/evaluate';
@@ -21,9 +21,15 @@ beforeAll(async () => {
   await createTestDb();
 }, 60_000);
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 const HOUR_MS = 60 * 60 * 1000;
 /** When the `approval_expiry` job queued with an approval first runs. */
 const EXPIRES_AT = new Date(NOW.getTime() + 3 * HOUR_MS);
+/** What the first failed attempt to create an approval order is logged under. */
+const FIRST_ATTEMPT_FAILED = 'Creating an approval order failed, so PayPal is asked again:';
 /** When the `charge_retry` job queued with an approval's capture first runs. */
 const RETRY_AT = new Date(NOW.getTime() + 2 * 60 * 1000);
 const APP_URL = 'https://behest.example.com';
@@ -156,8 +162,9 @@ describe('startApproval', () => {
     ]);
   });
 
-  it('asks again with the same request id when the answer is lost, creating one order', async () => {
+  it('logs the first failure and asks again with the same request id when the answer is lost, creating one order', async () => {
     const { db, deps, paypal, purchaseId } = await setUpAsk();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     paypal.failNext('createApprovalOrder', 'lost_response');
 
     const outcome = await startApproval(deps, purchaseId);
@@ -166,14 +173,19 @@ describe('startApproval', () => {
     expect(requestIds).toEqual([approvalRequestId(purchaseId), approvalRequestId(purchaseId)]);
     expect(outcome).toMatchObject({ status: 'awaiting_approval', approveUrl: expect.stringContaining('ORDER-1') });
     expect(await purchaseRow(db, purchaseId)).toMatchObject({ paypalOrderId: 'ORDER-1' });
+    expect(logged.mock.calls).toEqual([[`${FIRST_ATTEMPT_FAILED} purchase ${purchaseId}: fetch failed`]]);
   });
 
   it('cancels the purchase, releasing its budget, when PayPal cannot create the order twice', async () => {
     const { db, deps, paypal, purchaseId } = await setUpAsk();
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     paypal.failNext('createApprovalOrder', 'network');
     paypal.failNext('createApprovalOrder', 'network');
 
     const outcome = await startApproval(deps, purchaseId);
+
+    // The first failure is logged, and the second is recorded on the purchase.
+    expect(logged.mock.calls).toEqual([[`${FIRST_ATTEMPT_FAILED} purchase ${purchaseId}: fetch failed`]]);
 
     expect(outcome).toMatchObject({ status: 'cancelled', approveUrl: null, receiptId: null });
     expect(await purchaseRow(db, purchaseId)).toMatchObject({ status: 'cancelled', paypalOrderId: null, approveUrl: null });

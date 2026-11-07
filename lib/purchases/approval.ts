@@ -24,6 +24,9 @@ type ApprovalOrder = Awaited<ReturnType<PaypalPort['createApprovalOrder']>>;
 /** How long the buyer has to approve a purchase before it is cancelled and its budget released. */
 const APPROVAL_WINDOW_MS = 3 * 60 * 60 * 1000;
 
+/** What the first failed attempt to create an approval order is logged under. The second is logged on the purchase. */
+const FIRST_ATTEMPT_FAILED = 'Creating an approval order failed, so PayPal is asked again:';
+
 /**
  * Sends a purchase the gate referred to its buyer to PayPal for their approval. Moves it from
  * `proposed` to `awaiting_approval` and queues its `approval_expiry` job in one transaction, then
@@ -54,7 +57,7 @@ export async function startApproval(deps: ApprovalDeps, purchaseId: string): Pro
 
   let order: ApprovalOrder;
   try {
-    order = await sendApprovalOrder(deps.paypal, request);
+    order = await sendApprovalOrder(deps.paypal, purchaseId, request);
   } catch (error) {
     await cancelUnsentApproval(db, purchaseId, request.requestId, error);
     return purchaseOutcome(db, purchaseId);
@@ -166,11 +169,15 @@ async function enterCharging({ db, now }: CaptureDeps, purchaseId: string, order
   });
 }
 
-/** Asks PayPal for the approval order, and once more if that throws. Both carry the same request id, so PayPal creates one order. */
-async function sendApprovalOrder(paypal: PaypalPort, request: ApprovalRequest): Promise<ApprovalOrder> {
+/**
+ * Asks PayPal for the approval order, and once more if that throws, logging the first failure. Both
+ * carry the same request id, so PayPal creates one order.
+ */
+async function sendApprovalOrder(paypal: PaypalPort, purchaseId: string, request: ApprovalRequest): Promise<ApprovalOrder> {
   try {
     return await paypal.createApprovalOrder(request);
-  } catch {
+  } catch (error) {
+    console.error(`${FIRST_ATTEMPT_FAILED} purchase ${purchaseId}: ${error instanceof Error ? error.message : String(error)}`);
     return paypal.createApprovalOrder(request);
   }
 }

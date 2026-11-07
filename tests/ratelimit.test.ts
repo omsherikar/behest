@@ -151,11 +151,25 @@ describe('client address', () => {
     'x-real-ip': '192.0.2.5',
   };
 
-  it('takes cf-connecting-ip before every other header', () => {
+  it.each([undefined, '', '0', 'true', 'yes'])(
+    'ignores cf-connecting-ip and true-client-ip when TRUST_CLOUDFLARE_HEADERS is %j, as a client could set them itself',
+    (trust) => {
+      vi.stubEnv('TRUST_CLOUDFLARE_HEADERS', trust);
+      expect(clientAddress(requestWith(all))).toBe('192.0.2.4');
+      const { 'cf-connecting-ip': cf, 'true-client-ip': trueClient, 'x-real-ip': realIp } = all;
+      expect(clientAddress(requestWith({ 'cf-connecting-ip': cf, 'true-client-ip': trueClient, 'x-real-ip': realIp }))).toBe(
+        '192.0.2.5',
+      );
+    },
+  );
+
+  it('takes cf-connecting-ip before every other header when TRUST_CLOUDFLARE_HEADERS is 1', () => {
+    vi.stubEnv('TRUST_CLOUDFLARE_HEADERS', '1');
     expect(clientAddress(requestWith(all))).toBe('192.0.2.1');
   });
 
-  it('takes true-client-ip next', () => {
+  it('takes true-client-ip next when TRUST_CLOUDFLARE_HEADERS is 1', () => {
+    vi.stubEnv('TRUST_CLOUDFLARE_HEADERS', '1');
     const { 'true-client-ip': trueClient, 'x-forwarded-for': forwarded, 'x-real-ip': realIp } = all;
     expect(clientAddress(requestWith({ 'true-client-ip': trueClient, 'x-forwarded-for': forwarded, 'x-real-ip': realIp }))).toBe(
       '192.0.2.2',
@@ -204,6 +218,7 @@ describe('client address', () => {
   });
 
   it('skips a header that is set but empty', () => {
+    vi.stubEnv('TRUST_CLOUDFLARE_HEADERS', '1');
     expect(
       clientAddress(requestWith({ 'cf-connecting-ip': ' ', 'true-client-ip': '', 'x-forwarded-for': ' , ', 'x-real-ip': '192.0.2.5' })),
     ).toBe('192.0.2.5');

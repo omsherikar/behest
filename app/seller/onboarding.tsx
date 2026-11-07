@@ -246,7 +246,7 @@ export function Onboarding({ slug, onboarded, children }: { slug: string; onboar
         </p>
         <input
           type="file"
-          accept="image/*"
+          accept="image/jpeg,image/png,image/webp"
           multiple
           onChange={(event) => void addPhotos(event)}
           disabled={photos.length >= MAX_PHOTOS}

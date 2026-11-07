@@ -144,3 +144,38 @@ it('keeps polling after running the jobs fails', async () => {
   await stop();
   expect(runDueJobs).toHaveBeenCalledTimes(2);
 });
+
+it('runs the periodic pass on the first tick, then at most once a minute, each time before the due jobs', async () => {
+  const periodic = vi.fn(async (_deps: string) => {});
+  const stop = startWorker(async () => ({ ...runtime, periodic }), 1000);
+
+  vi.advanceTimersByTime(1000);
+  await settle();
+  expect(periodic).toHaveBeenCalledExactlyOnceWith('deps');
+  expect(periodic.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(runDueJobs).mock.invocationCallOrder[0]);
+
+  for (let second = 2; second <= 60; second++) {
+    vi.advanceTimersByTime(1000);
+    await settle();
+  }
+  expect(periodic).toHaveBeenCalledOnce();
+
+  vi.advanceTimersByTime(1000);
+  await stop();
+  expect(periodic).toHaveBeenCalledTimes(2);
+  expect(runDueJobs).toHaveBeenCalledTimes(61);
+});
+
+it('logs a failed periodic pass and still runs the due jobs', async () => {
+  const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const periodic = vi.fn(async () => {
+    throw new Error('connect ECONNREFUSED 127.0.0.1:5432');
+  });
+  const stop = startWorker(async () => ({ ...runtime, periodic }), 1000);
+
+  vi.advanceTimersByTime(1000);
+  await stop();
+
+  expect(errorLog).toHaveBeenCalledExactlyOnceWith('Periodic job pass failed: connect ECONNREFUSED 127.0.0.1:5432');
+  expect(runDueJobs).toHaveBeenCalledExactlyOnceWith(appDb, handlers, 'deps', expect.any(Function));
+});

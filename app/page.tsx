@@ -1,4 +1,4 @@
-import { AppShell } from '@/components/shell/app-shell';
+import { TopBar } from '@/components/shell/top-bar';
 import { buttonClass } from '@/components/ui/button';
 import { Hero } from './_landing/hero';
 import { BuiltOnPayPal, Footer, HowItWorks, InspectReceipt, Problem, SafetyModel, TryIt } from './_landing/sections';
@@ -24,8 +24,9 @@ function HeaderLinks() {
 
 export default function Home() {
   return (
-    <AppShell bleed aside={<HeaderLinks />}>
-      <div className="bg-schematic">
+    <>
+      <TopBar end={<HeaderLinks />} />
+      <main id="content">
         <Hero />
         <Problem />
         <HowItWorks />
@@ -34,7 +35,7 @@ export default function Home() {
         <SafetyModel />
         <TryIt />
         <Footer />
-      </div>
-    </AppShell>
+      </main>
+    </>
   );
 }

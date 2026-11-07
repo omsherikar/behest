@@ -397,6 +397,7 @@ Money is integer cents with an ISO currency code. Timestamps are UTC. Budget per
 | `/api/mcp` | MCP server for outside agents to browse catalogs |
 | `POST /api/receipts/verify` | Convenience verifier for sellers without a JOSE library |
 | `GET /.well-known/jwks.json` | Public signing keys |
+| `POST /api/disputes/[id]/draft` | Operator drafts a cited narrative from the evidence pack |
 | `POST /api/disputes/[id]/evidence` | Operator submits a reviewed pack |
 | `POST /api/ai/studio` | Server proxy for the dashboard analyst |
 

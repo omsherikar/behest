@@ -212,7 +212,7 @@ function SubmittedNarrative({
 }) {
   const { narrative } = submitted;
   return (
-    <section aria-labelledby="submitted-heading" className="panel mt-8 rounded-frame p-5 sm:p-6">
+    <section data-tour="dispute-answer" aria-labelledby="submitted-heading" className="panel mt-8 rounded-frame p-5 sm:p-6">
       <h2 id="submitted-heading" className="text-heading font-medium text-text">
         Submitted narrative
       </h2>

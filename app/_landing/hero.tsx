@@ -6,7 +6,7 @@ import { LightLines } from '@/components/vui/light-lines';
 
 export function Hero() {
   return (
-    <section aria-labelledby="hero-title" className="relative pt-36 pb-16 sm:pt-44 lg:pb-24">
+    <section data-tour="hero" aria-labelledby="hero-title" className="relative pt-36 pb-16 sm:pt-44 lg:pb-24">
       <div className="container-page flex flex-col items-center text-center">
         <p className="glass rounded-full px-3.5 py-1.5 text-meta font-medium text-muted">Built on PayPal</p>
         <h1 id="hero-title" className="mt-8 text-display font-medium text-balance text-text">

@@ -132,7 +132,7 @@ function OrderPanel({ order, sellerSlug, onClose }: { order: SellerOrderRow | nu
             </ul>
           </section>
 
-          <section aria-labelledby="order-receipt" className="grid gap-3">
+          <section data-tour="receipt-check" aria-labelledby="order-receipt" className="grid gap-3">
             <h3 id="order-receipt" className="text-meta text-muted">
               The receipt presented with it
             </h3>
@@ -151,7 +151,9 @@ export function OrdersGrid({ rows, labelledBy, sellerSlug }: { rows: SellerOrder
   const { open, setOpen, close } = useOpenFromAddress(rows);
   return (
     <>
-      <SellerGrid rows={rows} columns={columns} label="orders" labelledBy={labelledBy} onOpen={setOpen} />
+      <div data-tour="orders-grid">
+        <SellerGrid rows={rows} columns={columns} label="orders" labelledBy={labelledBy} onOpen={setOpen} />
+      </div>
       <OrderPanel order={open} sellerSlug={sellerSlug} onClose={close} />
     </>
   );

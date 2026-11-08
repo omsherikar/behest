@@ -103,12 +103,14 @@ const columns: ColDef<DisputeRow>[] = [
 export function DisputesGrid({ rows, labelledBy }: { rows: DisputeRow[]; labelledBy: string }) {
   const router = useRouter();
   return (
-    <SellerGrid
-      rows={rows}
-      columns={columns}
-      label="disputes"
-      labelledBy={labelledBy}
-      onOpen={(row) => router.push(`/ops/disputes/${row.id}`)}
-    />
+    <div data-tour="disputes-grid">
+      <SellerGrid
+        rows={rows}
+        columns={columns}
+        label="disputes"
+        labelledBy={labelledBy}
+        onOpen={(row) => router.push(`/ops/disputes/${row.id}`)}
+      />
+    </div>
   );
 }

@@ -172,7 +172,7 @@ function ItemBody({ item }: { item: DraftItem }) {
 
 export function EvidenceItems({ items }: { items: readonly DraftItem[] }) {
   return (
-    <section aria-labelledby="evidence-heading" className="mt-8">
+    <section data-tour="dispute-evidence" aria-labelledby="evidence-heading" className="mt-8">
       <h2 id="evidence-heading" className="text-lead font-medium text-text">
         Evidence
       </h2>

@@ -154,7 +154,7 @@ function DetailPanel({ detail, onClose }: { detail: PurchaseDetail | null; onClo
           )}
           <PurchaseTrace key={detail.id} detail={detail} defaultOpen={focusStep(detail)} />
           {detail.reasons.length > 0 && (
-            <section aria-labelledby="ledger-detail-why">
+            <section data-tour="purchase-reasons" aria-labelledby="ledger-detail-why">
               <h3 id="ledger-detail-why" className="text-meta text-muted">
                 {reasonsHeading(detail.verdict)}
               </h3>
@@ -169,7 +169,9 @@ function DetailPanel({ detail, onClose }: { detail: PurchaseDetail | null; onClo
               </ul>
             </section>
           )}
-          <WhatWouldChange change={detail.change} reasons={detail.reasons} />
+          <div data-tour="what-would-change">
+            <WhatWouldChange change={detail.change} reasons={detail.reasons} />
+          </div>
         </>
       )}
     </SidePanel>
@@ -181,7 +183,9 @@ export function LedgerGrid({ rows, labelledBy }: { rows: PurchaseDetail[]; label
   const { open, setOpen, close } = useOpenFromAddress(rows);
   return (
     <>
-      <SellerGrid rows={rows} columns={columns} label="purchases" labelledBy={labelledBy} onOpen={setOpen} />
+      <div data-tour="ledger-grid">
+        <SellerGrid rows={rows} columns={columns} label="purchases" labelledBy={labelledBy} onOpen={setOpen} />
+      </div>
       <DetailPanel detail={open} onClose={close} />
     </>
   );

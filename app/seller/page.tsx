@@ -50,7 +50,7 @@ export default async function SellerPage() {
             {summary && <ShopSummary summary={summary} />}
           </Onboarding>
         </div>
-        <aside aria-label={summary ? 'Hidden from agents' : 'What Behest does with your listings'} className="min-w-0 lg:sticky lg:top-28 lg:col-span-5 lg:self-start">
+        <aside data-tour="hidden-from-agents" aria-label={summary ? 'Hidden from agents' : 'What Behest does with your listings'} className="min-w-0 lg:sticky lg:top-28 lg:col-span-5 lg:self-start">
           {summary ? <HiddenListings hidden={summary.hidden} /> : <WhatHappens />}
         </aside>
       </div>

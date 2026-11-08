@@ -97,7 +97,21 @@ rm cookies.txt
 
 The reset answers with how many rows it removed and what it seeded. It keeps a linked wallet unless the body also says `"full":true`, and it answers 409 while a purchase that changed in the last 30 minutes is being charged or a job is running.
 
-## 8. Smoke checks
+## 8. Pin the guided demo's records
+
+The guided demo on the home page walks through real records: one allowed, one held and one blocked purchase, a seller order whose receipt was checked, and a dispute answered with evidence. Make them once with the real flows on the live site, then name them in `TOUR_PINS` in `.env.production`, as the file describes, and recreate the app so it reads the setting:
+
+```sh
+docker compose exec db psql -U behest behest -c "select id, final_verdict, status, total_cents, created_at from purchases order by created_at"
+docker compose exec db psql -U behest behest -c "select id, status, reason, created_at from seller_orders order by created_at"
+docker compose exec db psql -U behest behest -c "select id, paypal_dispute_id, purchase_id, submitted_at from disputes order by opened_at"
+docker compose up -d
+curl -fsS "https://$DOMAIN/api/tour"   # every pin filled in
+```
+
+A demo reset removes those records, so pin them again after one. Until a pin is set, its steps show their card without the highlight.
+
+## 9. Smoke checks
 
 ```sh
 curl -fsS "https://$DOMAIN/api/health"                         # {"ok":true}

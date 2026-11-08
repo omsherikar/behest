@@ -5,7 +5,8 @@
 // defines its columns in its own client component, so they can format values and render cells; the
 // rows come from the server.
 
-import { useCallback, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   CellStyleModule,
   ClientSideRowModelModule,
@@ -26,6 +27,7 @@ import {
 } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact } from 'ag-grid-react';
 import { fieldClass } from '@/components/ui/field';
+import { ROW_PARAM } from '@/lib/ui/open-from-address';
 import { cn } from '@/lib/utils';
 
 if (process.env.NODE_ENV !== 'production') {
@@ -157,6 +159,16 @@ export function SellerGrid<Row extends { id: string }>({
     box.current?.querySelector('[role="grid"], [role="treegrid"]')?.setAttribute('aria-labelledby', labelledBy);
   }, [labelledBy]);
 
+  // `?row=<id>` scrolls that row into view, even past the rows a long grid has not drawn yet: the
+  // guided demo uses it to show a pinned record however many newer rows sit above it.
+  const api = useRef<GridApi<Row> | null>(null);
+  const shownRow = useSearchParams().get(ROW_PARAM);
+  const showRow = useCallback(() => {
+    const node = shownRow && api.current?.getRowNode(shownRow);
+    if (node) api.current?.ensureNodeVisible(node, 'middle');
+  }, [shownRow]);
+  useEffect(() => showRow(), [showRow]);
+
   return (
     <div className="grid gap-3">
       <input
@@ -180,7 +192,11 @@ export function SellerGrid<Row extends { id: string }>({
             getRowId={rowId<Row>}
             quickFilterText={search}
             enableCellTextSelection
-            onGridReady={nameGrid}
+            onGridReady={(event) => {
+              api.current = event.api;
+              nameGrid();
+            }}
+            onFirstDataRendered={showRow}
             autoSizeStrategy={autoSizeStrategy}
             // A new width sizes the columns to their content again, which then fills the width again.
             // Before the first sizing, when no row is drawn yet, there is nothing to measure.

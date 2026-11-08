@@ -96,7 +96,7 @@ export default async function BuyerPage({ searchParams }: PageProps<'/buyer'>) {
       )}
 
       <div className="grid gap-8 lg:grid-cols-12">
-        <aside aria-label="What your agent can do now" className="min-w-0 lg:sticky lg:top-28 lg:col-span-5 lg:col-start-8 lg:row-start-1 lg:self-start">
+        <aside data-tour="mandate-readback" aria-label="What your agent can do now" className="min-w-0 lg:sticky lg:top-28 lg:col-span-5 lg:col-start-8 lg:row-start-1 lg:self-start">
           <MandatePanel mandate={inForce} title="What your agent can do now" wallet={walletStatus} readback change={false} />
         </aside>
 
@@ -148,7 +148,7 @@ type ActiveMandate = {
  */
 function SignedMandate({ mandate }: { mandate: ActiveMandate }) {
   return (
-    <section aria-labelledby="active-heading" className="panel rounded-frame">
+    <section data-tour="mandate-signature" aria-labelledby="active-heading" className="panel rounded-frame">
       <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-line px-5 py-4 sm:px-6">
         <h2 id="active-heading" className="text-heading font-medium text-text">
           Your signed mandate

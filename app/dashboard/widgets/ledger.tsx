@@ -256,7 +256,7 @@ export function LedgerWidget(params: AgWidgetParams<LedgerDef>) {
   if (!ledger) return <MissingFields widget="decision ledger" />;
   if (ledger.rows.length === 0) return null;
   return (
-    <div className="flex h-full flex-col px-2 pb-2 font-paypal">
+    <div data-tour="ledger-widget" className="flex h-full flex-col px-2 pb-2 font-paypal">
       {showVerdictMix && <VerdictMix rows={ledger.rows} />}
       <div className="min-h-0 flex-1">
         <AgGridProvider modules={modules}>

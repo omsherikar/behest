@@ -91,20 +91,22 @@ export default function SecurityPage() {
             }
           />
 
-          <Figures>
-            <Figure label="Attacks replayed against every layer">{file.deterministic.length}</Figure>
-            {live ? (
-              <>
-                <Figure label={`Stopped in the live run, out of ${live.results.length}`} tone="text-seal">
-                  {live.results.filter((result) => result.state === 'stopped').length}
-                </Figure>
-                <Figure label="Model calls in the live run">{live.calls}</Figure>
-                <Figure label="What the live run cost, estimated">${live.costUsd.toFixed(2)}</Figure>
-              </>
-            ) : (
-              <Figure label="Live run against the model">Not run</Figure>
-            )}
-          </Figures>
+          <div data-tour="security-figures">
+            <Figures>
+              <Figure label="Attacks replayed against every layer">{file.deterministic.length}</Figure>
+              {live ? (
+                <>
+                  <Figure label={`Stopped in the live run, out of ${live.results.length}`} tone="text-seal">
+                    {live.results.filter((result) => result.state === 'stopped').length}
+                  </Figure>
+                  <Figure label="Model calls in the live run">{live.calls}</Figure>
+                  <Figure label="What the live run cost, estimated">${live.costUsd.toFixed(2)}</Figure>
+                </>
+              ) : (
+                <Figure label="Live run against the model">Not run</Figure>
+              )}
+            </Figures>
+          </div>
 
           <Section id="threat" title="The threat">
             <div className="grid gap-6 lg:grid-cols-12">

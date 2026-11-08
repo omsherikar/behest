@@ -10,8 +10,10 @@ import { COUNTS_AGAINST_BUDGET } from '@/lib/purchases/transitions';
 
 // "What would change" for a purchase already decided: the gate's input rebuilt as it was when the
 // gate decided, and the answer the pages show. The replay counts the buyer's spend and recent
-// purchases from before this one, excluding it, at the moment it was proposed. The mandate's state
-// is today's: once a mandate has expired or been replaced, no change to it can allow anything.
+// purchases from before this one, excluding it, at the moment it was proposed. The mandate is judged
+// as it was when the purchase was decided, so its explanation stays the same after the buyer signs
+// another mandate; only a purchase blocked because its mandate was not in force says no change can
+// allow it.
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -73,10 +75,14 @@ export async function gateReplay(db: Db, purchaseId: string, now: Date): Promise
     .from(wallets)
     .where(and(eq(wallets.buyerId, purchase.buyerId), eq(wallets.status, 'linked'), isNotNull(wallets.paymentTokenId)));
 
-  // Today's state of the mandate: a mandate past its expiry counts as expired however it is stored.
+  // The mandate as it stood when the gate decided. A purchase decided while it was in force is
+  // explained against it even after it was revoked or expired, so a mandate signed later cannot
+  // change the answer. A purchase blocked because the mandate was not in force keeps today's state,
+  // where a mandate past its expiry counts as expired however it is stored.
+  const inForceWhenDecided = purchase.gateOutcomes.some((outcome) => outcome.rule === 'mandate_active' && outcome.result === 'pass');
   const expiries = [mandate.expiresAt, policy.data.expiresAt === null ? null : new Date(policy.data.expiresAt)];
   const expired = expiries.some((at) => at !== null && at.getTime() <= now.getTime());
-  const status = mandate.status === 'active' && expired ? 'expired' : mandate.status;
+  const status = inForceWhenDecided ? 'active' : mandate.status === 'active' && expired ? 'expired' : mandate.status;
 
   return {
     input: {

@@ -29,9 +29,11 @@ it('serves the text as plain text that clients may keep for five minutes', async
   expect(body).toContain('(https://behest.example/.well-known/jwks.json)');
 });
 
-it('names the repository documents by path while the repository is private', async () => {
+it('links the source and the repository documents on GitHub, now that the repository is public', async () => {
   const body = await (await GET()).text();
-  expect(body).toContain('- Architecture: `docs/architecture.md` in the repository, which is private for now.');
+  expect(body).toContain('https://github.com/omsherikar/behest');
+  expect(body).toContain('https://github.com/omsherikar/behest/blob/main/docs/architecture.md');
+  expect(body).not.toContain('private for now');
 });
 
 it('fails rather than link to a wrong origin when APP_URL is not set', async () => {

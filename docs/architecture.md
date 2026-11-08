@@ -412,12 +412,15 @@ Money is integer cents with an ISO currency code. Timestamps are UTC. Budget per
 | `POST /api/receipts/verify` | Convenience verifier for sellers without a JOSE library |
 | `GET /.well-known/jwks.json` | Public signing keys |
 | `POST /api/disputes/[id]/draft` | Operator drafts a cited narrative from the evidence pack |
-| `POST /api/disputes/[id]/evidence` | Operator submits a reviewed pack |
+| `POST /api/disputes/[id]/evidence` | Operator submits a reviewed pack, while PayPal takes evidence on the dispute |
+| `POST /api/disputes/[id]/message` | Operator sends the reviewed narrative to the buyer as a message, while PayPal takes no evidence yet |
 | `POST /api/ai/studio` | Server proxy for the dashboard analyst |
 | `GET /api/dashboard/data` | The dashboard's rows, scoped to the session's persona |
 | `POST /api/session` | Starts a demo session as a persona; `DELETE` ends it |
 | `POST /api/demo/reset` | Operator resets the demo; needs `DEMO_RESET_KEY` |
 | `GET /api/health` | Liveness check |
+| `GET /llms.txt` | What Behest does, for AI agents and the assistants people read sites with |
+| `GET /robots.txt` | Crawlers may read the public pages and seller catalogs, not the persona pages or the rest of the API |
 
 ## 11. Dashboard
 

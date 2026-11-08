@@ -7,6 +7,7 @@ import {
   mayOpen,
   PERSONAS,
   personaRefusal,
+  personaSections,
   requiredPersona,
   SESSION_COOKIE,
   sessionCookie,
@@ -136,6 +137,14 @@ describe('requiredPersona', () => {
       expect(requiredPersona(pathname)).toBeNull();
     },
   );
+});
+
+describe('personaSections', () => {
+  it('names every section that needs a persona, and only those', () => {
+    const sections = personaSections();
+    expect(sections).toEqual(['buyer', 'seller', 'ops', 'products', 'plans', 'invoices', 'transactions', 'balances', 'dashboard']);
+    for (const section of sections) expect(requiredPersona(`/${section}`)).not.toBeNull();
+  });
 });
 
 describe('mayOpen', () => {

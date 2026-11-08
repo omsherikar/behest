@@ -85,6 +85,11 @@ const SECTION_ACCESS = new Map<string, PageAccess>([
   ['dashboard', 'any'],
 ]);
 
+/** The first path segment of every section a visitor needs a persona to open. Used by robots.ts. */
+export function personaSections(): string[] {
+  return [...SECTION_ACCESS.keys()];
+}
+
 /** Who may open a page path, or null when everyone may, signed in or not. Used by proxy.ts. */
 export function requiredPersona(pathname: string): PageAccess | null {
   return SECTION_ACCESS.get(pathname.split('/')[1]) ?? null;

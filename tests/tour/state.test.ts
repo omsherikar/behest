@@ -74,7 +74,8 @@ describe('targetFor', () => {
   });
 
   it('scrolls a pinned row into view', () => {
-    expect(targetFor(step('ledger'), PINS)).toEqual({ path: '/buyer/ledger', anchor: 'ledger-grid', rowId: PINS.allowed, missing: false });
+    expect(targetFor(step('ledger'), PINS)).toEqual({ path: `/buyer/ledger?row=${PINS.allowed}`, anchor: 'ledger-grid', rowId: PINS.allowed, missing: false });
+    expect(targetFor(step('dispute'), PINS).path).toBe(`/ops/disputes?row=${PINS.dispute}`);
   });
 
   it('fills the dispute into its page', () => {

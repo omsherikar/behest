@@ -1,9 +1,12 @@
 // A grid's side panel can be opened from the address, as `?open=<id>`, so a link can show one
 // record: the guided demo uses it to open a pinned purchase or order. The panel drops the parameter
-// again when it closes, so a reload shows the plain page.
+// again when it closes, so a reload shows the plain page. `?row=<id>` likewise makes a grid scroll
+// that row into view, past the rows a long grid has not drawn yet.
 
 /** The query parameter naming the record whose panel to open. */
 export const OPEN_PARAM = 'open';
+/** The query parameter naming a row the grid scrolls into view, however far down it is. */
+export const ROW_PARAM = 'row';
 
 /** The row the address names, or null when it names none of them. */
 export function rowToOpen<Row extends { id: string }>(rows: readonly Row[], open: string | null): Row | null {

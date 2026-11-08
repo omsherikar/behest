@@ -1,4 +1,4 @@
-import { OPEN_PARAM } from '@/lib/ui/open-from-address';
+import { OPEN_PARAM, ROW_PARAM } from '@/lib/ui/open-from-address';
 import type { TourPins } from './pins';
 import { TOUR_END, TOUR_STEPS, type TourStep } from './steps';
 
@@ -65,10 +65,7 @@ export function targetFor(step: TourStep, pins: TourPins): TourTarget {
   }
   const base = pins.dispute === null ? step.path : step.path.replace('{dispute}', pins.dispute);
   const open = step.open === undefined ? null : pins[step.open];
-  return {
-    path: open === null ? base : `${base}?${OPEN_PARAM}=${encodeURIComponent(open)}`,
-    anchor: step.anchor,
-    rowId: step.row === undefined ? null : pins[step.row],
-    missing: false,
-  };
+  const rowId = step.row === undefined ? null : pins[step.row];
+  const query = open !== null ? `?${OPEN_PARAM}=${encodeURIComponent(open)}` : rowId !== null ? `?${ROW_PARAM}=${encodeURIComponent(rowId)}` : '';
+  return { path: `${base}${query}`, anchor: step.anchor, rowId, missing: false };
 }

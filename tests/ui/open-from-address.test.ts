@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OPEN_PARAM, rowToOpen, withoutOpen } from '@/lib/ui/open-from-address';
+import { OPEN_PARAM, ROW_PARAM, rowToOpen, withoutOpen } from '@/lib/ui/open-from-address';
 
 // A grid opens a record's panel when the address names it with ?open=<id>, which is how the guided
 // demo shows one pinned purchase or order, and drops the parameter when the panel closes.
@@ -26,6 +26,7 @@ describe('withoutOpen', () => {
   });
 });
 
-it('names the parameter open', () => {
+it('names the parameters open and row', () => {
   expect(OPEN_PARAM).toBe('open');
+  expect(ROW_PARAM).toBe('row');
 });

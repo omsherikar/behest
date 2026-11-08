@@ -1,3 +1,4 @@
+import { StartTourButton } from '@/components/tour/start-tour-button';
 import { buttonClass } from '@/components/ui/button';
 import { LightLines } from '@/components/vui/light-lines';
 
@@ -18,8 +19,9 @@ export function Hero() {
           any seller can verify.
         </p>
         <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
-          <a href="#try" className={buttonClass('primary', 'large')}>
-            Try the live demo
+          <StartTourButton />
+          <a href="#try" className={buttonClass('secondary', 'large')}>
+            Try it yourself
           </a>
           <a href="/security" className={buttonClass('secondary', 'large')}>
             See the attack replay

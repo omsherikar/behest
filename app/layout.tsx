@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Tour } from "@/components/tour/tour";
 import "./globals.css";
 
 // Geist Sans for the interface, Geist Mono for machine values: ids, hashes, SKUs, amounts in tables,
@@ -35,6 +36,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           silences that mismatch for the body's own attributes only, not for anything inside it. */}
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
         {children}
+        <Tour />
       </body>
     </html>
   );

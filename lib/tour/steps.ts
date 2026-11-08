@@ -42,7 +42,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     path: '/buyer',
     anchor: 'mandate-readback',
     title: 'Her mandate, in her own words',
-    body: 'Priya wrote her spending limits in plain words, and Claude turned them into a strict policy. The sentences she confirmed were rendered by code from that policy, not written by the model, so what she read is exactly what is enforced.',
+    body: 'Priya wrote her spending limits in plain words, and Claude turned them into a strict policy. The sentences she confirmed were rendered by code from that policy, not written by the model, so what she read is exactly what is enforced. Her PayPal wallet was linked once, with no purchase.',
   },
   {
     id: 'signature',
@@ -50,7 +50,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
     path: '/buyer',
     anchor: 'mandate-signature',
     title: 'Signed, and checkable by anyone',
-    body: 'Behest signs the mandate with its Ed25519 key, and a passkey signature, when the buyer adds one, covers the same policy and readback. Anyone can check them with public keys, without asking Behest. Her PayPal wallet was linked once, with no purchase.',
+    body: 'Behest signs the mandate with its Ed25519 key, and a passkey signature, when the buyer adds one, covers the same policy and readback. Anyone can check them with public keys, without asking Behest.',
   },
   {
     id: 'ledger',

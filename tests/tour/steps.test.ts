@@ -79,6 +79,12 @@ describe('the copy', () => {
     for (const step of ALL) expect(`${step.title} ${step.body}`).not.toMatch(/\b(judge|judges|rate|score|best)\b/i);
   });
 
+  it('mentions the linked wallet on the step whose panel shows it', () => {
+    const body = (id: string) => ALL.find((step) => step.id === id)?.body ?? '';
+    expect(body('mandate')).toContain('wallet');
+    expect(body('signature')).not.toContain('wallet');
+  });
+
   it('names each role the way the top bar does', () => {
     expect(ROLE_LABEL).toEqual({ buyer: 'Buyer', seller: 'Seller', operator: 'Operator' });
   });

@@ -2,7 +2,6 @@
 
 import type { ColDef, ValueFormatterParams } from 'ag-grid-community';
 import type { CustomCellRendererProps } from 'ag-grid-react';
-import { useState } from 'react';
 import type { PurchaseDetail } from '@/lib/buyer-pages/detail';
 import { reasonsHeading, statusWords } from '@/lib/buyer-pages/words';
 import { formatUsd } from '@/lib/domain/money';
@@ -12,6 +11,7 @@ import { focusStep, PurchaseTrace } from '@/components/purchase/purchase-trace';
 import { MiniTrace } from '@/components/ui/mini-trace';
 import { Money } from '@/components/ui/money';
 import { SidePanel } from '@/components/ui/side-panel';
+import { useOpenFromAddress } from '@/components/ui/use-open-from-address';
 import { VerdictBadge } from '@/components/ui/verdict-badge';
 import { WhatWouldChange } from '@/components/ui/what-would-change';
 
@@ -178,11 +178,11 @@ function DetailPanel({ detail, onClose }: { detail: PurchaseDetail | null; onClo
 
 /** `labelledBy` is the id of the element that names the grid, such as the page heading. */
 export function LedgerGrid({ rows, labelledBy }: { rows: PurchaseDetail[]; labelledBy: string }) {
-  const [open, setOpen] = useState<PurchaseDetail | null>(null);
+  const { open, setOpen, close } = useOpenFromAddress(rows);
   return (
     <>
       <SellerGrid rows={rows} columns={columns} label="purchases" labelledBy={labelledBy} onOpen={setOpen} />
-      <DetailPanel detail={open} onClose={() => setOpen(null)} />
+      <DetailPanel detail={open} onClose={close} />
     </>
   );
 }

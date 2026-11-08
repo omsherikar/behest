@@ -1,15 +1,15 @@
 import type { ChangeView } from '@/lib/buyer-pages/what-would-change';
 
 // What would have let a held or blocked purchase through, in the buyer's words: approving it at
-// PayPal, the smallest mandate changes, or why no change to the mandate can allow it.
+// PayPal, the smallest changes to the mandate it was decided under, or why no change to it can allow it.
 
 /** The sentence before the list of changes. */
 function lead(approve: boolean, together: boolean, count: number): string {
   const what = together
-    ? 'these changes to your mandate together'
+    ? 'these changes to the mandate it was decided under together'
     : count === 1
-      ? 'this change to your mandate'
-      : 'one of these changes to your mandate';
+      ? 'this change to the mandate it was decided under'
+      : 'one of these changes to the mandate it was decided under';
   const sentence = `${approve ? 'or ' : ''}${what} would have let it through:`;
   return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
@@ -30,7 +30,7 @@ export function WhatWouldChange({
     return (
       <div className={box}>
         <p className="text-meta text-muted">What would change</p>
-        <p className="mt-1 text-text">This one cannot be allowed by changing your mandate.</p>
+        <p className="mt-1 text-text">This one cannot be allowed by changing the mandate it was decided under.</p>
         {!reasons.some((reason) => change.reason === (/[.!?]$/.test(reason) ? reason : `${reason}.`)) && (
           <p className="mt-0.5 text-muted">{change.reason}</p>
         )}
@@ -55,7 +55,7 @@ export function WhatWouldChange({
           {stillAsks && <p className="mt-1 text-muted">It would then still need your approval.</p>}
         </>
       )}
-      {!approve && changes.length === 0 && <p className="mt-1 text-muted">No change to your mandate alone would allow it.</p>}
+      {!approve && changes.length === 0 && <p className="mt-1 text-muted">No change to that mandate alone would allow it.</p>}
     </div>
   );
 }

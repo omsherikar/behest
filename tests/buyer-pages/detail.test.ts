@@ -187,12 +187,38 @@ describe('mandateInForce', () => {
 });
 
 describe('after the mandate is revoked', () => {
+  /** What the held purchase showed while its mandate was still in force. */
+  let heldBefore: Awaited<ReturnType<typeof changeFor>>;
+  /** A purchase the gate blocked because its mandate was no longer in force when it was proposed. */
+  let blockedAsRevoked: string;
+
   beforeAll(async () => {
+    heldBefore = await changeFor(db, ids.held, NOW);
+    const base = await purchaseRow(db, ids.held);
+    const [row] = await db
+      .insert(purchases)
+      .values({
+        ...base,
+        id: undefined,
+        updatedAt: undefined,
+        approveUrl: null,
+        gateVerdict: 'BLOCK',
+        finalVerdict: 'BLOCK',
+        status: 'blocked',
+        gateOutcomes: [{ rule: 'mandate_active', result: 'block', detail: 'This mandate was revoked.' }],
+      })
+      .returning({ id: purchases.id });
+    blockedAsRevoked = row.id;
     await db.update(mandates).set({ status: 'revoked' }).where(eq(mandates.id, mandateId));
   });
 
-  it('suggests no change to it', async () => {
-    expect(await changeFor(db, ids.held, NOW)).toEqual({ kind: 'cannot', reason: 'This mandate was revoked.' });
+  it('still explains a purchase decided while the mandate was in force, as it did then', async () => {
+    expect(heldBefore?.kind).toBe('changes');
+    expect(await changeFor(db, ids.held, NOW)).toEqual(heldBefore);
+  });
+
+  it('suggests no change for a purchase blocked because the mandate was not in force', async () => {
+    expect(await changeFor(db, blockedAsRevoked, NOW)).toEqual({ kind: 'cannot', reason: 'This mandate was revoked.' });
   });
 
   it('has no mandate in force', async () => {

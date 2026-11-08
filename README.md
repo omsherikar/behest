@@ -6,20 +6,29 @@ Sellers hesitate to take orders from AI shopping agents because nobody can prove
 
 Built for the [PayPal AI Hackathon](https://paypalaihackathon.devpost.com). Everything runs on the PayPal sandbox.
 
+- **Demo video (2:58):** [youtu.be/-qJ0i8Bb1_I](https://youtu.be/-qJ0i8Bb1_I)
+- **Live demo, with a three-minute guided tour:** [behest.omstudio.tech](https://behest.omstudio.tech)
+
 ## How it works
 
 1. **Mandate.** The buyer types something like "$60 a month on groceries and spices, ask me above $25, never electronics". Claude compiles it into a policy JSON (budget and period, per-purchase maximum, approval threshold, allowed and denied categories and sellers, purchase rate, expiry) and lists its assumptions and open questions.
-2. **Readback and signature.** Code, not a model, renders the policy back as plain sentences. The buyer confirms exactly what will be enforced, and Behest signs the mandate as an EdDSA JWS.
+2. **Readback and signature.** Code, not a model, renders the policy back as plain sentences. The buyer confirms exactly what will be enforced, and Behest signs the mandate as an EdDSA JWS. A limit Behest cannot enforce, such as "only on weekends", comes back as a question; it is never dropped. With a passkey, the buyer also signs the hashes of the policy and the readback, and the mandate names the passkey's public key, so anyone can check the buyer's signature without Behest.
 3. **Wallet link.** The buyer approves a PayPal Vault v3 setup token once, with no purchase. Behest keeps the resulting payment token, so later purchases inside the mandate need no click.
-4. **Shopping.** The buyer asks the Claude shopping agent for something. The agent searches Behest sellers, compares open-web prices through Channel3, and proposes a seller, SKUs and quantities. It never sees a payment tool and never sets a price.
-5. **Decision.** The policy gate, plain TypeScript with no model in it, re-prices the cart from Behest's database and evaluates twelve rules to ALLOW, ASK or BLOCK. Claude's intent check then compares the cart with the buyer's own request and can only move the verdict toward the human.
+4. **Shopping.** The buyer asks the Claude shopping agent for something. The agent searches Behest sellers, compares open-web prices through Channel3, and proposes a seller, SKUs and quantities. It never sees a payment tool and never sets a price. Its searches, lookups and choice form a decision record, whose hash goes into the receipt.
+5. **Decision.** The policy gate, plain TypeScript with no model in it, re-prices the cart from Behest's database and evaluates twelve rules to ALLOW, ASK or BLOCK. An item priced over 1.5 times its Channel3 market median is held for the buyer. Claude's intent check then compares the cart with the buyer's own request and can only move the verdict toward the human. A held or blocked purchase shows the smallest change to the mandate that would have let it through, or why no change would.
 6. **Payment.** ALLOW charges the saved wallet with PayPal Orders v2, buyer not present. ASK creates a PayPal order the buyer approves themselves, from a link or a QR code on their phone. BLOCK moves no money. Every PayPal call that moves money carries an idempotency key.
-7. **Receipt and settlement.** A captured purchase gets a signed receipt. The seller verifies it against Behest's public JWKS and accepts or rejects the order. Behest, the merchant of record, pays an accepted order out to the seller with PayPal Payouts, or refunds a rejected one.
-8. **Disputes.** A dispute opened at PayPal is matched to its purchase. Claude drafts a narrative in which every claim cites an evidence item (signed mandate, readback, receipt, cart, purchase log, approval), the operator reviews and edits it, and Behest submits it through PayPal's provide-evidence endpoint.
+7. **Receipt and settlement.** A captured purchase gets a signed receipt. The seller verifies it against Behest's public JWKS (signature, under 15 minutes old, seller, cart, amount, never used before) and accepts or rejects the order. Behest, the merchant of record, pays an accepted order out to the seller with PayPal Payouts, or refunds a rejected one.
+8. **Disputes.** A dispute opened at PayPal is matched to its purchase. Claude drafts a narrative in which every claim cites an evidence item (signed mandate, readback, receipt, cart, the agent's decision record, purchase log, approval); a claim that cites nothing is dropped. The operator reviews and edits it. Before answering, Behest reads the dispute at PayPal and answers the way PayPal allows at that stage: the narrative as evidence through provide-evidence, or a message to the buyer while PayPal takes no evidence yet.
 
 The full design, with its invariants, state machine, receipt format and decision record, is in [docs/architecture.md](docs/architecture.md).
 
 ## What the demo shows
+
+### Guided demo
+
+**Take the guided demo** on the home page is a three-minute, fourteen-step tour. It switches persona for you, opens each page and highlights real records from one run on the live site: an allowed, a held and a blocked purchase, a seller order whose receipt was checked, and a dispute. It resumes after a reload, Esc closes it, and its last card hands over with **Try it yourself**. The records it points at are named in `TOUR_PINS` ([docs/deploy.md](docs/deploy.md)); a step whose record is missing still shows its card, without the highlight.
+
+### Personas
 
 Open the app and pick a persona on the home page. There is no sign-up: the persona is held in a signed, HTTP-only cookie, and every page and route that needs a persona checks it on the server. The seller catalog and order intake, receipt verification, PayPal webhooks, the public key set, the health check and the session route itself are public by design. The demo buyer is Priya; the demo seller is Ravi's Spice Co.
 
@@ -53,6 +62,16 @@ The operator also sees the starter's PayPal data pages (`/products`, `/plans`, `
 
 `/dashboard` is an AG Studio report scoped to whoever is viewing: the buyer sees their purchases and mandate, the seller the orders placed with it, and the operator everything plus PayPal Transaction Search for reconciliation. It has three custom Studio widgets: the **decision ledger** (verdict chips and every rule's outcome), the **budget burn-down** (spend against the mandate, with reservations shown apart), and the **receipt card** (a receipt's claims and its live verification result). The **AG Studio analyst** is driven by Claude through a custom adapter ([app/dashboard/studio/anthropic-adapter.ts](app/dashboard/studio/anthropic-adapter.ts)): ask "Which purchases needed approval this week and why?" and it answers or adds widgets. Its tools run in the browser over the rows already loaded for the persona, and the Anthropic key stays on the server behind [`/api/ai/studio`](app/api/ai/studio/route.ts).
 
+### Public pages and endpoints
+
+| Path | What it is |
+|---|---|
+| `/security` | A published prompt-injection attack on agent payments, ["Whispers of Wealth"](https://arxiv.org/abs/2601.22569) (arXiv 2601.22569), replayed against every Behest layer. In the live run against the model, 7 of 8 attacks were stopped and 1 was held for the buyer, over 38 model calls costing about $0.31. The page also lists what Behest does not stop yet. |
+| `/.well-known/jwks.json` | The Ed25519 public keys that verify every mandate and receipt Behest signs. |
+| `POST /api/receipts/verify` | Runs the seller's receipt checks for a seller without a JOSE library. Body: `{ "jws", "cart", "sellerSlug" }`. |
+| `/api/sellers/<slug>/catalog` | A seller's catalog as JSON, the way outside shopping agents read it. A listing flagged for text aimed at AI agents is never in it. |
+| `/llms.txt` | A plain-text summary of Behest for AI agents and other readers, with links to check each claim. `/robots.txt` keeps crawlers off the persona pages and private APIs. |
+
 ## Built With
 
 **PayPal (sandbox)**
@@ -63,7 +82,7 @@ The operator also sees the starter's PayPal data pages (`/products`, `/plans`, `
 | Orders v2 capture | ALLOW: charge the saved wallet with no buyer present. ASK: a buyer-approved order, captured on return or by webhook | [lib/paypal/orders.ts](lib/paypal/orders.ts) |
 | Payouts | Pay the seller once it has verified the receipt and accepted the order | [lib/paypal/payouts.ts](lib/paypal/payouts.ts) |
 | Refunds (Payments v2) | Refund the buyer from Behest's capture when a seller rejects an order | [lib/paypal/refunds.ts](lib/paypal/refunds.ts) |
-| Disputes with provide-evidence | Read disputes, match them to purchases, submit the operator's reviewed narrative | [lib/paypal/disputes.ts](lib/paypal/disputes.ts) |
+| Disputes with provide-evidence and send-message | Read disputes, match them to purchases, and answer the way PayPal allows at that stage: the operator's reviewed narrative as evidence, or a message to the buyer | [lib/paypal/disputes.ts](lib/paypal/disputes.ts) |
 | Webhooks | Order approval, capture, refund, payout and dispute events, each accepted only after PayPal's verify-webhook-signature call | [lib/paypal/webhooks.ts](lib/paypal/webhooks.ts) |
 | PayPal Agent Toolkit (read-only) | `list_disputes`, `get_dispute`, `get_order` and `get_shipment_tracking`, bridged into Claude tools for the dispute evidence agent. No other toolkit tool is ever exposed | [lib/paypal/toolkit-bridge.ts](lib/paypal/toolkit-bridge.ts) |
 | Transaction Search | Reconciliation rows on the operator's dashboard | [lib/paypal/reporting.ts](lib/paypal/reporting.ts) |
@@ -141,11 +160,9 @@ Rate limits key on the client address. Behind Caddy, `TRUSTED_PROXY_HOPS=1` pick
 
 ## Test credentials for judges
 
-> **To be added at deploy:** the hosted URL and the PayPal sandbox buyer login (email and password of the sandbox Personal account). Nothing below this line is filled in yet.
-
-- **Hosted URL:** to be added at deploy.
+- **Hosted demo:** [behest.omstudio.tech](https://behest.omstudio.tech). Start with **Take the guided demo** on the home page: a three-minute tour of real records from one run on that site (an allowed, a held and a blocked purchase, a seller order whose receipt was checked, and a dispute), after which you can try it yourself.
 - **Behest login:** none. Pick the buyer, seller or operator persona on the home page.
-- **PayPal sandbox buyer login** (for linking the wallet and approving ASK purchases at PayPal): to be added at deploy.
+- **PayPal sandbox buyer login** (for linking the wallet and approving ASK purchases at PayPal): in the testing instructions of the Devpost submission, not in this public repository.
 
 ## Security and trust model
 
@@ -154,6 +171,7 @@ Rate limits key on the client address. Behind Caddy, `TRUSTED_PROXY_HOPS=1` pick
 - **Untrusted text is quoted.** Seller listings, Channel3 results, PayPal dispute text and the agent's own rationale reach Claude only inside delimited tags it is told to treat as data. One gate input does come from seller text: each listing's category, which the catalog builder assigns from what the seller wrote (see [Known limitations](#known-limitations)). Listings whose text speaks to AI agents are flagged at onboarding and hidden from agents; the gate also blocks any cart that contains one.
 - **Signed receipts with a public JWKS.** Mandates and receipts are Ed25519 JWS, and the policy and cart hashes inside them are SHA-256 over RFC 8785 canonical JSON. Anyone can verify them against [`/.well-known/jwks.json`](app/.well-known/jwks.json/route.ts); sellers check signature, freshness (15 minutes), seller, cart hash, amount and replay, and seller intake never reads Behest's purchase tables.
 - **Idempotent PayPal calls.** Every money-moving request carries a `PayPal-Request-Id` derived from the purchase and the step (`charge`, `capture`, `refund`), and payouts a matching `sender_batch_id`, so a retry can never charge, pay or refund twice.
+- **Tested against a published attack.** The [`/security`](app/security/page.tsx) page replays the attack from "Whispers of Wealth" (arXiv 2601.22569) against every layer and lists, with the results, what Behest does not stop yet.
 - **Sandbox only.** Behest uses PayPal sandbox accounts and moves no real money. Secrets live in environment variables and are never committed.
 
 ## Sandbox honesty

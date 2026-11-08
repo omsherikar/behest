@@ -61,7 +61,7 @@ describe('llmsText', () => {
 
   it('uses no em dash, and no instruction aimed at the model reading it', () => {
     const body = text();
-    expect(body).not.toContain('—');
+    expect(body).not.toContain('\u2014');
     expect(body).not.toMatch(/\b(ignore|disregard) (all |any )?(previous|prior)|you (must|should) (rate|rank|score|recommend)/i);
   });
 });

@@ -7,20 +7,17 @@ import { type Box, placeCard, type Size } from '@/lib/tour/place';
 import { NO_PINS, type TourPins } from '@/lib/tour/pins';
 import { LAST_INDEX, stepAt, targetFor } from '@/lib/tour/state';
 import { TOUR_STEPS } from '@/lib/tour/steps';
+import { runStep } from './run-step';
 import { TourCard } from './tour-card';
 import { dispatchTour, useTourState } from './tour-store';
 
-// The guided demo, mounted once in the root layout. For each step it switches the demo role if the
-// step needs another one, opens the step's page, waits for the element to ring, and draws the dim,
-// the ring and the card. It only shows: its only calls are GET /api/tour for the pinned ids and
-// POST /api/session for the role, and it never presses a page's own buttons. When a grid's side
-// panel is open, a native modal dialog that makes the rest of the page inert, it draws inside that
-// dialog so the card stays usable. Anything it cannot find leaves the card up without a ring.
+// The guided demo, mounted once in the root layout. For each step it switches to the step's demo
+// role, opens the step's page, waits for the element to ring, and draws the dim, the ring and the
+// card. It only shows: its only calls are GET /api/tour for the pinned ids and POST /api/session
+// for the role, and it never presses a page's own buttons. When a grid's side panel is open, a
+// native modal dialog that makes the rest of the page inert, it draws inside that dialog so the
+// card stays usable. Anything it cannot find leaves the card up without a ring.
 
-/** How long a step waits for its page and for the element to ring; the card shows meanwhile. */
-const WAIT_MS = 30_000;
-/** How long it waits for a pinned grid row before ringing the grid without scrolling to it. */
-const ROW_WAIT_MS = 3_000;
 const POLL_MS = 100;
 /** The ring sits this far outside the element it rings. */
 const RING_PAD = 6;
@@ -64,7 +61,7 @@ export function Tour() {
   const [host, setHost] = useState<Element | null>(null);
   const [card, setCard] = useState<Size>({ width: 416, height: 240 });
   const [view, setView] = useState<Size>({ width: 1440, height: 900 });
-  const role = useRef<string | null>(null);
+  const roles = useRef<Promise<void>>(Promise.resolve());
   const cardBox = useRef<HTMLDivElement>(null);
   const primary = useRef<HTMLButtonElement>(null);
   const active = index !== null;
@@ -85,42 +82,47 @@ export function Tour() {
     };
   }, [active, pins]);
 
-  // Each step: the role, the page, then the element to ring.
+  // Each step: the role, the page, then the element to ring (components/tour/run-step.ts). Role
+  // switches run one after another, so a slow switch from a step already left cannot land after a
+  // later one.
   useEffect(() => {
     if (index === null || pins === null) return;
     const step = stepAt(index);
-    const target = targetFor(step, pins);
     let left = false;
     const gone = () => left;
-    void (async () => {
-      if (step.role !== null && role.current !== step.role) {
-        try {
-          const response = await fetch('/api/session', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ persona: step.role }),
-          });
-          if (response.ok) role.current = step.role;
-        } catch {
-          // The page below then shows whatever the current role may see; the card still explains it.
-        }
-        if (left) return;
-        if (here() === target.path) router.refresh();
-      }
-      if (here() !== target.path) router.push(target.path, { scroll: false });
-      const arrived = await waitFor(() => here() === target.path, WAIT_MS, gone);
-      if (target.rowId !== null && arrived) {
-        const row = await waitFor(() => document.querySelector(`[row-id="${CSS.escape(target.rowId as string)}"]`), ROW_WAIT_MS, gone);
-        row?.scrollIntoView({ block: 'center', behavior: motion() });
-      }
-      const element = target.anchor !== null && arrived ? await waitFor(() => findAnchor(target.anchor as string), WAIT_MS, gone) : null;
-      if (left) return;
-      if (element && target.rowId === null) {
-        const tall = element.getBoundingClientRect().height > innerHeight * 0.6;
-        element.scrollIntoView({ block: tall ? 'start' : 'center', behavior: motion() });
-      }
-      setFound({ index, element });
-    })();
+    void runStep(
+      step,
+      targetFor(step, pins),
+      {
+        here,
+        switchRole: (persona) => {
+          roles.current = roles.current.then(() =>
+            fetch('/api/session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ persona }),
+            }).then(
+              () => undefined,
+              () => undefined,
+            ),
+          );
+          return roles.current;
+        },
+        push: (path) => router.push(path, { scroll: false }),
+        refresh: () => router.refresh(),
+        waitFor: (probe, ms) => waitFor(probe, ms, gone),
+        findRow: (id) => document.querySelector(`[row-id="${CSS.escape(id)}"]`),
+        findAnchor,
+        revealRow: (row) => row.scrollIntoView({ block: 'center', behavior: motion() }),
+        revealAnchor: (element) => {
+          const tall = element.getBoundingClientRect().height > innerHeight * 0.6;
+          element.scrollIntoView({ block: tall ? 'start' : 'center', behavior: motion() });
+        },
+      },
+      gone,
+    ).then((element) => {
+      if (!left) setFound({ index, element });
+    });
     return () => {
       left = true;
     };
